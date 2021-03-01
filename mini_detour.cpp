@@ -55,6 +55,7 @@
 #include <mach/mach_init.h>
 #include <mach/mach_vm.h>
 #include <mach/vm_prot.h>
+#include <mach/vm_map.h>
 #include <unistd.h>
 #include <errno.h>
 
@@ -349,10 +350,17 @@ void* memory_alloc(void* address_hint, size_t size, mem_protect_rights rights)
 {
     mach_vm_address_t address = (mach_vm_address_t)page_addr(address_hint, page_size());
 
-    if (mach_vm_allocate(mach_task_self(), &address, (mach_vm_size_t)size, VM_FLAGS_FIXED) == KERN_SUCCESS)
-        return (void*)address;
+    mach_port_t task;
+    task = mach_task_self();
+    //task_for_pid(mach_task_self(), getpid(), &task);
 
-    return nullptr;
+    // VM_FLAGS_ANYWHERE allows for better compatibility as the Kernel will find a place for us.
+    int flags = (address_hint == nullptr ? VM_FLAGS_ANYWHERE : VM_FLAGS_FIXED);
+
+    if (mach_vm_allocate(task, &address, (mach_vm_size_t)size, flags) != KERN_SUCCESS)
+        address = 0;
+
+    return (void*)address;
 }
 
 int flush_instruction_cache(void* pBase, size_t size)
@@ -391,7 +399,15 @@ public:
     {
         abs_jump_t* jump = nullptr;
 
-        for (int i = 0; i < 10000000; ++i)
+#ifdef __APPLE_64__
+        if (hint_addr > (void*)0x7ffefffff000)
+            hint_addr = (void*)0x7ffefffff000;
+#elif __APPLE_32__
+        if (hint_addr > (void*)0x70000000)
+            hint_addr = (void*)0x70000000;
+#endif
+
+        for (int i = 0; i < 100000; ++i)
         {
             jump = reinterpret_cast<abs_jump_t*>(memory_alloc(hint_addr, region_size(), mem_protect_rights::mem_rwx));
             if (std::abs((int64_t)jump - (int64_t)hint_addr) <= std::numeric_limits<int32_t>::max())
