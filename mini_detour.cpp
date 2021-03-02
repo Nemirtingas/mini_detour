@@ -399,10 +399,10 @@ public:
     {
         abs_jump_t* jump = nullptr;
 
-#ifdef __APPLE_64__
+#if defined(__APPLE_64__)
         if (hint_addr > (void*)0x7ffefffff000)
             hint_addr = (void*)0x7ffefffff000;
-#elif __APPLE_32__
+#elif defined(__APPLE_32__)
         if (hint_addr > (void*)0x70000000)
             hint_addr = (void*)0x70000000;
 #endif
