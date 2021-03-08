@@ -1,6 +1,5 @@
 #include "mini_detour.h"
 
-#include <vector>
 #include <cassert>
 #include <string.h>
 #include <cmath>
@@ -391,10 +390,19 @@ struct memory_region_t
 
 class MemoryManager
 {
-    std::vector<abs_jump_t*> jumps_regions; // Jumps next to functions addresses
-    std::vector<memory_region_t> memory_regions; // memory regions for trampolines
+    size_t jumps_regions_size;
+    abs_jump_t** jumps_regions; // Jumps next to functions addresses
+    size_t memory_regions_size;
+    memory_region_t* memory_regions; // memory regions for trampolines
 
 public:
+    MemoryManager():
+        jumps_regions_size(0),
+        jumps_regions(nullptr),
+        memory_regions_size(0),
+        memory_regions(nullptr)
+    {}
+
     abs_jump_t* AllocJumpsRegion(void* hint_addr)
     {
         abs_jump_t* jump = nullptr;
@@ -427,6 +435,16 @@ public:
             }
             // Protect trampoline region memory
             mem_protect(jump, region_size(), mem_protect_rights::mem_rx);
+
+            abs_jump_t** new_jumps = (abs_jump_t**)realloc(jumps_regions, sizeof(abs_jump_t*) * (jumps_regions_size + 1));
+            if (new_jumps == nullptr)
+            {
+                memory_free(jump, region_size());
+                return nullptr;
+            }
+
+            jumps_regions = new_jumps;
+            jumps_regions[jumps_regions_size++] = jump;
         }
 
         return jump;
@@ -434,8 +452,9 @@ public:
 
     abs_jump_t* GetFreeJump(void* hint_addr)
     {
-        for (auto jumps_region : jumps_regions)
+        for (int i = 0; i < jumps_regions_size; ++i)
         {
+            auto jumps_region = jumps_regions[i];
             if (std::abs((int64_t)jumps_region - (int64_t)hint_addr) <= std::numeric_limits<int32_t>::max())
             {
                 for (int i = 0; i < jumps_in_region(); ++i)
@@ -454,8 +473,12 @@ public:
 
     memory_region_t* AllocMemoryRegion()
     {
-        memory_regions.emplace_back(memory_region_t());
-        memory_region_t& region = *memory_regions.rbegin();
+        memory_region_t* new_region = (memory_region_t*)realloc(memory_regions, sizeof(memory_region_t) * (memory_regions_size + 1));
+        if (new_region == nullptr)
+            return nullptr;
+
+        memory_regions = new_region;
+        memory_region_t& region = memory_regions[memory_regions_size++];
         region.mem_addr = (memory_t*)memory_alloc(nullptr, region_size(), mem_protect_rights::mem_rwx);
         memset(region.mem_addr, 0, region_size());
 
@@ -466,15 +489,15 @@ public:
     {
         assert(mem_size <= sizeof(memory_t::data));
         uint8_t* res = nullptr;
-        for (auto& mem_region : memory_regions)
+        for (int i = 0; i < memory_regions_size; ++i)
         {
-            memory_t* mem = mem_region.mem_addr;
+            memory_t* mem = memory_regions[i].mem_addr;
             memory_t* end = mem + region_size() / sizeof(memory_t) + 1;
             for (; mem != end; ++mem)
             {
                 if (!mem->used)
                 {
-                    APP_LOGD("Using free memory at %p", mem);
+                    APP_LOGD("Using free memory at {}", (void*)mem);
                     if (!mem_protect(mem, sizeof(memory_t), mem_protect_rights::mem_rwx))
                         return nullptr;
 
@@ -486,15 +509,18 @@ public:
         }
 
         memory_region_t* mem_region = AllocMemoryRegion();
+        if (mem_region == nullptr)
+            return nullptr;
+
         mem_region->mem_addr->used = 1;
-        APP_LOGD("Using new memory at %p", mem_region->mem_addr);
+        APP_LOGD("Using new memory at {}", (void*)mem_region->mem_addr);
 
         return mem_region->mem_addr->data;
     }
 
     void FreeMemory(void* memory)
     {
-        APP_LOGD("Freeing memory %p", memory);
+        APP_LOGD("Freeing memory {}", memory);
         memory_t* mem = reinterpret_cast<memory_t*>(reinterpret_cast<uint8_t*>(memory)- 1);
 
         if (!mem_protect(mem, sizeof(memory_t), mem_protect_rights::mem_rwx))
@@ -712,8 +738,8 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
 
     if (s_1byte_opcodes[*pCode].base_size == 0)
     {
-        APP_LOGD("Unknown opcode %02x", pCode[0]);
-        APP_LOGD("Next opcodes: %02x %02x %02x %02x %02x %02x", pCode[1], pCode[2], pCode[3], pCode[4], pCode[5], pCode[6]);
+        APP_LOGD("Unknown opcode {:02x}", pCode[0]);
+        APP_LOGD("Next opcodes: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}", pCode[1], pCode[2], pCode[3], pCode[4], pCode[5], pCode[6]);
 
         return 0;
     }
@@ -721,7 +747,7 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
     if (s_1byte_opcodes[*pCode].has_r_m)
     {
         code_len = read_mod_reg_rm_opcode(pCode, relocation);
-        APP_LOGD("Opcode %s, base_size: %d, has_r_m: %d, opcode_size: %d",
+        APP_LOGD("Opcode {}, base_size: {}, has_r_m: {}, opcode_size: {}",
             s_1byte_opcodes[*pCode].desc,
             (int)s_1byte_opcodes[*pCode].base_size,
             (int)s_1byte_opcodes[*pCode].has_r_m,
@@ -730,7 +756,7 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
     }
     else
     {
-        APP_LOGD("Opcode %s, size: %d", s_1byte_opcodes[*pCode].desc, (int)s_1byte_opcodes[*pCode].base_size);
+        APP_LOGD("Opcode {}, size: {}", s_1byte_opcodes[*pCode].desc, (int)s_1byte_opcodes[*pCode].base_size);
 
         switch (*pCode)
         {
@@ -790,8 +816,8 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
     // If we are here, then its a 2bytes opcode
     if (s_2bytes_opcodes[*(pCode+1)].base_size == 0)
     {
-        APP_LOGD("Unknown 2bytes opcode %02x %02x", pCode[0], pCode[1]);
-        APP_LOGD("Next opcodes: %02x %02x %02x %02x %02x %02x", pCode[2], pCode[3], pCode[4], pCode[5], pCode[6], pCode[7]);
+        APP_LOGD("Unknown 2bytes opcode {:02x} {:02x}", pCode[0], pCode[1]);
+        APP_LOGD("Next opcodes: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}", pCode[2], pCode[3], pCode[4], pCode[5], pCode[6], pCode[7]);
 
         return 0;
     }
@@ -800,7 +826,7 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
     if (s_2bytes_opcodes[*pCode].has_r_m)
     {
         code_len = read_mod_reg_rm_opcode(pCode, relocation);
-        APP_LOGD("Read %d bytes for 2bytes opcode %02x %02x", code_len, pCode[0], pCode[1]);
+        APP_LOGD("Read {} bytes for 2bytes opcode {:02x} {:02x}", code_len, pCode[0], pCode[1]);
         return code_len;
     }
     else
