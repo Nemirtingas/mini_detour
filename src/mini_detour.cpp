@@ -1,11 +1,11 @@
-#include "mini_detour.h"
+#include <mini_detour.h>
 
 #include <cassert>
 #include <string.h>
 #include <cmath>
 #include <limits>
 
-#include "../../steam_dll/Log.h"
+#include <log/log.h>
 
 #if defined(WIN64) || defined(_WIN64) || defined(__MINGW64__)
 #define __WINDOWS_64__
