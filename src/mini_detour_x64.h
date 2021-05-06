@@ -255,7 +255,7 @@ opcode_t s_1byte_opcodes[256] =
     {false, 0, "0xf0"}, // 0xf0
     {false, 0, "0xf1"}, // 0xf1
     {false, 0, "0xf2"}, // 0xf2
-    {false, 0, "0xf3"}, // 0xf3
+    {false, 0, "REPZ"}, // 0xf3
     {false, 0, "0xf4"}, // 0xf4
     {false, 0, "0xf5"}, // 0xf5
     {false, 0, "0xf6"}, // 0xf6

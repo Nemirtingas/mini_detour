@@ -780,11 +780,23 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
             case 0x4e: // REX.WRX
             case 0x4f: // REX.WRXB
                 return s_1byte_opcodes[*pCode].base_size + read_opcode(pCode + s_1byte_opcodes[*pCode].base_size, relocation); // REX works only with the next opcode, don't stop searching after a REX
+#else
+            case 0xf3: // REP
+                // This is some weird opcode. Its size changes depending on the next opcode
+                // TODO: need to look at this
+                if (pCode[1] == 0x0f)
+                {
+                    APP_LOGD("REP: {:02x} {:02x} {:02x} {:02x}", pCode[0], pCode[1], pCode[2], pCode[3]);
+                    return 4;
+                }
+                return 0;
 #endif
             case 0x64: // FS:
             case 0x65: // GS:
                 return s_1byte_opcodes[*pCode].base_size + read_opcode(pCode + s_1byte_opcodes[*pCode].base_size, relocation);
 
+            case 0xe8: // CALL
+                // we can relocate a CALL, need to be carefull tho
             case 0xe9: // JMP
                 // we can relocate a JMP
                 *relocation = pCode + 1;
@@ -969,8 +981,9 @@ namespace mini_detour
                 }
                 else if (*pCode == 0xe9)
                 {
-                    relocatable_size += opcode_size;
-                    pCode += opcode_size;
+                    // Disable this for now
+                    //relocatable_size += opcode_size;
+                    //pCode += opcode_size;
                     break;
                 }
                 else
@@ -1022,7 +1035,7 @@ namespace mini_detour
             relocatable_size += opcode_size;
         }
 
-        // can't event make a relative jump
+        // can't even make a relative jump
         if (relocatable_size < sizeof(rel_jump_t))
             return false;
 
@@ -1078,17 +1091,11 @@ namespace mini_detour
 
         orignal_func_address = func;
         uint8_t* pCode = reinterpret_cast<uint8_t*>(func);
-        uint8_t* relocation = nullptr;
-        uint8_t relocation_size = 0;
         size_t relocatable_size = 0;
-        enum reloc_e
-        {
-            none = 0,
-            jmp,
-            call,
-            other
-        };
-        int relocation_type = reloc_e::none;
+
+        size_t original_trampoline_size = 0;
+        size_t total_original_trampoline_size = 0;
+        abs_jump_t* jump = nullptr;
 
         // If its an imported function.      CALL                JUMP
         if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
@@ -1107,9 +1114,9 @@ namespace mini_detour
 
         restore_address = pCode;
 
+        uint8_t* tmp_relocation = nullptr;
         while (relocatable_size < sizeof(abs_jump_t))
         {
-            uint8_t* tmp_relocation = nullptr;
             int opcode_size = read_opcode(pCode, &tmp_relocation);
             //  Unknown opcode, break now
             if (opcode_size == 0 || is_opcode_terminating_function(*pCode))
@@ -1125,13 +1132,8 @@ namespace mini_detour
                 }
                 else if (*pCode == 0xe9)
                 {
-                    relocation_type = reloc_e::jmp;
-                    relocation = tmp_relocation;
-                    relocation_size = sizeof(rel_jump_t);
-
-                    relocatable_size += opcode_size;
-                    pCode += opcode_size;
-                    break;
+                    //relocation_type = reloc_e::jmp;
+                    break; // Don't handle this kind of relocation for now
                 }
                 else
                 {
@@ -1144,101 +1146,90 @@ namespace mini_detour
             relocatable_size += opcode_size;
         }
 
-        if (relocatable_size >= sizeof(rel_jump_t))
+        if (relocatable_size < sizeof(rel_jump_t))
         {
-            saved_code_size = relocatable_size;
-            saved_code = mm.GetFreeMemory(saved_code_size);
-            if (saved_code == nullptr)
-                goto error;
-
-            if(!mem_protect(saved_code, saved_code_size, mem_protect_rights::mem_rwx))
-                goto error;
-
-            // Save the original code
-            memcpy(saved_code, restore_address, saved_code_size);
-            mem_protect(saved_code, saved_code_size, mem_protect_rights::mem_rx);
-
-            // The number of bytes to copy from the original function for trampoline
-            size_t original_trampoline_size = relocatable_size - (relocation == nullptr ? 0 : relocation_size);
-            // The total number of bytes to copy from the original function + abs jump for trampoline
-            size_t total_original_trampoline_size = original_trampoline_size + sizeof(abs_jump_t);
-
-            original_trampoline_address = mm.GetFreeMemory(total_original_trampoline_size);
-            if (original_trampoline_address == nullptr)
-                goto error;
-
-            // RWX on our original trampoline funx
-            if (!mem_protect(original_trampoline_address, total_original_trampoline_size, mem_protect_rights::mem_rwx))
-                goto error;
-
-            // RWX on the orignal func
-            if (!mem_protect(restore_address, relocatable_size, mem_protect_rights::mem_rwx))
-                goto error;
-
-            // Copy the original code
-            memcpy(original_trampoline_address, restore_address, original_trampoline_size);
-
-            // Get the absolute jump
-            abs_jump_t* jump = new (reinterpret_cast<uint8_t*>(original_trampoline_address) + original_trampoline_size) abs_jump_t;
-
-            switch (relocation_type)
-            {
-                case reloc_e::none:
-                    // Set the jump address to the original code
-                    jump->abs_addr = reinterpret_cast<uint8_t*>(restore_address) + saved_code_size;
-                    break;
-
-                case reloc_e::jmp:
-                    // Set the jump address to the relocation code
-                    jump->abs_addr = relative_addr_to_absolute(*(int32_t*)relocation, relocation + relative_addr_size - sizeof(rel_jump_t));
-                    break;
-
-                case reloc_e::call:
-                case reloc_e::other:
-                    break;
-            }
-
-            if (relocatable_size >= sizeof(abs_jump_t))
-            {
-                APP_LOGI("Absolute hook");
-
-                abs_jump_t hook_jump;
-                hook_jump.abs_addr = detour_func;
-                // Write the jump
-                memcpy(restore_address, &hook_jump, sizeof(hook_jump));
-            }
-            else
-            {
-                APP_LOGI("Relative hook");
-
-                // Setup the trampoline
-                abs_jump_t* abs_jump = mm.GetFreeJump(restore_address);
-                if (abs_jump == nullptr)
-                    goto error;
-
-                if (!mem_protect(abs_jump, sizeof(*abs_jump), mem_protect_rights::mem_rwx))
-                    goto error;
-
-                abs_jump->abs_addr = detour_func;
-                mem_protect(abs_jump, sizeof(*abs_jump), mem_protect_rights::mem_rx);
-                flush_instruction_cache(abs_jump, sizeof(*abs_jump));
-
-                rel_jump_t hook_jump;
-                hook_jump.rel_addr = absolute_addr_to_relative((uint8_t*)restore_address, (uint8_t*)abs_jump);
-
-                // Write the jump
-                memcpy(restore_address, &hook_jump, sizeof(hook_jump));
-
-                trampoline_address = abs_jump;
-            }
-
-            // Try to restore memory rights, if it fails, no problem, we are just a bit too permissive
-            mem_protect(original_trampoline_address, total_original_trampoline_size, mem_protect_rights::mem_rx);
-            flush_instruction_cache(original_trampoline_address, total_original_trampoline_size);
-
-            mem_protect(restore_address, relocatable_size, mem_protect_rights::mem_rx);
-            flush_instruction_cache(restore_address, relocatable_size);
+            APP_LOGE("Relocatable size was too small {} < {}", relocatable_size, sizeof(rel_jump_t));
+            goto error;
         }
+
+        saved_code_size = relocatable_size;
+        saved_code = mm.GetFreeMemory(saved_code_size);
+        if (saved_code == nullptr)
+            goto error;
+
+        if(!mem_protect(saved_code, saved_code_size, mem_protect_rights::mem_rwx))
+            goto error;
+
+        // Save the original code
+        memcpy(saved_code, restore_address, saved_code_size);
+        mem_protect(saved_code, saved_code_size, mem_protect_rights::mem_rx);
+
+        // The number of bytes to copy from the original function for trampoline
+        original_trampoline_size = relocatable_size;
+        // The total number of bytes to copy from the original function + abs jump for trampoline
+        total_original_trampoline_size = original_trampoline_size + sizeof(abs_jump_t);
+
+        original_trampoline_address = mm.GetFreeMemory(total_original_trampoline_size);
+        if (original_trampoline_address == nullptr)
+            goto error;
+
+        // RWX on our original trampoline funx
+        if (!mem_protect(original_trampoline_address, total_original_trampoline_size, mem_protect_rights::mem_rwx))
+            goto error;
+
+        // RWX on the orignal func
+        if (!mem_protect(restore_address, relocatable_size, mem_protect_rights::mem_rwx))
+            goto error;
+
+        // Copy the original code
+        memcpy(original_trampoline_address, restore_address, original_trampoline_size);
+
+        // Get the absolute jump
+        jump = new (reinterpret_cast<uint8_t*>(original_trampoline_address) + original_trampoline_size) abs_jump_t;
+
+        // Set the jump address to the original code
+        jump->abs_addr = reinterpret_cast<uint8_t*>(restore_address) + saved_code_size;
+
+        if (relocatable_size >= sizeof(abs_jump_t))
+        {
+            APP_LOGI("Absolute hook {} >= {}", relocatable_size, sizeof(abs_jump_t));
+
+            abs_jump_t hook_jump;
+            hook_jump.abs_addr = detour_func;
+            // Write the jump
+            memcpy(restore_address, &hook_jump, sizeof(hook_jump));
+        }
+        else
+        {
+            APP_LOGI("Relative hook");
+
+            // Setup the trampoline
+            abs_jump_t* abs_jump = mm.GetFreeJump(restore_address);
+            if (abs_jump == nullptr)
+                goto error;
+
+            if (!mem_protect(abs_jump, sizeof(*abs_jump), mem_protect_rights::mem_rwx))
+                goto error;
+
+            abs_jump->abs_addr = detour_func;
+            mem_protect(abs_jump, sizeof(*abs_jump), mem_protect_rights::mem_rx);
+            flush_instruction_cache(abs_jump, sizeof(*abs_jump));
+
+            rel_jump_t hook_jump;
+            hook_jump.rel_addr = absolute_addr_to_relative((uint8_t*)restore_address, (uint8_t*)abs_jump);
+
+            // Write the jump
+            memcpy(restore_address, &hook_jump, sizeof(hook_jump));
+
+            trampoline_address = abs_jump;
+        }
+
+        // Try to restore memory rights, if it fails, no problem, we are just a bit too permissive
+        mem_protect(original_trampoline_address, total_original_trampoline_size, mem_protect_rights::mem_rx);
+        flush_instruction_cache(original_trampoline_address, total_original_trampoline_size);
+
+        mem_protect(restore_address, relocatable_size, mem_protect_rights::mem_rx);
+        flush_instruction_cache(restore_address, relocatable_size);
 
         return original_trampoline_address;
     error:
@@ -1268,6 +1259,8 @@ namespace mini_detour
 
         if (!mem_protect(restore_address, saved_code_size, mem_protect_rights::mem_rwx))
             return res;
+
+        APP_LOGI("Restoring hook");
 
         memcpy(restore_address, saved_code, saved_code_size);
         mem_protect(restore_address, saved_code_size, mem_protect_rights::mem_rx);
