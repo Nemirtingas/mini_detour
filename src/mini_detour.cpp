@@ -780,16 +780,6 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
             case 0x4e: // REX.WRX
             case 0x4f: // REX.WRXB
                 return s_1byte_opcodes[*pCode].base_size + read_opcode(pCode + s_1byte_opcodes[*pCode].base_size, relocation); // REX works only with the next opcode, don't stop searching after a REX
-#else
-            case 0xf3: // REP
-                // This is some weird opcode. Its size changes depending on the next opcode
-                // TODO: need to look at this
-                if (pCode[1] == 0x0f)
-                {
-                    APP_LOGD("REP: {:02x} {:02x} {:02x} {:02x}", pCode[0], pCode[1], pCode[2], pCode[3]);
-                    return 4;
-                }
-                return 0;
 #endif
             case 0x64: // FS:
             case 0x65: // GS:
@@ -801,6 +791,16 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
                 // we can relocate a JMP
                 *relocation = pCode + 1;
                 return s_1byte_opcodes[*pCode].base_size;
+
+            case 0xf3: // REP
+                // This is some weird opcode. Its size changes depending on the next opcode
+                // TODO: need to look at this
+                if (pCode[1] == 0x0f)
+                {
+                    APP_LOGD("REP: {:02x} {:02x} {:02x} {:02x}", pCode[0], pCode[1], pCode[2], pCode[3]);
+                    return 4;
+                }
+                return 0;
 
             case 0xff: // Extended
             {
