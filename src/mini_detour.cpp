@@ -8,49 +8,41 @@
 #include <log/log.h>
 
 #if defined(WIN64) || defined(_WIN64) || defined(__MINGW64__)
-#define __WINDOWS_64__
-#define __64BITS__
+    #define MINIDETOUR_OS_WINDOWS
+    #define MINIDETOUR_ARCH_X64
 #elif defined(WIN32) || defined(_WIN32) || defined(__MINGW32__)
-#define __WINDOWS_32__
-#define __32BITS__
+    #define MINIDETOUR_OS_WINDOWS
+    #define MINIDETOUR_ARCH_X86
+#elif defined(__linux__) || defined(linux)
+    #if defined(__x86_64__)
+        #define MINIDETOUR_OS_LINUX
+        #define MINIDETOUR_ARCH_X64
+    #else
+        #define MINIDETOUR_OS_LINUX
+        #define MINIDETOUR_ARCH_X86
+    #endif
+#elif defined(__APPLE__)
+    #if defined(__x86_64__)
+        #define MINIDETOUR_OS_APPLE
+        #define MINIDETOUR_ARCH_X64
+    #else
+        #define MINIDETOUR_OS_APPLE
+        #define MINIDETOUR_ARCH_X86
+    #endif
 #endif
 
-#if defined(__WINDOWS_32__) || defined(__WINDOWS_64__)
-#define __WINDOWS__
-#endif
+#if defined(MINIDETOUR_OS_WINDOWS)
+#define WIN32_LEAN_AND_MEAN
+#define VC_EXTRALEAN
+#define NOMINMAX
+#include <Windows.h>
 
-#if defined(__linux__) || defined(linux)
-#if defined(__x86_64__)
-#define __LINUX_64__
-#define __64BITS__
-#else
-#define __LINUX_32__
-#define __32BITS__
-#endif
-#endif
-
-#if defined(__LINUX_32__) || defined(__LINUX_64__)
-#define __LINUX__
-#endif
-
-#if defined(__APPLE__)
-#if defined(__x86_64__)
-#define __APPLE_64__
-#define __64BITS__
-#else
-#define __APPLE_32__
-#define __32BITS__
-#endif
-#endif
-
-#if defined(__WINDOWS__)
-
-#elif defined(__LINUX__)
+#elif defined(MINIDETOUR_OS_LINUX)
 #include <sys/mman.h>
 #include <unistd.h>
 #include <errno.h>
 
-#elif defined(__APPLE__)
+#elif defined(MINIDETOUR_OS_APPLE)
 #include <mach/mach_init.h>
 #include <mach/mach_vm.h>
 #include <mach/vm_prot.h>
@@ -97,7 +89,7 @@ constexpr int relative_addr_size = sizeof(int32_t);
 // PUSH XX XX XX XX
 // RET
 
-#ifdef __64BITS__
+#ifdef MINIDETOUR_ARCH_X64
 #include "mini_detour_x64.h"
 
 #pragma pack(push, 1)
@@ -131,7 +123,7 @@ struct rel_jump_t
 };
 #pragma pack(pop)
 
-#else
+#elif defined(MINIDETOUR_ARCH_X86)
 #include "mini_detour_x86.h"
 
 #pragma pack(push, 1)
@@ -170,7 +162,7 @@ struct rel_jump_t
 constexpr decltype(abs_jump_t::code) abs_jump_t::code;
 constexpr decltype(rel_jump_t::code) rel_jump_t::code;
 
-#if defined(__LINUX__)
+#if defined(MINIDETOUR_OS_LINUX)
 enum mem_protect_rights
 {
     mem_r = PROT_READ,
@@ -214,7 +206,7 @@ int flush_instruction_cache(void* pBase, size_t size)
     return 1;
 }
 
-#elif defined(__WINDOWS__)
+#elif defined(MINIDETOUR_OS_WINDOWS)
 enum mem_protect_rights
 {
     mem_r = PAGE_READONLY,
@@ -312,7 +304,7 @@ int flush_instruction_cache(void* pBase, size_t size)
     return FlushInstructionCache(GetCurrentProcess(), pBase, size);
 }
 
-#elif defined(__APPLE__)
+#elif defined(MINIDETOUR_OS_APPLE)
 enum mem_protect_rights
 {
     mem_r = VM_PROT_READ,
@@ -372,7 +364,7 @@ int flush_instruction_cache(void* pBase, size_t size)
 struct memory_t
 {
     uint8_t used;
-#ifdef __64BITS__
+#ifdef MINIDETOUR_ARCH_X64
     uint8_t data[63];
 #else
     uint8_t data[31];
@@ -407,12 +399,14 @@ public:
     {
         abs_jump_t* jump = nullptr;
 
-#if defined(__APPLE_64__)
+#ifdef MINIDETOUR_OS_APPLE
+    #if defined(MINIDETOUR_ARCH_X64)
         if (hint_addr > (void*)0x7ffefffff000)
             hint_addr = (void*)0x7ffefffff000;
-#elif defined(__APPLE_32__)
+    #elif defined(MINIDETOUR_ARCH_X86)
         if (hint_addr > (void*)0x70000000)
             hint_addr = (void*)0x70000000;
+    #endif
 #endif
 
         for (int i = 0; i < 100000; ++i)
@@ -762,7 +756,7 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
         {
             case 0x0f: // 2 bytes opcode
                 break;
-#ifdef __64BITS__
+#ifdef MINIDETOUR_ARCH_X64
             case 0x40: // REX
             case 0x41: // REX.B
             case 0x42: // REX.X
@@ -807,7 +801,7 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
                 switch (pCode[1])
                 {
                     // Get the true function call
-                    #ifdef __64BITS__
+                    #ifdef MINIDETOUR_ARCH_X64
                     //    pCode = *reinterpret_cast<uint8_t**>(pCode + 6 + *(int32_t*)(pCode + 2)); // 2 opcodes + 4 relative address ptr
                     #else
                     //    pCode = **reinterpret_cast<uint8_t***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
@@ -952,7 +946,7 @@ namespace mini_detour
         if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
         {
             // Get the real imported function address
-        #ifdef __64BITS__
+        #ifdef MINIDETOUR_ARCH_X64
             pCode = *reinterpret_cast<uint8_t**>(pCode + 6 + *(int32_t*)(pCode + 2)); // 2 opcodes + 4 relative address ptr
         #else
             pCode = **reinterpret_cast<uint8_t***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
@@ -1010,7 +1004,7 @@ namespace mini_detour
         if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
         {
             // Get the real imported function address
-        #ifdef __64BITS__
+        #ifdef MINIDETOUR_ARCH_X64
             pCode = *reinterpret_cast<uint8_t**>(pCode + 6 + *(int32_t*)(pCode + 2)); // 2 opcodes + 4 relative address ptr
         #else
             pCode = **reinterpret_cast<uint8_t***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
@@ -1101,7 +1095,7 @@ namespace mini_detour
         if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
         {
             // Get the real imported function address
-        #ifdef __64BITS__
+        #ifdef MINIDETOUR_ARCH_X64
             pCode = *reinterpret_cast<uint8_t**>(pCode + 6 + *(int32_t*)(pCode + 2)); // 2 opcodes + 4 relative address ptr
         #else
             pCode = **reinterpret_cast<uint8_t***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
