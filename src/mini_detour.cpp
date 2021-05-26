@@ -491,7 +491,7 @@ public:
             {
                 if (!mem->used)
                 {
-                    APP_LOGD("Using free memory at {}", (void*)mem);
+                    SPDLOG_DEBUG("Using free memory at {}", (void*)mem);
                     if (!mem_protect(mem, sizeof(memory_t), mem_protect_rights::mem_rwx))
                         return nullptr;
 
@@ -507,14 +507,14 @@ public:
             return nullptr;
 
         mem_region->mem_addr->used = 1;
-        APP_LOGD("Using new memory at {}", (void*)mem_region->mem_addr);
+        SPDLOG_DEBUG("Using new memory at {}", (void*)mem_region->mem_addr);
 
         return mem_region->mem_addr->data;
     }
 
     void FreeMemory(void* memory)
     {
-        APP_LOGD("Freeing memory {}", memory);
+        SPDLOG_DEBUG("Freeing memory {}", memory);
         memory_t* mem = reinterpret_cast<memory_t*>(reinterpret_cast<uint8_t*>(memory)- 1);
 
         if (!mem_protect(mem, sizeof(memory_t), mem_protect_rights::mem_rwx))
@@ -732,8 +732,8 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
 
     if (s_1byte_opcodes[*pCode].base_size == 0)
     {
-        APP_LOGD("Unknown opcode {:02x}", pCode[0]);
-        APP_LOGD("Next opcodes: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}", pCode[1], pCode[2], pCode[3], pCode[4], pCode[5], pCode[6]);
+        SPDLOG_DEBUG("Unknown opcode {:02x}", pCode[0]);
+        SPDLOG_DEBUG("Next opcodes: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}", pCode[1], pCode[2], pCode[3], pCode[4], pCode[5], pCode[6]);
 
         return 0;
     }
@@ -741,7 +741,7 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
     if (s_1byte_opcodes[*pCode].has_r_m)
     {
         code_len = read_mod_reg_rm_opcode(pCode, relocation);
-        APP_LOGD("Opcode {}, base_size: {}, has_r_m: {}, opcode_size: {}",
+        SPDLOG_DEBUG("Opcode {}, base_size: {}, has_r_m: {}, opcode_size: {}",
             s_1byte_opcodes[*pCode].desc,
             (int)s_1byte_opcodes[*pCode].base_size,
             (int)s_1byte_opcodes[*pCode].has_r_m,
@@ -750,7 +750,7 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
     }
     else
     {
-        APP_LOGD("Opcode {}, size: {}", s_1byte_opcodes[*pCode].desc, (int)s_1byte_opcodes[*pCode].base_size);
+        SPDLOG_DEBUG("Opcode {}, size: {}", s_1byte_opcodes[*pCode].desc, (int)s_1byte_opcodes[*pCode].base_size);
 
         switch (*pCode)
         {
@@ -791,7 +791,7 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
                 // TODO: need to look at this
                 if (pCode[1] == 0x0f)
                 {
-                    APP_LOGD("REP: {:02x} {:02x} {:02x} {:02x}", pCode[0], pCode[1], pCode[2], pCode[3]);
+                    SPDLOG_DEBUG("REP: {:02x} {:02x} {:02x} {:02x}", pCode[0], pCode[1], pCode[2], pCode[3]);
                     return 4;
                 }
                 return 0;
@@ -822,8 +822,8 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
     // If we are here, then its a 2bytes opcode
     if (s_2bytes_opcodes[*(pCode+1)].base_size == 0)
     {
-        APP_LOGD("Unknown 2bytes opcode {:02x} {:02x}", pCode[0], pCode[1]);
-        APP_LOGD("Next opcodes: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}", pCode[2], pCode[3], pCode[4], pCode[5], pCode[6], pCode[7]);
+        SPDLOG_DEBUG("Unknown 2bytes opcode {:02x} {:02x}", pCode[0], pCode[1]);
+        SPDLOG_DEBUG("Next opcodes: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}", pCode[2], pCode[3], pCode[4], pCode[5], pCode[6], pCode[7]);
 
         return 0;
     }
@@ -832,7 +832,7 @@ int read_opcode(uint8_t* pCode, uint8_t** relocation)
     if (s_2bytes_opcodes[*pCode].has_r_m)
     {
         code_len = read_mod_reg_rm_opcode(pCode, relocation);
-        APP_LOGD("Read {} bytes for 2bytes opcode {:02x} {:02x}", code_len, pCode[0], pCode[1]);
+        SPDLOG_DEBUG("Read {} bytes for 2bytes opcode {:02x} {:02x}", code_len, pCode[0], pCode[1]);
         return code_len;
     }
     else
@@ -1142,7 +1142,7 @@ namespace mini_detour
 
         if (relocatable_size < sizeof(rel_jump_t))
         {
-            APP_LOGE("Relocatable size was too small {} < {}", relocatable_size, sizeof(rel_jump_t));
+            SPDLOG_ERROR("Relocatable size was too small {} < {}", relocatable_size, sizeof(rel_jump_t));
             goto error;
         }
 
@@ -1186,7 +1186,7 @@ namespace mini_detour
 
         if (relocatable_size >= sizeof(abs_jump_t))
         {
-            APP_LOGI("Absolute hook {} >= {}", relocatable_size, sizeof(abs_jump_t));
+            SPDLOG_INFO("Absolute hook {} >= {}", relocatable_size, sizeof(abs_jump_t));
 
             abs_jump_t hook_jump;
             hook_jump.abs_addr = detour_func;
@@ -1195,7 +1195,7 @@ namespace mini_detour
         }
         else
         {
-            APP_LOGI("Relative hook");
+            SPDLOG_INFO("Relative hook");
 
             // Setup the trampoline
             abs_jump_t* abs_jump = mm.GetFreeJump(restore_address);
@@ -1254,13 +1254,13 @@ namespace mini_detour
         if (!mem_protect(restore_address, saved_code_size, mem_protect_rights::mem_rwx))
             return res;
 
-        APP_LOGI("Restoring hook");
+        SPDLOG_INFO("Restoring hook");
 
         memcpy(restore_address, saved_code, saved_code_size);
         mem_protect(restore_address, saved_code_size, mem_protect_rights::mem_rx);
         flush_instruction_cache(restore_address, saved_code_size);
 
-        APP_LOGI("Restored hook");
+        SPDLOG_INFO("Restored hook");
 
         res = orignal_func_address;
         reset();
