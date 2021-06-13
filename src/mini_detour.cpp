@@ -52,7 +52,6 @@
 
 #endif
 
-inline void* page_addr(void* addr, size_t page_size);
 inline size_t page_addr_size(void* addr, size_t len, size_t page_size);
 inline size_t region_size();
 inline size_t jumps_in_region();
@@ -162,16 +161,24 @@ struct rel_jump_t
 constexpr decltype(abs_jump_t::code) abs_jump_t::code;
 constexpr decltype(rel_jump_t::code) rel_jump_t::code;
 
+namespace mini_detour {
+namespace memory_manipulation {
+
 #if defined(MINIDETOUR_OS_LINUX)
-enum mem_protect_rights
+int mem_protect_rights_to_native(mem_protect_rights rights)
 {
-    mem_r = PROT_READ,
-    mem_w = PROT_WRITE,
-    mem_x = PROT_EXEC,
-    mem_rw = PROT_WRITE | PROT_READ,
-    mem_rx = PROT_WRITE | PROT_EXEC,
-    mem_rwx = PROT_WRITE | PROT_READ | PROT_EXEC,
-};
+	switch(rights)
+	{
+		case mem_r  : return PROT_READ;
+		case mem_w  : return PROT_WRITE;
+		case mem_x  : return PROT_EXEC;
+		case mem_rw : return PROT_WRITE | PROT_READ;
+		case mem_rx : return PROT_WRITE | PROT_EXEC;
+		case mem_rwx: return PROT_WRITE | PROT_READ | PROT_EXEC;
+	}
+	
+	return PROT_WRITE | PROT_READ | PROT_EXEC;
+}
 
 size_t page_size()
 {
@@ -185,7 +192,7 @@ size_t page_size()
 
 bool mem_protect(void* addr, size_t size, size_t rights)
 {
-    return mprotect(page_addr(addr, page_size()), page_addr_size(addr, size, page_size()), rights) == 0;
+    return mprotect(page_addr(addr, page_size()), page_addr_size(addr, size, page_size()), mem_protect_rights_to_native(rights)) == 0;
 }
 
 void memory_free(void* mem_addr, size_t size)
@@ -198,7 +205,7 @@ void* memory_alloc(void* address_hint, size_t size, mem_protect_rights rights)
 {
     // TODO: Here find a way to allocate moemry near the address_hint.
     // Sometimes you get address too far for a relative jmp
-    return mmap(address_hint, size, rights, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return mmap(address_hint, size, mem_protect_rights_to_native(rights), MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 }
 
 int flush_instruction_cache(void* pBase, size_t size)
@@ -207,15 +214,20 @@ int flush_instruction_cache(void* pBase, size_t size)
 }
 
 #elif defined(MINIDETOUR_OS_WINDOWS)
-enum mem_protect_rights
+DWORD mem_protect_rights_to_native(mem_protect_rights rights)
 {
-    mem_r = PAGE_READONLY,
-    mem_w = PAGE_READWRITE,
-    mem_x = PAGE_EXECUTE,
-    mem_rw = PAGE_READWRITE,
-    mem_rx = PAGE_EXECUTE_READ,
-    mem_rwx = PAGE_EXECUTE_READWRITE,
-};
+	switch(rights)
+	{
+		case mem_r  : return PAGE_READONLY;
+		case mem_w  : return PAGE_READWRITE;
+		case mem_x  : return PAGE_EXECUTE;
+		case mem_rw : return PAGE_READWRITE;
+		case mem_rx : return PAGE_EXECUTE_READ;
+		case mem_rwx: return PAGE_EXECUTE_READWRITE;
+	}
+	
+	return PAGE_EXECUTE_READWRITE;
+}
 
 size_t page_size()
 {
@@ -229,10 +241,10 @@ size_t page_size()
     return _page_size;
 }
 
-bool mem_protect(void* addr, size_t size, size_t rights)
+bool mem_protect(void* addr, size_t size, mem_protect_rights rights)
 {
     DWORD oldProtect;
-    return VirtualProtect(addr, size, rights, &oldProtect) != FALSE;
+    return VirtualProtect(addr, size, mem_protect_rights_to_native(rights), &oldProtect) != FALSE;
 }
 
 void memory_free(void* mem_addr, size_t size)
@@ -287,7 +299,7 @@ void* memory_alloc(void* address_hint, size_t size, mem_protect_rights rights)
         for (; pbAddress < (PBYTE)mbi.BaseAddress + mbi.RegionSize; pbAddress += 0x10000)
         {
             PBYTE pbAlloc = (PBYTE)VirtualAllocEx(hProcess, pbAddress, size,
-                MEM_RESERVE | MEM_COMMIT, rights);
+                MEM_RESERVE | MEM_COMMIT, mem_protect_rights_to_native(rights));
             if (pbAlloc == nullptr)
             {
                 continue;
@@ -305,15 +317,20 @@ int flush_instruction_cache(void* pBase, size_t size)
 }
 
 #elif defined(MINIDETOUR_OS_APPLE)
-enum mem_protect_rights
+size_t mem_protect_rights_to_native(mem_protect_rights rights)
 {
-    mem_r = VM_PROT_READ,
-    mem_w = VM_PROT_WRITE,
-    mem_x = VM_PROT_EXECUTE,
-    mem_rw = VM_PROT_WRITE | VM_PROT_READ,
-    mem_rx = VM_PROT_WRITE | VM_PROT_EXECUTE,
-    mem_rwx = VM_PROT_WRITE | VM_PROT_READ | VM_PROT_EXECUTE,
-};
+	switch(rights)
+	{
+		case mem_r  : return VM_PROT_READ;
+		case mem_w  : return VM_PROT_WRITE;
+		case mem_x  : return VM_PROT_EXECUTE;
+		case mem_rw : return VM_PROT_WRITE | VM_PROT_READ;
+		case mem_rx : return VM_PROT_WRITE | VM_PROT_EXECUTE;
+		case mem_rwx: return VM_PROT_WRITE | VM_PROT_READ | VM_PROT_EXECUTE;
+	}
+	
+	return PROT_WRITE | PROT_READ | PROT_EXEC;
+}
 
 size_t page_size()
 {
@@ -325,9 +342,11 @@ size_t page_size()
     return _page_size;
 }
 
-bool mem_protect(void* addr, size_t size, size_t rights)
+bool mem_protect(void* addr, size_t size, mem_protect_rights rights)
 {
-    return mach_vm_protect(mach_task_self(), (mach_vm_address_t)addr, size, FALSE, rights) == KERN_SUCCESS;
+	// TODO: Here find a way to allocate moemry near the address_hint.
+    // Sometimes you get address too far for a relative jmp
+    return mach_vm_protect(mach_task_self(), (mach_vm_address_t)addr, size, FALSE, mem_protect_rights_to_native(rights)) == KERN_SUCCESS;
 }
 
 void memory_free(void* mem_addr, size_t size)
@@ -348,8 +367,14 @@ void* memory_alloc(void* address_hint, size_t size, mem_protect_rights rights)
     // VM_FLAGS_ANYWHERE allows for better compatibility as the Kernel will find a place for us.
     int flags = (address_hint == nullptr ? VM_FLAGS_ANYWHERE : VM_FLAGS_FIXED);
 
-    if (mach_vm_allocate(task, &address, (mach_vm_size_t)size, flags) != KERN_SUCCESS)
+    if (mach_vm_allocate(task, &address, (mach_vm_size_t)size, flags) == KERN_SUCCESS)
+	{
+		memory_protect(address, size, rights);
+	}
+	else
+	{
         address = 0;
+	}
 
     return (void*)address;
 }
@@ -360,6 +385,11 @@ int flush_instruction_cache(void* pBase, size_t size)
 }
 
 #endif
+
+}
+}
+
+using namespace mini_detour::memory_manipulation;
 
 struct memory_t
 {
@@ -540,16 +570,6 @@ inline size_t jumps_in_region()
 inline void* library_address_by_handle(void* library)
 {
     return (library == nullptr ? nullptr : *reinterpret_cast<void**>(library));
-}
-
-inline size_t page_align(size_t size, size_t page_size)
-{
-    return (size + (page_size - 1)) & (((size_t)-1) ^ (page_size - 1));
-}
-
-inline void* page_addr(void* addr, size_t page_size)
-{
-    return reinterpret_cast<void*>(reinterpret_cast<size_t>(addr)& (((size_t)-1) ^ (page_size - 1)));
 }
 
 inline size_t page_addr_size(void* addr, size_t len, size_t page_size)
@@ -1179,7 +1199,8 @@ namespace mini_detour
         memcpy(original_trampoline_address, restore_address, original_trampoline_size);
 
         // Get the absolute jump
-        jump = new (reinterpret_cast<uint8_t*>(original_trampoline_address) + original_trampoline_size) abs_jump_t;
+        jump = reinterpret_cast<abs_jump_t*>((reinterpret_cast<uint8_t*>(original_trampoline_address) + original_trampoline_size));
+		memcpy(jump, abs_jump_t::code, sizeof(abs_jump_t::code));
 
         // Set the jump address to the original code
         jump->abs_addr = reinterpret_cast<uint8_t*>(restore_address) + saved_code_size;
