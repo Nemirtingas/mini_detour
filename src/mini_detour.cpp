@@ -166,7 +166,7 @@ namespace mini_detour {
 namespace memory_manipulation {
 
 #if defined(MINIDETOUR_OS_LINUX)
-int mem_protect_rights_to_native(mem_protect_rights rights)
+int memory_protect_rights_to_native(memory_protect_rights rights)
 {
     switch(rights)
     {
@@ -191,9 +191,9 @@ size_t page_size()
     return _page_size;
 }
 
-bool mem_protect(void* addr, size_t size, size_t rights)
+bool memory_protect(void* addr, size_t size, size_t rights)
 {
-    return mprotect(page_addr(addr, page_size()), page_addr_size(addr, size, page_size()), mem_protect_rights_to_native(rights)) == 0;
+    return mprotect(page_addr(addr, page_size()), page_addr_size(addr, size, page_size()), memory_protect_rights_to_native(rights)) == 0;
 }
 
 void memory_free(void* mem_addr, size_t size)
@@ -202,11 +202,11 @@ void memory_free(void* mem_addr, size_t size)
         munmap(mem_addr, size);
 }
 
-void* memory_alloc(void* address_hint, size_t size, mem_protect_rights rights)
+void* memory_alloc(void* address_hint, size_t size, memory_protect_rights rights)
 {
     // TODO: Here find a way to allocate moemry near the address_hint.
     // Sometimes you get address too far for a relative jmp
-    return mmap(address_hint, size, mem_protect_rights_to_native(rights), MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return mmap(address_hint, size, memory_protect_rights_to_native(rights), MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 }
 
 int flush_instruction_cache(void* pBase, size_t size)
@@ -215,7 +215,7 @@ int flush_instruction_cache(void* pBase, size_t size)
 }
 
 #elif defined(MINIDETOUR_OS_WINDOWS)
-DWORD mem_protect_rights_to_native(mem_protect_rights rights)
+DWORD memory_protect_rights_to_native(memory_protect_rights rights)
 {
     switch(rights)
     {
@@ -242,10 +242,10 @@ size_t page_size()
     return _page_size;
 }
 
-bool mem_protect(void* addr, size_t size, mem_protect_rights rights)
+bool memory_protect(void* addr, size_t size, memory_protect_rights rights)
 {
     DWORD oldProtect;
-    return VirtualProtect(addr, size, mem_protect_rights_to_native(rights), &oldProtect) != FALSE;
+    return VirtualProtect(addr, size, memory_protect_rights_to_native(rights), &oldProtect) != FALSE;
 }
 
 void memory_free(void* mem_addr, size_t size)
@@ -254,7 +254,7 @@ void memory_free(void* mem_addr, size_t size)
         VirtualFree(mem_addr, 0, MEM_RELEASE);
 }
 
-void* memory_alloc(void* address_hint, size_t size, mem_protect_rights rights)
+void* memory_alloc(void* address_hint, size_t size, memory_protect_rights rights)
 {
     MEMORY_BASIC_INFORMATION mbi;
     ZeroMemory(&mbi, sizeof(mbi));
@@ -300,7 +300,7 @@ void* memory_alloc(void* address_hint, size_t size, mem_protect_rights rights)
         for (; pbAddress < (PBYTE)mbi.BaseAddress + mbi.RegionSize; pbAddress += 0x10000)
         {
             PBYTE pbAlloc = (PBYTE)VirtualAllocEx(hProcess, pbAddress, size,
-                MEM_RESERVE | MEM_COMMIT, mem_protect_rights_to_native(rights));
+                MEM_RESERVE | MEM_COMMIT, memory_protect_rights_to_native(rights));
             if (pbAlloc == nullptr)
             {
                 continue;
@@ -318,7 +318,7 @@ int flush_instruction_cache(void* pBase, size_t size)
 }
 
 #elif defined(MINIDETOUR_OS_APPLE)
-size_t mem_protect_rights_to_native(mem_protect_rights rights)
+size_t memory_protect_rights_to_native(memory_protect_rights rights)
 {
     switch(rights)
     {
@@ -330,7 +330,7 @@ size_t mem_protect_rights_to_native(mem_protect_rights rights)
         case mem_rwx: return VM_PROT_WRITE | VM_PROT_READ | VM_PROT_EXECUTE;
     }
     
-    return PROT_WRITE | PROT_READ | PROT_EXEC;
+    return VM_PROT_WRITE | VM_PROT_READ | VM_PROT_EXECUTE;
 }
 
 size_t page_size()
@@ -343,11 +343,11 @@ size_t page_size()
     return _page_size;
 }
 
-bool mem_protect(void* addr, size_t size, mem_protect_rights rights)
+bool memory_protect(void* addr, size_t size, memory_protect_rights rights)
 {
     // TODO: Here find a way to allocate moemry near the address_hint.
     // Sometimes you get address too far for a relative jmp
-    return mach_vm_protect(mach_task_self(), (mach_vm_address_t)addr, size, FALSE, mem_protect_rights_to_native(rights)) == KERN_SUCCESS;
+    return mach_vm_protect(mach_task_self(), (mach_vm_address_t)addr, size, FALSE, memory_protect_rights_to_native(rights)) == KERN_SUCCESS;
 }
 
 void memory_free(void* mem_addr, size_t size)
@@ -357,7 +357,7 @@ void memory_free(void* mem_addr, size_t size)
 }
 
 
-void* memory_alloc(void* address_hint, size_t size, mem_protect_rights rights)
+void* memory_alloc(void* address_hint, size_t size, memory_protect_rights rights)
 {
     mach_vm_address_t address = (mach_vm_address_t)page_addr(address_hint, page_size());
 
@@ -370,7 +370,7 @@ void* memory_alloc(void* address_hint, size_t size, mem_protect_rights rights)
 
     if (mach_vm_allocate(task, &address, (mach_vm_size_t)size, flags) == KERN_SUCCESS)
     {
-        memory_protect(address, size, rights);
+        memory_protect((void*)address, size, rights);
     }
     else
     {
@@ -442,7 +442,7 @@ public:
 
         for (int i = 0; i < 100000; ++i)
         {
-            jump = reinterpret_cast<abs_jump_t*>(memory_alloc(hint_addr, region_size(), mem_protect_rights::mem_rwx));
+            jump = reinterpret_cast<abs_jump_t*>(memory_alloc(hint_addr, region_size(), memory_protect_rights::mem_rwx));
             if (std::abs((int64_t)jump - (int64_t)hint_addr) <= std::numeric_limits<int32_t>::max())
                 break;
 
@@ -459,7 +459,7 @@ public:
                 memcpy(jump + i, abs_jump_t::code, sizeof(abs_jump_t));
             }
             // Protect trampoline region memory
-            mem_protect(jump, region_size(), mem_protect_rights::mem_rx);
+            memory_protect(jump, region_size(), memory_protect_rights::mem_rx);
 
             abs_jump_t** new_jumps = (abs_jump_t**)realloc(jumps_regions, sizeof(abs_jump_t*) * (jumps_regions_size + 1));
             if (new_jumps == nullptr)
@@ -504,7 +504,7 @@ public:
 
         memory_regions = new_region;
         memory_region_t& region = memory_regions[memory_regions_size++];
-        region.mem_addr = (memory_t*)memory_alloc(nullptr, region_size(), mem_protect_rights::mem_rwx);
+        region.mem_addr = (memory_t*)memory_alloc(nullptr, region_size(), memory_protect_rights::mem_rwx);
         memset(region.mem_addr, 0, region_size());
 
         return &region;
@@ -523,11 +523,11 @@ public:
                 if (!mem->used)
                 {
                     SPDLOG_DEBUG("Using free memory at {}", (void*)mem);
-                    if (!mem_protect(mem, sizeof(memory_t), mem_protect_rights::mem_rwx))
+                    if (!memory_protect(mem, sizeof(memory_t), memory_protect_rights::mem_rwx))
                         return nullptr;
 
                     mem->used = 1;
-                    mem_protect(mem, sizeof(memory_t), mem_protect_rights::mem_rx);
+                    memory_protect(mem, sizeof(memory_t), memory_protect_rights::mem_rx);
                     return mem->data;
                 }
             }
@@ -548,11 +548,11 @@ public:
         SPDLOG_DEBUG("Freeing memory {}", memory);
         memory_t* mem = reinterpret_cast<memory_t*>(reinterpret_cast<uint8_t*>(memory)- 1);
 
-        if (!mem_protect(mem, sizeof(memory_t), mem_protect_rights::mem_rwx))
+        if (!memory_protect(mem, sizeof(memory_t), memory_protect_rights::mem_rwx))
             return;
         mem->used = 0;
 
-        mem_protect(mem, sizeof(memory_t), mem_protect_rights::mem_rx);
+        memory_protect(mem, sizeof(memory_t), memory_protect_rights::mem_rx);
     }
 };
 
@@ -935,11 +935,11 @@ namespace mini_detour
     {
         if (trampoline_address != nullptr)
         {// If we have a trampoline, clear it
-            if (mem_protect(trampoline_address, sizeof(*trampoline_address), mem_protect_rights::mem_rwx))
+            if (memory_protect(trampoline_address, sizeof(*trampoline_address), memory_protect_rights::mem_rwx))
             {// If it fails, we can't do much, memory leak of sizeof(abs_jmp_t)
                 trampoline_address->abs_addr = nullptr;
                 flush_instruction_cache(trampoline_address, sizeof(*trampoline_address));
-                mem_protect(trampoline_address, sizeof(*trampoline_address), mem_protect_rights::mem_rx);
+                memory_protect(trampoline_address, sizeof(*trampoline_address), memory_protect_rights::mem_rx);
             }
             trampoline_address = nullptr;
         }
@@ -1054,7 +1054,7 @@ namespace mini_detour
         if (relocatable_size < sizeof(rel_jump_t))
             return false;
 
-        if(!mem_protect(func, relocatable_size, mem_protect_rights::mem_rwx))
+        if(!memory_protect(func, relocatable_size, memory_protect_rights::mem_rwx))
             return false;
 
         if (relocatable_size >= sizeof(abs_jump_t))
@@ -1063,7 +1063,7 @@ namespace mini_detour
             hook_jump.abs_addr = hook_func;
             // Write the jump
             memcpy(func, &hook_jump, sizeof(hook_jump));
-            mem_protect(func, sizeof(hook_jump), mem_protect_rights::mem_rx);
+            memory_protect(func, sizeof(hook_jump), memory_protect_rights::mem_rx);
             flush_instruction_cache(func, sizeof(abs_jump_t));
         }
         else
@@ -1073,14 +1073,14 @@ namespace mini_detour
             if (abs_jump == nullptr)
                 return false;
 
-            if (!mem_protect(abs_jump, sizeof(*abs_jump), mem_protect_rights::mem_rwx))
+            if (!memory_protect(abs_jump, sizeof(*abs_jump), memory_protect_rights::mem_rwx))
             {
                 mm.FreeMemory(abs_jump);
                 return false;
             }
 
             abs_jump->abs_addr = hook_func;
-            mem_protect(abs_jump, sizeof(*abs_jump), mem_protect_rights::mem_rx);
+            memory_protect(abs_jump, sizeof(*abs_jump), memory_protect_rights::mem_rx);
             flush_instruction_cache(abs_jump, sizeof(*abs_jump));
 
             rel_jump_t hook_jump;
@@ -1090,7 +1090,7 @@ namespace mini_detour
             memcpy(func, &hook_jump, sizeof(hook_jump));
         }
 
-        mem_protect(func, relocatable_size, mem_protect_rights::mem_rx);
+        memory_protect(func, relocatable_size, memory_protect_rights::mem_rx);
         flush_instruction_cache(func, relocatable_size);
 
         return true;
@@ -1172,12 +1172,12 @@ namespace mini_detour
         if (saved_code == nullptr)
             goto error;
 
-        if(!mem_protect(saved_code, saved_code_size, mem_protect_rights::mem_rwx))
+        if(!memory_protect(saved_code, saved_code_size, memory_protect_rights::mem_rwx))
             goto error;
 
         // Save the original code
         memcpy(saved_code, restore_address, saved_code_size);
-        mem_protect(saved_code, saved_code_size, mem_protect_rights::mem_rx);
+        memory_protect(saved_code, saved_code_size, memory_protect_rights::mem_rx);
 
         // The number of bytes to copy from the original function for trampoline
         original_trampoline_size = relocatable_size;
@@ -1189,11 +1189,11 @@ namespace mini_detour
             goto error;
 
         // RWX on our original trampoline funx
-        if (!mem_protect(original_trampoline_address, total_original_trampoline_size, mem_protect_rights::mem_rwx))
+        if (!memory_protect(original_trampoline_address, total_original_trampoline_size, memory_protect_rights::mem_rwx))
             goto error;
 
         // RWX on the orignal func
-        if (!mem_protect(restore_address, relocatable_size, mem_protect_rights::mem_rwx))
+        if (!memory_protect(restore_address, relocatable_size, memory_protect_rights::mem_rwx))
             goto error;
 
         // Copy the original code
@@ -1224,11 +1224,11 @@ namespace mini_detour
             if (abs_jump == nullptr)
                 goto error;
 
-            if (!mem_protect(abs_jump, sizeof(*abs_jump), mem_protect_rights::mem_rwx))
+            if (!memory_protect(abs_jump, sizeof(*abs_jump), memory_protect_rights::mem_rwx))
                 goto error;
 
             abs_jump->abs_addr = detour_func;
-            mem_protect(abs_jump, sizeof(*abs_jump), mem_protect_rights::mem_rx);
+            memory_protect(abs_jump, sizeof(*abs_jump), memory_protect_rights::mem_rx);
             flush_instruction_cache(abs_jump, sizeof(*abs_jump));
 
             rel_jump_t hook_jump;
@@ -1241,10 +1241,10 @@ namespace mini_detour
         }
 
         // Try to restore memory rights, if it fails, no problem, we are just a bit too permissive
-        mem_protect(original_trampoline_address, total_original_trampoline_size, mem_protect_rights::mem_rx);
+        memory_protect(original_trampoline_address, total_original_trampoline_size, memory_protect_rights::mem_rx);
         flush_instruction_cache(original_trampoline_address, total_original_trampoline_size);
 
-        mem_protect(restore_address, relocatable_size, mem_protect_rights::mem_rx);
+        memory_protect(restore_address, relocatable_size, memory_protect_rights::mem_rx);
         flush_instruction_cache(restore_address, relocatable_size);
 
         return original_trampoline_address;
@@ -1273,13 +1273,13 @@ namespace mini_detour
         if (restore_address == nullptr)
             return res;
 
-        if (!mem_protect(restore_address, saved_code_size, mem_protect_rights::mem_rwx))
+        if (!memory_protect(restore_address, saved_code_size, memory_protect_rights::mem_rwx))
             return res;
 
         SPDLOG_INFO("Restoring hook");
 
         memcpy(restore_address, saved_code, saved_code_size);
-        mem_protect(restore_address, saved_code_size, mem_protect_rights::mem_rx);
+        memory_protect(restore_address, saved_code_size, memory_protect_rights::mem_rx);
         flush_instruction_cache(restore_address, saved_code_size);
 
         SPDLOG_INFO("Restored hook");
