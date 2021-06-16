@@ -1,6 +1,7 @@
 #ifndef MINI_DETOUR_H
 #define MINI_DETOUR_H
 
+#include <cstddef>
 #include <cstdint>
 
 struct abs_jump_t;
@@ -10,7 +11,7 @@ namespace mini_detour
 {
     namespace memory_manipulation
     {
-        enum mem_protect_rights
+        enum memory_protect_rights
         {
             mem_r,
             mem_w,
@@ -31,9 +32,9 @@ namespace mini_detour
         }
 
         size_t page_size();
-        bool mem_protect(void* addr, size_t size, mem_protect_rights rights);
+        bool memory_protect(void* addr, size_t size, memory_protect_rights rights);
         void memory_free(void* mem_addr, size_t size);
-        void* memory_alloc(void* address_hint, size_t size, mem_protect_rights rights);
+        void* memory_alloc(void* address_hint, size_t size, memory_protect_rights rights);
         int flush_instruction_cache(void* pBase, size_t size);
     }
     
