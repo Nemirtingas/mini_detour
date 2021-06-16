@@ -4,8 +4,9 @@
 #include <string.h>
 #include <cmath>
 #include <limits>
+#include <type_traits> // std::move
 
-#include <log/log.h>
+#include <spdlog/spdlog.h>
 
 #if defined(WIN64) || defined(_WIN64) || defined(__MINGW64__)
     #define MINIDETOUR_OS_WINDOWS
@@ -167,17 +168,17 @@ namespace memory_manipulation {
 #if defined(MINIDETOUR_OS_LINUX)
 int mem_protect_rights_to_native(mem_protect_rights rights)
 {
-	switch(rights)
-	{
-		case mem_r  : return PROT_READ;
-		case mem_w  : return PROT_WRITE;
-		case mem_x  : return PROT_EXEC;
-		case mem_rw : return PROT_WRITE | PROT_READ;
-		case mem_rx : return PROT_WRITE | PROT_EXEC;
-		case mem_rwx: return PROT_WRITE | PROT_READ | PROT_EXEC;
-	}
-	
-	return PROT_WRITE | PROT_READ | PROT_EXEC;
+    switch(rights)
+    {
+        case mem_r  : return PROT_READ;
+        case mem_w  : return PROT_WRITE;
+        case mem_x  : return PROT_EXEC;
+        case mem_rw : return PROT_WRITE | PROT_READ;
+        case mem_rx : return PROT_WRITE | PROT_EXEC;
+        case mem_rwx: return PROT_WRITE | PROT_READ | PROT_EXEC;
+    }
+    
+    return PROT_WRITE | PROT_READ | PROT_EXEC;
 }
 
 size_t page_size()
@@ -216,17 +217,17 @@ int flush_instruction_cache(void* pBase, size_t size)
 #elif defined(MINIDETOUR_OS_WINDOWS)
 DWORD mem_protect_rights_to_native(mem_protect_rights rights)
 {
-	switch(rights)
-	{
-		case mem_r  : return PAGE_READONLY;
-		case mem_w  : return PAGE_READWRITE;
-		case mem_x  : return PAGE_EXECUTE;
-		case mem_rw : return PAGE_READWRITE;
-		case mem_rx : return PAGE_EXECUTE_READ;
-		case mem_rwx: return PAGE_EXECUTE_READWRITE;
-	}
-	
-	return PAGE_EXECUTE_READWRITE;
+    switch(rights)
+    {
+        case mem_r  : return PAGE_READONLY;
+        case mem_w  : return PAGE_READWRITE;
+        case mem_x  : return PAGE_EXECUTE;
+        case mem_rw : return PAGE_READWRITE;
+        case mem_rx : return PAGE_EXECUTE_READ;
+        case mem_rwx: return PAGE_EXECUTE_READWRITE;
+    }
+    
+    return PAGE_EXECUTE_READWRITE;
 }
 
 size_t page_size()
@@ -319,17 +320,17 @@ int flush_instruction_cache(void* pBase, size_t size)
 #elif defined(MINIDETOUR_OS_APPLE)
 size_t mem_protect_rights_to_native(mem_protect_rights rights)
 {
-	switch(rights)
-	{
-		case mem_r  : return VM_PROT_READ;
-		case mem_w  : return VM_PROT_WRITE;
-		case mem_x  : return VM_PROT_EXECUTE;
-		case mem_rw : return VM_PROT_WRITE | VM_PROT_READ;
-		case mem_rx : return VM_PROT_WRITE | VM_PROT_EXECUTE;
-		case mem_rwx: return VM_PROT_WRITE | VM_PROT_READ | VM_PROT_EXECUTE;
-	}
-	
-	return PROT_WRITE | PROT_READ | PROT_EXEC;
+    switch(rights)
+    {
+        case mem_r  : return VM_PROT_READ;
+        case mem_w  : return VM_PROT_WRITE;
+        case mem_x  : return VM_PROT_EXECUTE;
+        case mem_rw : return VM_PROT_WRITE | VM_PROT_READ;
+        case mem_rx : return VM_PROT_WRITE | VM_PROT_EXECUTE;
+        case mem_rwx: return VM_PROT_WRITE | VM_PROT_READ | VM_PROT_EXECUTE;
+    }
+    
+    return PROT_WRITE | PROT_READ | PROT_EXEC;
 }
 
 size_t page_size()
@@ -344,7 +345,7 @@ size_t page_size()
 
 bool mem_protect(void* addr, size_t size, mem_protect_rights rights)
 {
-	// TODO: Here find a way to allocate moemry near the address_hint.
+    // TODO: Here find a way to allocate moemry near the address_hint.
     // Sometimes you get address too far for a relative jmp
     return mach_vm_protect(mach_task_self(), (mach_vm_address_t)addr, size, FALSE, mem_protect_rights_to_native(rights)) == KERN_SUCCESS;
 }
@@ -368,13 +369,13 @@ void* memory_alloc(void* address_hint, size_t size, mem_protect_rights rights)
     int flags = (address_hint == nullptr ? VM_FLAGS_ANYWHERE : VM_FLAGS_FIXED);
 
     if (mach_vm_allocate(task, &address, (mach_vm_size_t)size, flags) == KERN_SUCCESS)
-	{
-		memory_protect(address, size, rights);
-	}
-	else
-	{
+    {
+        memory_protect(address, size, rights);
+    }
+    else
+    {
         address = 0;
-	}
+    }
 
     return (void*)address;
 }
@@ -892,7 +893,7 @@ namespace mini_detour
     {
         if (this != &other)
         {
-            restore_address                = std::move(other.restore_address);
+            restore_address             = std::move(other.restore_address);
             saved_code_size             = std::move(other.saved_code_size);
             saved_code                  = std::move(other.saved_code);
             original_trampoline_address = std::move(other.original_trampoline_address);
@@ -908,7 +909,7 @@ namespace mini_detour
     {
         if (this != &other)
         {
-            restore_address                = std::move(other.restore_address);
+            restore_address             = std::move(other.restore_address);
             saved_code_size             = std::move(other.saved_code_size);
             saved_code                  = std::move(other.saved_code);
             original_trampoline_address = std::move(other.original_trampoline_address);
@@ -1200,7 +1201,7 @@ namespace mini_detour
 
         // Get the absolute jump
         jump = reinterpret_cast<abs_jump_t*>((reinterpret_cast<uint8_t*>(original_trampoline_address) + original_trampoline_size));
-		memcpy(jump, abs_jump_t::code, sizeof(abs_jump_t::code));
+        memcpy(jump, abs_jump_t::code, sizeof(abs_jump_t::code));
 
         // Set the jump address to the original code
         jump->abs_addr = reinterpret_cast<uint8_t*>(restore_address) + saved_code_size;

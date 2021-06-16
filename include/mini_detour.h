@@ -8,35 +8,35 @@ struct rel_jump_t;
 
 namespace mini_detour
 {
-	namespace memory_manipulation
-	{
-		enum mem_protect_rights
-		{
-			mem_r,
-			mem_w,
-			mem_x,
-			mem_rw,
-			mem_rx,
-			mem_rwx
-		};
-		
-		inline size_t page_align(size_t size, size_t page_size)
-		{
-			return (size + (page_size - 1)) & (((size_t)-1) ^ (page_size - 1));
-		}
+    namespace memory_manipulation
+    {
+        enum mem_protect_rights
+        {
+            mem_r,
+            mem_w,
+            mem_x,
+            mem_rw,
+            mem_rx,
+            mem_rwx
+        };
+        
+        inline size_t page_align(size_t size, size_t page_size)
+        {
+            return (size + (page_size - 1)) & (((size_t)-1) ^ (page_size - 1));
+        }
 
-		inline void* page_addr(void* addr, size_t page_size)
-		{
-			return reinterpret_cast<void*>(reinterpret_cast<size_t>(addr)& (((size_t)-1) ^ (page_size - 1)));
-		}
+        inline void* page_addr(void* addr, size_t page_size)
+        {
+            return reinterpret_cast<void*>(reinterpret_cast<size_t>(addr)& (((size_t)-1) ^ (page_size - 1)));
+        }
 
-		size_t page_size();
-		bool mem_protect(void* addr, size_t size, mem_protect_rights rights);
-		void memory_free(void* mem_addr, size_t size);
-		void* memory_alloc(void* address_hint, size_t size, mem_protect_rights rights);
-		int flush_instruction_cache(void* pBase, size_t size);
-	}
-	
+        size_t page_size();
+        bool mem_protect(void* addr, size_t size, mem_protect_rights rights);
+        void memory_free(void* mem_addr, size_t size);
+        void* memory_alloc(void* address_hint, size_t size, mem_protect_rights rights);
+        int flush_instruction_cache(void* pBase, size_t size);
+    }
+    
     class hook
     {
         void* orignal_func_address;
