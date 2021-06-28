@@ -139,10 +139,10 @@ opcode_t s_1byte_opcodes[256] =
     {false, 0, "0x7d"}, // 0x7d
     {false, 0, "0x7e"}, // 0x7e
     {false, 0, "0x7f"}, // 0x7f
-    {false, 3, "ADD     r/m8        imm8"}    , // 0x80 
-    {false, 6, "ADD     r/m16/32    imm16/32"}, // 0x81 
-    {false, 3, "ADD     r/m8        imm8"}    , // 0x82 
-    {false, 3, "ADD     r/m16/32    imm8"}    , // 0x83 
+    {true , 3, "ADD     r/m8        imm8"}    , // 0x80 
+    {true , 6, "ADD     r/m16/32    imm16/32"}, // 0x81 
+    {true , 3, "ADD     r/m8        imm8"}    , // 0x82 
+    {true , 3, "ADD     r/m16/32    imm8"}    , // 0x83 
     {true , 2, "TEST    r/m8        r8"}      , // 0x84 
     {true , 2, "TEST    r/m16/32    r16/32"}  , // 0x85 
     {true , 2, "XCHG    r8          r/m8"}    , // 0x86 
