@@ -6,6 +6,8 @@
 #include <limits>
 #include <utility>
 #include <type_traits> // std::move
+#include <fstream>
+#include <string>
 
 #ifdef USE_SPDLOG
 	#include <spdlog/spdlog.h>
