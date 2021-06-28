@@ -1,43 +1,56 @@
 #ifndef MINI_DETOUR_H
 #define MINI_DETOUR_H
 
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
 struct abs_jump_t;
 struct rel_jump_t;
 
+namespace memory_manipulation
+{
+    enum memory_rights
+    {
+        mem_none = 0,
+        mem_r    = 1,
+        mem_w    = 2,
+        mem_x    = 4,
+        mem_rw   = mem_r | mem_w,
+        mem_rx   = mem_r | mem_x,
+        mem_wx   = mem_w | mem_x,
+        mem_rwx  = mem_r | mem_w | mem_x,
+        mem_unset = 8,
+    };
+
+    struct region_infos_t
+    {
+        memory_rights rights;
+        void* start;
+        void* end;
+    };
+
+    inline void* page_round_up(void* _addr, size_t page_size)
+    {
+        size_t addr = (size_t)_addr;
+        return (void*)((addr + (page_size - 1)) & (((size_t)-1) ^ (page_size - 1)));
+    }
+
+    inline void* page_round(void* _addr, size_t page_size)
+    {
+        size_t addr = (size_t)_addr;
+        return (void*)(addr & (((size_t)-1) ^ (page_size - 1)));
+    }
+
+    size_t page_size();
+    region_infos_t get_region_infos(void* address);
+    bool memory_protect(void* address, size_t size, memory_rights rights, memory_rights* old_rights = nullptr);
+    void memory_free(void* address, size_t size);
+    void* memory_alloc(void* address_hint, size_t size, memory_rights rights);
+    int flush_instruction_cache(void* address, size_t size);
+}
+    
 namespace mini_detour
 {
-    namespace memory_manipulation
-    {
-        enum memory_protect_rights
-        {
-            mem_r,
-            mem_w,
-            mem_x,
-            mem_rw,
-            mem_rx,
-            mem_rwx
-        };
-        
-        inline size_t page_align(size_t size, size_t page_size)
-        {
-            return (size + (page_size - 1)) & (((size_t)-1) ^ (page_size - 1));
-        }
-
-        inline void* page_addr(void* addr, size_t page_size)
-        {
-            return reinterpret_cast<void*>(reinterpret_cast<size_t>(addr)& (((size_t)-1) ^ (page_size - 1)));
-        }
-
-        size_t page_size();
-        bool memory_protect(void* addr, size_t size, memory_protect_rights rights);
-        void memory_free(void* mem_addr, size_t size);
-        void* memory_alloc(void* address_hint, size_t size, memory_protect_rights rights);
-        int flush_instruction_cache(void* pBase, size_t size);
-    }
-    
     class hook
     {
         void* orignal_func_address;
