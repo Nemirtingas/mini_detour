@@ -123,11 +123,15 @@ TEST_CASE("Memory free", "[memfree]") {
 bool Myputs_called = false;
 mini_detour::hook puts_hook;
 
+#ifdef TESTS_OS_WINDOWS
 int __cdecl Myputs(const char* str)
+#else
+int Myputs(const char* str)
+#endif
 {
     Myputs_called = true;
     return puts_hook.get_original_func<decltype(puts)*>()(str);
-}
+};
 
 int do_something(int a, int b)
 {
