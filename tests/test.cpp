@@ -107,7 +107,7 @@ TEST_CASE("Memory protect", "[memprotect]") {
     REQUIRE(old_rights == memory_manipulation::memory_rights::mem_rx);
 
     REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rwx, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_rwx);
+    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_wx);
 
     auto infos = memory_manipulation::get_region_infos(mem);
     REQUIRE(infos.start != nullptr);

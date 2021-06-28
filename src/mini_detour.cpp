@@ -474,10 +474,10 @@ void memory_free(void* address, size_t size)
         mach_vm_deallocate(mach_task_self(), (mach_vm_address_t)address, size);
 }
 
-
 void* memory_alloc(void* address_hint, size_t size, memory_rights rights)
 {
-    mach_vm_address_t address = (mach_vm_address_t)page_round(address_hint, page_size());
+    mach_vm_address_t address = (mach_vm_address_t)0;
+    size = (size_t)page_round_up((void*)size, page_size());
 
     mach_port_t task;
     task = mach_task_self();
@@ -486,7 +486,44 @@ void* memory_alloc(void* address_hint, size_t size, memory_rights rights)
     // VM_FLAGS_ANYWHERE allows for better compatibility as the Kernel will find a place for us.
     int flags = (address_hint == nullptr ? VM_FLAGS_ANYWHERE : VM_FLAGS_FIXED);
 
-    if (mach_vm_allocate(task, &address, (mach_vm_size_t)size, flags) == KERN_SUCCESS)
+    kern_return_t res;
+
+    if(flags == VM_FLAGS_ANYWHERE)
+    {
+        res = mach_vm_allocate(task, &address, (mach_vm_size_t)size, flags);
+    }
+    else
+    {
+    #if defined(MINIDETOUR_ARCH_X64)
+        void* max_user_address = (void*)0x7ffefffff000;
+    #elif defined(MINIDETOUR_ARCH_X86)
+        void* max_user_address = (void*)0x70000000;
+    #endif
+
+        if (address_hint > max_user_address)
+            address_hint = max_user_address;
+        
+        region_infos_t infos = get_region_infos(address_hint);
+        address = (mach_vm_address_t)infos.start;
+        for(int i = 0; i < 100000; ++i, (uint8_t*&)address -= page_size() )
+        {
+            res = mach_vm_allocate(task, &address, (mach_vm_size_t)size, flags);
+            if(res == KERN_SUCCESS)
+                break;
+        }
+        if(res != KERN_SUCCESS)
+        {
+            address = (mach_vm_address_t)infos.end;
+            for(int i = 0; i < 100000 && (void*)address < max_user_address; ++i, (uint8_t*&)address += page_size() )
+            {
+                res = mach_vm_allocate(task, &address, (mach_vm_size_t)size, flags);
+                if(res == KERN_SUCCESS)
+                  break;
+            }
+        }
+    }
+
+    if (res == KERN_SUCCESS)
     {
         memory_protect((void*)address, size, rights);
     }
@@ -545,31 +582,20 @@ public:
     {
         abs_jump_t* jump = nullptr;
 
-#ifdef MINIDETOUR_OS_APPLE
-    #if defined(MINIDETOUR_ARCH_X64)
-        if (hint_addr > (void*)0x7ffefffff000)
-            hint_addr = (void*)0x7ffefffff000;
-    #elif defined(MINIDETOUR_ARCH_X86)
-        if (hint_addr > (void*)0x70000000)
-            hint_addr = (void*)0x70000000;
-    #endif
-#endif
+        jump = reinterpret_cast<abs_jump_t*>(memory_manipulation::memory_alloc(hint_addr, region_size(), memory_manipulation::memory_rights::mem_rwx));
 
-        for (int i = 0; i < 100000; ++i)
+        if (jump != nullptr)
         {
-            jump = reinterpret_cast<abs_jump_t*>(memory_manipulation::memory_alloc(hint_addr, region_size(), memory_manipulation::memory_rights::mem_rwx));
-
             uint64_t high = (uint64_t)std::max((void*)jump, hint_addr);
             uint64_t low  = (uint64_t)std::min((void*)jump, hint_addr);
 
-            if ((high - low) <= std::numeric_limits<int32_t>::max())
-                break;
-
-            hint_addr = reinterpret_cast<uint8_t*>(hint_addr) - memory_manipulation::page_size();
-
-            memory_manipulation::memory_free(jump, region_size());
-            jump = nullptr;
+            if((high - low) > std::numeric_limits<int32_t>::max())
+            {
+                memory_manipulation::memory_free(jump, region_size());
+                jump = nullptr;
+            }
         }
+
         if (jump)
         {
             size_t max_jumps = jumps_in_region();

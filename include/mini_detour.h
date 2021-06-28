@@ -11,15 +11,15 @@ namespace memory_manipulation
 {
     enum memory_rights
     {
-        mem_none,
-        mem_r,
-        mem_w,
-        mem_x,
-        mem_rw,
-        mem_rx,
-        mem_wx,
-        mem_rwx,
-        mem_unset
+        mem_none = 0,
+        mem_r    = 1,
+        mem_w    = 2,
+        mem_x    = 4,
+        mem_rw   = mem_r | mem_w,
+        mem_rx   = mem_r | mem_x,
+        mem_wx   = mem_w | mem_x,
+        mem_rwx  = mem_r | mem_w | mem_x,
+        mem_unset = 8,
     };
 
     struct region_infos_t
