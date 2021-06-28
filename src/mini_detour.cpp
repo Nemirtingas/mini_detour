@@ -195,7 +195,7 @@ size_t page_size()
     return sysconf(_SC_PAGESIZE);
 }
 
-region_infos_t get_page_infos(void* address)
+region_infos_t get_region_infos(void* address)
 {
     region_infos_t res{};
 
@@ -232,7 +232,7 @@ region_infos_t get_page_infos(void* address)
 
 bool memory_protect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
 {
-    region_infos_t infos = get_page_infos(address);
+    region_infos_t infos = get_region_infos(address);
     bool res = mprotect(page_round(address, page_size()), page_addr_size(address, size, page_size()), memory_protect_rights_to_native(rights)) == 0;
 
     if (old_rights != nullptr)
@@ -459,7 +459,7 @@ size_t page_size()
 
 bool memory_protect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
 {
-    region_infos_t infos = get_page_infos(address);
+    region_infos_t infos = get_region_infos(address);
     bool res = mach_vm_protect(mach_task_self(), (mach_vm_address_t)address, size, FALSE, memory_protect_rights_to_native(rights)) == KERN_SUCCESS;
 
     if (old_rights != nullptr)

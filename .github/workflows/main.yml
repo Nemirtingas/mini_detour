@@ -76,5 +76,5 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: powershell
         run: |
-          Get-ChildItem -Recurse -Filter '*' ${{ runner.workspace }}\b;
-          
+          #Get-ChildItem -Recurse -Filter '*' ${{ runner.workspace }}\b;
+          ${{ runner.workspace }}\b\ninja\bin\Release\tests.exe
