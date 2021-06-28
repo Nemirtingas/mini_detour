@@ -163,7 +163,7 @@ TEST_CASE("Hook function", "[Hook function]") {
     REQUIRE(Myputs_called == false);
 
     REQUIRE(do_something(5, 8) == 13);
-    CHECK(do_something_hook.hook_func((void*)&do_something, (void*)Mydo_something) != nullptr);
+    do_something_hook.hook_func((void*)&do_something, (void*)Mydo_something);
 
     if (do_something_hook.get_original_func<void*>() != nullptr)
     {
