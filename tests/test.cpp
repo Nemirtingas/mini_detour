@@ -35,79 +35,81 @@ TEST_CASE("Memory allocation", "[mem alloc]") {
 TEST_CASE("Memory protect", "[memprotect]") {
     memory_manipulation::memory_rights old_rights;
 
+    REQUIRE(mem != nullptr);
+
 #if defined(TESTS_OS_WINDOWS)
     REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_r, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_none);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_none);
 
     REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_w, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_r);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_r);
 
     REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_x, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_rw); // Windows doesn't have a pure w
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_rw); // Windows doesn't have a pure w
 
     REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rw, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_x);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_x);
 
     REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rx, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_rw);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_rw);
 
     REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_wx, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_rx);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_rx);
 
     REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rwx, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_rwx); // Windows doesn't have a pure wx
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_rwx); // Windows doesn't have a pure wx
 
     auto infos = memory_manipulation::get_region_infos(mem);
     REQUIRE(infos.start != nullptr);
     REQUIRE(infos.end != nullptr);
     REQUIRE(infos.rights == memory_manipulation::memory_rights::mem_rwx);
 #elif defined(TESTS_OS_LINUX)
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_r, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_none);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_r, &old_rights) == true);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_none);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_w, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_r);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_w, &old_rights) == true);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_r);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_x, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_w);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_x, &old_rights) == true);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_w);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rw, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_x);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rw, &old_rights) == true);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_x);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rx, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_rw);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rx, &old_rights) == true);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_rw);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_wx, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_rx);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_wx, &old_rights) == true);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_rx);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rwx, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_rwx);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rwx, &old_rights) == true);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_wx);
 
     auto infos = memory_manipulation::get_region_infos(mem);
     REQUIRE(infos.start != nullptr);
     REQUIRE(infos.end != nullptr);
-    REQUIRE(infos.rights == memory_manipulation::memory_rights::mem_rwx);
+    CHECK(infos.rights == memory_manipulation::memory_rights::mem_rwx);
 #elif defined(TESTS_OS_APPLE)
     REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_r, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_none);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_none);
 
     REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_w, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_r);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_r);
 
     REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_x, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_w);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_w);
 
     REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rw, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_x);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_x);
 
     REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rx, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_rw);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_rw);
 
     REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_wx, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_rx);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_rx);
 
     REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rwx, &old_rights) == true);
-    REQUIRE(old_rights == memory_manipulation::memory_rights::mem_wx);
+    CHECK(old_rights == memory_manipulation::memory_rights::mem_wx);
 
     auto infos = memory_manipulation::get_region_infos(mem);
     REQUIRE(infos.start != nullptr);
