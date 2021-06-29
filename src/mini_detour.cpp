@@ -1,8 +1,9 @@
 #include <mini_detour.h>
 
-#include <cassert>
+#include <assert.h>
 #include <string.h>
-#include <cmath>
+
+#include <algorithm>
 #include <limits>
 #include <utility>
 #include <type_traits> // std::move
