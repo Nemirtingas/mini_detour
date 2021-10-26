@@ -47,13 +47,19 @@ if(LOCAL_INSTALL)
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 endif()
 
+set(MINIDETOUR_HEADERS
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/mini_detour/mini_detour.h
+)
+
 add_library(
-  ${PROJECT_NAME}
+  mini_detour
   src/mini_detour.cpp
 )
 
+set_property(TARGET mini_detour PROPERTY POSITION_INDEPENDENT_CODE ON)
+
 target_link_libraries(
-  ${PROJECT_NAME}
+  mini_detour
   PUBLIC
   $<$<BOOL:${USE_SPDLOG}>:spdlog::spdlog>
   
@@ -62,14 +68,14 @@ target_link_libraries(
 )
 
 target_include_directories(
-  ${PROJECT_NAME}
+  mini_detour
   PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
 
 target_compile_definitions(
-  ${PROJECT_NAME}
+  mini_detour
   PRIVATE
   $<$<BOOL:${USE_SPDLOG}>:USE_SPDLOG>
 )
@@ -77,38 +83,51 @@ target_compile_definitions(
 
 if(BUILD_TESTS)
 
-add_executable(
-  tests
-  tests/test.cpp
-)
+	add_executable(
+	  tests
+	  tests/test.cpp
+	)
 
-target_link_libraries(
-  tests
-  PUBLIC
-  ${PROJECT_NAME}
-)
+	target_link_libraries(
+	  tests
+	  PRIVATE
+	  mini_detour
+	)
 
-target_include_directories(
-  tests
-  PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-)
+	target_include_directories(
+	  tests
+	  PRIVATE
+	  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+	  $<INSTALL_INTERFACE:include>
+	)
 
 endif()
 
-install(TARGETS ${PROJECT_NAME}
-    EXPORT ${PROJECT_NAME}-targets
-    RUNTIME DESTINATION "bin"
-    LIBRARY DESTINATION "lib"
-    ARCHIVE DESTINATION "lib"
+set_target_properties(mini_detour PROPERTIES EXPORT_NAME MiniDetour)
+add_library(MiniDetour::MiniDetour ALIAS mini_detour)
+
+##################
+## Install rules
+install(TARGETS mini_detour EXPORT MiniDetourTargets
+	RUNTIME DESTINATION bin
+	LIBRARY DESTINATION lib
+	ARCHIVE DESTINATION lib
 )
 
+install(FILES ${MINIDETOUR_HEADERS}
+	DESTINATION include/mini_detour
+)
+
+# Export targets
 install(
-    EXPORT
-        ${PROJECT_NAME}-targets
-    NAMESPACE
-        ${PROJECT_NAME}::
-    DESTINATION
-        "lib/${PROJECT_NAME}"
+	EXPORT MiniDetourTargets
+	FILE MiniDetourTargets.cmake
+	NAMESPACE MiniDetour::
+	DESTINATION lib/cmake/MiniDetour
+)
+
+# Export config
+install(
+	FILES ${CMAKE_CURRENT_SOURCE_DIR}/cmake/MiniDetourConfig.cmake
+	DESTINATION lib/cmake/MiniDetour
 )
