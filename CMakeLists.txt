@@ -1,33 +1,11 @@
+
+cmake_policy(SET CMP0091 NEW)
 project(mini_detour)
 cmake_minimum_required(VERSION 3.0)
 
-if(WIN32) # Setup some variables for Windows build
-  if(MSVC) # If building with MSVC
-	option(STATIC_MSVCRT "Static link the MSVC runtime" ON)
-	
-    if(STATIC_MSVCRT)
-      set(CompilerFlags
-        CMAKE_CXX_FLAGS
-        CMAKE_CXX_FLAGS_DEBUG
-        CMAKE_CXX_FLAGS_RELEASE
-        CMAKE_C_FLAGS
-        CMAKE_C_FLAGS_DEBUG
-        CMAKE_C_FLAGS_RELEASE
-        )
-      foreach(CompilerFlag ${CompilerFlags})
-        string(REPLACE "/MD" "/MT" ${CompilerFlag} "${${CompilerFlag}}")
-      endforeach()
-    endif()
-  endif()
-
-elseif(APPLE)
+if(APPLE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
   
-elseif(UNIX)
-
-else()
-  message(FATAL_ERROR "No CMake for other platforms")
-
 endif()
 
 set(CMAKE_C_STANDARD_LIBRARIES "" CACHE STRING "" FORCE)
@@ -56,6 +34,8 @@ add_library(
   src/mini_detour.cpp
 )
 
+set_property(TARGET mini_detour PROPERTY
+  MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 set_property(TARGET mini_detour PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 target_link_libraries(
@@ -65,6 +45,12 @@ target_link_libraries(
   
   # For library UNIX loading
   $<$<NOT:$<BOOL:${WIN32}>>:dl>
+)
+
+target_compile_options(
+  mini_detour
+  PRIVATE
+  $<$<BOOL:${MSVC}>:/MP>
 )
 
 target_include_directories(
@@ -80,54 +66,45 @@ target_compile_definitions(
   $<$<BOOL:${USE_SPDLOG}>:USE_SPDLOG>
 )
 
-
 if(BUILD_TESTS)
+  add_executable(
+    tests
+    tests/test.cpp
+  )
 
-	add_executable(
-	  tests
-	  tests/test.cpp
-	)
+  target_link_libraries(
+    tests
+    PRIVATE
+    mini_detour
+  )
 
-	target_link_libraries(
-	  tests
-	  PRIVATE
-	  mini_detour
-	)
-
-	target_include_directories(
-	  tests
-	  PRIVATE
-	  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-	  $<INSTALL_INTERFACE:include>
-	)
+  target_include_directories(
+    tests
+    PRIVATE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
 
 endif()
 
 set_target_properties(mini_detour PROPERTIES EXPORT_NAME MiniDetour)
-add_library(MiniDetour::MiniDetour ALIAS mini_detour)
 
 ##################
 ## Install rules
 install(TARGETS mini_detour EXPORT MiniDetourTargets
-	RUNTIME DESTINATION bin
-	LIBRARY DESTINATION lib
-	ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
 )
 
 install(FILES ${MINIDETOUR_HEADERS}
-	DESTINATION include/mini_detour
+  DESTINATION include/mini_detour
 )
 
 # Export targets
 install(
-	EXPORT MiniDetourTargets
-	FILE MiniDetourTargets.cmake
-	NAMESPACE MiniDetour::
-	DESTINATION lib/cmake/MiniDetour
-)
-
-# Export config
-install(
-	FILES ${CMAKE_CURRENT_SOURCE_DIR}/cmake/MiniDetourConfig.cmake
-	DESTINATION lib/cmake/MiniDetour
+  EXPORT MiniDetourTargets
+  FILE MiniDetourConfig.cmake
+  NAMESPACE MiniDetour::
+  DESTINATION lib/cmake/MiniDetour
 )

@@ -1,4 +1,4 @@
-#include <mini_detour.h>
+#include <mini_detour/mini_detour.h>
 
 #include <assert.h>
 #include <string.h>
