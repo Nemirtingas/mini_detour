@@ -17,13 +17,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(USE_SPDLOG "Enable logs with SPDLOG" OFF)
 option(BUILD_TESTS "Build tests" OFF)
-option(LOCAL_INSTALL "Install on local folder instead of system directories" ON)
-
-if(LOCAL_INSTALL)
-  set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-  set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-endif()
 
 set(MINIDETOUR_HEADERS
   ${CMAKE_CURRENT_SOURCE_DIR}/include/mini_detour/mini_detour.h
