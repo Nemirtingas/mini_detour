@@ -87,6 +87,7 @@ if(BUILD_TESTS)
 
 endif()
 
+add_library(MiniDetour::MiniDetour ALIAS mini_detour)
 set_target_properties(mini_detour PROPERTIES EXPORT_NAME MiniDetour)
 
 ##################
