@@ -27,9 +27,10 @@ add_library(
   src/mini_detour.cpp
 )
 
-set_property(TARGET mini_detour PROPERTY
-  MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-set_property(TARGET mini_detour PROPERTY POSITION_INDEPENDENT_CODE ON)
+set_target_properties(mini_detour PROPERTIES
+  MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+  POSITION_INDEPENDENT_CODE ON
+)
 
 target_link_libraries(
   mini_detour
