@@ -1,7 +1,7 @@
 
 cmake_policy(SET CMP0091 NEW)
 project(mini_detour)
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.15)
 
 if(APPLE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
@@ -30,6 +30,9 @@ add_library(
 set_target_properties(mini_detour PROPERTIES
   MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
   POSITION_INDEPENDENT_CODE ON
+  C_VISIBILITY_PRESET hidden
+  CXX_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN ON
 )
 
 target_link_libraries(
