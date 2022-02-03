@@ -1112,20 +1112,26 @@ namespace mini_detour
         uint8_t* relocation = nullptr;
         int relocatable_size = 0;
 
-        // If its an imported function.      CALL                JUMP
-        if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
+        while (1)
         {
-            // Get the real imported function address
-        #ifdef MINIDETOUR_ARCH_X64
-            pCode = *reinterpret_cast<uint8_t**>(pCode + 6 + *(int32_t*)(pCode + 2)); // 2 opcodes + 4 relative address ptr
-        #else
-            pCode = **reinterpret_cast<uint8_t***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
-        #endif
-        }
-        //                     CALL                  JUMP
-        else if (/*pCode[0] == 0xe8 ||*/ pCode[0] == 0xe9)
-        {
-            pCode = relative_addr_to_absolute(*(int32_t*)(pCode+1), pCode);
+            // If its an imported function.      CALL                JUMP
+            if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
+            {
+                // Get the real imported function address
+#ifdef MINIDETOUR_ARCH_X64
+                pCode = *reinterpret_cast<uint8_t**>(pCode + 6 + *(int32_t*)(pCode + 2)); // 2 opcodes + 4 relative address ptr
+#else
+                pCode = **reinterpret_cast<uint8_t***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
+#endif
+            }
+            else if (pCode[0] == 0xe8 || pCode[0] == 0xe9)
+            {
+                pCode = relative_addr_to_absolute(*(int32_t*)(pCode + 1), pCode);
+            }
+            else
+            {
+                break;
+            }
         }
 
         while (relocatable_size < sizeof(abs_jump_t))
@@ -1170,19 +1176,26 @@ namespace mini_detour
         uint8_t* pCode = reinterpret_cast<uint8_t*>(func);
         size_t relocatable_size = 0;
 
-        // If its an imported function.      CALL                JUMP
-        if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
+        while (1)
         {
-            // Get the real imported function address
-        #ifdef MINIDETOUR_ARCH_X64
-            pCode = *reinterpret_cast<uint8_t**>(pCode + 6 + *(int32_t*)(pCode + 2)); // 2 opcodes + 4 relative address ptr
-        #else
-            pCode = **reinterpret_cast<uint8_t***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
-        #endif
-        }
-        else if (pCode[0] == 0xe8 || pCode[0] == 0xe9)
-        {
-            pCode = relative_addr_to_absolute(*(int32_t*)(pCode+1), pCode);
+            // If its an imported function.      CALL                JUMP
+            if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
+            {
+                // Get the real imported function address
+#ifdef MINIDETOUR_ARCH_X64
+                pCode = *reinterpret_cast<uint8_t**>(pCode + 6 + *(int32_t*)(pCode + 2)); // 2 opcodes + 4 relative address ptr
+#else
+                pCode = **reinterpret_cast<uint8_t***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
+#endif
+            }
+            else if (pCode[0] == 0xe8 || pCode[0] == 0xe9)
+            {
+                pCode = relative_addr_to_absolute(*(int32_t*)(pCode + 1), pCode);
+            }
+            else
+            {
+                break;
+            }
         }
 
         func = pCode;
@@ -1261,19 +1274,26 @@ namespace mini_detour
         size_t total_original_trampoline_size = 0;
         abs_jump_t* jump = nullptr;
 
-        // If its an imported function.      CALL                JUMP
-        if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
+        while (1)
         {
-            // Get the real imported function address
-        #ifdef MINIDETOUR_ARCH_X64
-            pCode = *reinterpret_cast<uint8_t**>(pCode + 6 + *(int32_t*)(pCode + 2)); // 2 opcodes + 4 relative address ptr
-        #else
-            pCode = **reinterpret_cast<uint8_t***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
-        #endif
-        }
-        else if (pCode[0] == 0xe8 || pCode[0] == 0xe9)
-        {
-            pCode = relative_addr_to_absolute(*(int32_t*)(pCode+1), pCode);
+            // If its an imported function.      CALL                JUMP
+            if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
+            {
+                // Get the real imported function address
+#ifdef MINIDETOUR_ARCH_X64
+                pCode = *reinterpret_cast<uint8_t**>(pCode + 6 + *(int32_t*)(pCode + 2)); // 2 opcodes + 4 relative address ptr
+#else
+                pCode = **reinterpret_cast<uint8_t***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
+#endif
+            }
+            else if (pCode[0] == 0xe8 || pCode[0] == 0xe9)
+            {
+                pCode = relative_addr_to_absolute(*(int32_t*)(pCode + 1), pCode);
+            }
+            else
+            {
+                break;
+            }
         }
 
         restore_address = pCode;
