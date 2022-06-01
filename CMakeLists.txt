@@ -68,6 +68,13 @@ if(BUILD_TESTS)
     tests
     tests/test.cpp
   )
+  
+  set_target_properties(tests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+  )
 
   target_link_libraries(
     tests
