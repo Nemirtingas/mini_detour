@@ -16,12 +16,9 @@ jobs:
           submodules: recursive
           fetch-depth: 0
       
-      - name: get-cmake
-        uses: lukka/get-cmake@v3.23.0
-        
       - name: Linux cmake
         if: matrix.os == 'ubuntu-latest'
-        uses: lukka/run-cmake@main
+        uses: lukka/run-cmake@v3.4
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/CMakeLists.txt'
           useVcpkgToolchainFile: false
@@ -42,7 +39,7 @@ jobs:
         
       - name: MacOS cmake
         if: matrix.os == 'macos-latest'
-        uses: lukka/run-cmake@main
+        uses: lukka/run-cmake@v3.4
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/CMakeLists.txt'
           useVcpkgToolchainFile: false
@@ -63,7 +60,7 @@ jobs:
         
       - name: Windows cmake
         if: matrix.os == 'windows-latest'
-        uses: lukka/run-cmake@main
+        uses: lukka/run-cmake@v3.4
         with:
           cmakeListsTxtPath: '${{ github.workspace }}/CMakeLists.txt'
           useVcpkgToolchainFile: false
