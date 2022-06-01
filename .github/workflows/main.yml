@@ -15,6 +15,9 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
+      
+      - name: get-cmake
+        uses: lukka/get-cmake@v3.23.0
         
       - name: Linux cmake
         if: matrix.os == 'ubuntu-latest'
