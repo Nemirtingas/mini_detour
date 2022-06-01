@@ -34,7 +34,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
-          find ${{ runner.workspace }}/b;
+          #find ${{ runner.workspace }}/b;
           ${{ runner.workspace }}/b/ninja/tests
         
       - name: MacOS cmake
@@ -55,7 +55,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         shell: bash
         run: |
-          find ${{ runner.workspace }}/b;
+          #find ${{ runner.workspace }}/b;
           ${{ runner.workspace }}/b/ninja/tests
         
       - name: Windows cmake
@@ -76,5 +76,5 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: powershell
         run: |
-          Get-ChildItem -Recurse -Filter '*' ${{ runner.workspace }}\b;
-          ${{ runner.workspace }}\b\ninja\bin\Release\tests.exe
+          #Get-ChildItem -Recurse -Filter '*' ${{ runner.workspace }}\b;
+          ${{ runner.workspace }}\b\ninja\Release\tests.exe
