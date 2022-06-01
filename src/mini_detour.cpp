@@ -279,27 +279,15 @@ DWORD memory_protect_rights_to_native(memory_rights rights)
 
 memory_rights memory_native_to_protect_rights(DWORD rights)
 {
-    memory_rights res;
-
-    if (rights & PAGE_READONLY)
-        res = mem_r;
-
-    if (rights & PAGE_READWRITE)
-        res = mem_rw;
-
-    if (rights & PAGE_EXECUTE)
-        res = mem_x;
-
-    if (rights & PAGE_EXECUTE_READ)
-        res = mem_rx;
-
-    if (rights & PAGE_EXECUTE_READWRITE)
-        res = mem_rwx;
-
-    if (rights & PAGE_NOACCESS)
-        res = mem_none;
-
-    return res;
+    switch (rights)
+    {
+        case PAGE_READONLY         : return mem_r  ;
+        case PAGE_READWRITE        : return mem_rw ; 
+        case PAGE_EXECUTE          : return mem_x  ; 
+        case PAGE_EXECUTE_READ     : return mem_rx ; 
+        case PAGE_EXECUTE_READWRITE: return mem_rwx;
+        default                    : return mem_none;
+    }
 }
 
 size_t page_size()
@@ -356,13 +344,8 @@ void* memory_alloc(void* address_hint, size_t size, memory_rights rights)
 
         ZeroMemory(&mbi, sizeof(mbi));
         if (VirtualQueryEx(hProcess, (PVOID)pbLast, &mbi, sizeof(mbi)) == 0)
-        {
-            if (GetLastError() == ERROR_INVALID_PARAMETER)
-            {
-                break;
-            }
-            break;
-        }
+            continue;
+
         // Usermode address space has such an unaligned region size always at the
         // end and only at the end.
         //
@@ -374,9 +357,7 @@ void* memory_alloc(void* address_hint, size_t size, memory_rights rights)
         // Skip anything other than a pure free region.
         //
         if (mbi.State != MEM_FREE)
-        {
             continue;
-        }
 
         // Use the max of mbi.BaseAddress and pbBase, in case mbi.BaseAddress < pbBase.
         PBYTE pbAddress = (PBYTE)mbi.BaseAddress > pbBase ? (PBYTE)mbi.BaseAddress : pbBase;
@@ -389,10 +370,10 @@ void* memory_alloc(void* address_hint, size_t size, memory_rights rights)
         {
             PBYTE pbAlloc = (PBYTE)VirtualAllocEx(hProcess, pbAddress, size,
                 MEM_RESERVE | MEM_COMMIT, memory_protect_rights_to_native(rights));
+
             if (pbAlloc == nullptr)
-            {
                 continue;
-            }
+
             return pbAlloc;
         }
     }
