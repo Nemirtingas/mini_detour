@@ -1,7 +1,7 @@
 #define CATCH_CONFIG_RUNNER
 #include "catch.hpp"
 
-#include <mini_detour.h>
+#include <mini_detour/mini_detour.h>
 #include <iostream>
 
 static void* mem;
