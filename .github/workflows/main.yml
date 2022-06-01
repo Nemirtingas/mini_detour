@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           find ${{ runner.workspace }}/b;
-          ${{ runner.workspace }}/b/ninja/bin/tests
+          ${{ runner.workspace }}/b/ninja/tests
         
       - name: MacOS cmake
         if: matrix.os == 'macos-latest'
@@ -56,7 +56,7 @@ jobs:
         shell: bash
         run: |
           find ${{ runner.workspace }}/b;
-          ${{ runner.workspace }}/b/ninja/bin/tests
+          ${{ runner.workspace }}/b/ninja/tests
         
       - name: Windows cmake
         if: matrix.os == 'windows-latest'
