@@ -25,6 +25,11 @@ set(MINIDETOUR_HEADERS
 add_library(
   mini_detour
   src/mini_detour.cpp
+  src/mini_detour_x64.h
+  src/mini_detour_x86.h
+  src/mini_detour_arm64.h
+  src/mini_detour_arm.h
+  include/mini_detour/mini_detour.h
 )
 
 set_target_properties(mini_detour PROPERTIES

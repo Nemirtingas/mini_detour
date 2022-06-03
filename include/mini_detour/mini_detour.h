@@ -4,9 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-struct abs_jump_t;
-struct rel_jump_t;
-
 namespace memory_manipulation
 {
     enum memory_rights
@@ -53,19 +50,19 @@ namespace mini_detour
 {
     class hook
     {
-        void* orignal_func_address;
+        void* _OriginalFuncAddress;
         // Where the original bytes were modified for hook
-        void* restore_address;
-        uint8_t saved_code_size;
+        void* _RestoreAddress;
+        uint8_t _SavedCodeSize;
         // Saved code to restore
-        uint8_t* saved_code;
+        uint8_t* _SavedCode;
         // Where the original relocation is, to call the original function
         // The content is the saved code + abs jump to original code
-        void* original_trampoline_address;
+        void* _OriginalTrampolineAddress;
         // The hook address
         void* detour_func;
         // Optional, if we have space for only a relative jump, we need a trampoline
-        abs_jump_t* trampoline_address;
+        void* trampoline_address;
 
     public:
         // Set this to true to restore the original function on hook destruction
@@ -96,7 +93,7 @@ namespace mini_detour
         template<typename T>
         inline T get_original_func()
         {
-            return reinterpret_cast<T>(original_trampoline_address);
+            return reinterpret_cast<T>(_OriginalTrampolineAddress);
         }
     };
 }

@@ -1,0 +1,4 @@
+#ifndef MINI_DETOUR_ARM64_H
+#define MINI_DETOUR_ARM64_H
+
+#endif//MINI_DETOUR_ARM64_H
