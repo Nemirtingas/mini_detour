@@ -100,7 +100,7 @@ namespace memory_manipulation {
             size = page_addr_size((void*)address, size, page_size());
             int pages = size / page_size();
 
-            for (int i = 0; i < 100000; ++i, address += page_size())
+            for (int i = 0; i < 100000 && (void*)address < max_user_address; ++i, address += page_size())
             {
                 bool found = true;
                 for (int j = 0; j < pages; ++j)
