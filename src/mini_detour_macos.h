@@ -118,7 +118,7 @@ namespace memory_manipulation {
                     kret = mach_vm_allocate(task, &address, (mach_vm_size_t)size, VM_FLAGS_FIXED);
                     if (kret == KERN_SUCCESS)
                     {
-                        SPDLOG_INFO("Allocated {} for address {}", (void*)address, (void*)bkp);
+                        SPDLOG_INFO("Allocated {} for hint {}", (void*)address, address_hint);
                         memory_protect(reinterpret_cast<void*>(address), size, rights);
                         return reinterpret_cast<void*>(address);
                     }
@@ -144,7 +144,7 @@ namespace memory_manipulation {
                     kret = mach_vm_allocate(task, &address, (mach_vm_size_t)size, VM_FLAGS_FIXED);
                     if (kret == KERN_SUCCESS)
                     {
-                        SPDLOG_INFO("Allocated {} for address {}", (void*)address, (void*)bkp);
+                        SPDLOG_INFO("Allocated {} for hint {}", (void*)address, address_hint);
                         memory_protect(reinterpret_cast<void*>(address), size, rights);
                         return reinterpret_cast<void*>(address);
                     }
