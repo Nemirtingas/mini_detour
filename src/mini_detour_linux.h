@@ -64,7 +64,10 @@ namespace memory_manipulation {
 
     bool memory_protect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
     {
-        region_infos_t infos = get_region_infos(address);
+        region_infos_t infos;
+        if(old_rights != nullptr)
+            infos = get_region_infos(address);
+
         bool res = mprotect(page_round(address, page_size()), page_addr_size(address, size, page_size()), memory_protect_rights_to_native(rights)) == 0;
 
         if (old_rights != nullptr)

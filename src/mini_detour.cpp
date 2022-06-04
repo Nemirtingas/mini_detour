@@ -13,6 +13,37 @@
 
 #ifdef USE_SPDLOG
 #include <spdlog/spdlog-inl.h>
+
+#include <iomanip>
+#include <sstream>
+
+template <>
+struct fmt::formatter<memory_manipulation::memory_rights> {
+    // Parses format specifications of the form ['f' | 'e'].
+    constexpr auto parse(format_parse_context& ctx) {
+        auto it = ctx.begin(), end = ctx.end();
+
+        // Check if reached the end of the range:
+        if (it != end && *it != '}')
+            throw format_error("invalid format");
+
+        // Return an iterator past the end of the parsed range:
+        return it;
+    }
+
+    // Formats the point p using the parsed format specification (presentation)
+    // stored in this formatter.
+    template <typename FormatContext>
+    auto format(memory_manipulation::memory_rights rights, FormatContext& ctx) {
+        // auto format(const point &p, FormatContext &ctx) -> decltype(ctx.out()) // c++11
+          // ctx.out() is an output iterator to write to.
+        return format_to(ctx.out(), "{}{}{}",
+            rights & memory_manipulation::memory_rights::mem_r ? 'r' : '-',
+            rights & memory_manipulation::memory_rights::mem_w ? 'w' : '-',
+            rights & memory_manipulation::memory_rights::mem_x ? 'x' : '-');
+    }
+};
+
 #else
 #define SPDLOG_DEBUG(...)
 #define SPDLOG_ERROR(...)
@@ -442,7 +473,6 @@ namespace mini_detour
         if (_OriginalTrampolineAddress != nullptr)
             return _OriginalTrampolineAddress;
 
-        _OriginalFuncAddress = func;
         uint8_t* pCode = reinterpret_cast<uint8_t*>(func);
         size_t relocatable_size = 0;
 
@@ -465,7 +495,10 @@ namespace mini_detour
         _SavedCodeSize = relocatable_size;
         _SavedCode = (uint8_t*)malloc(sizeof(uint8_t) * relocatable_size);
         if (_SavedCode == nullptr)
+        {
+            SPDLOG_ERROR("Failed to malloc {} for code save.", relocatable_size);
             goto error;
+        }
 
         // Save the original code
         memcpy(_SavedCode, pCode, _SavedCodeSize);
@@ -476,15 +509,24 @@ namespace mini_detour
 
         _OriginalTrampolineAddress = mm.GetFreeTrampoline(total_original_trampoline_size);
         if (_OriginalTrampolineAddress == nullptr)
+        {
+            SPDLOG_ERROR("Failed to get memory for trampoline.");
             goto error;
+        }
 
         // RWX on our original trampoline func
         if (!memory_manipulation::memory_protect(_OriginalTrampolineAddress, total_original_trampoline_size, memory_manipulation::memory_rights::mem_rwx))
+        {
+            SPDLOG_ERROR("Failed to protect trampoline memory ({} : {}), current rights: {}.", _OriginalTrampolineAddress, total_original_trampoline_size, memory_manipulation::get_region_infos(_OriginalTrampolineAddress).rights);
             goto error;
+        }
 
         // RWX on the orignal func
         if (!memory_manipulation::memory_protect(pCode, _SavedCodeSize, memory_manipulation::memory_rights::mem_rwx))
+        {
+            SPDLOG_ERROR("Failed to protect function memory ({} : {}), current rights: {}.", (void*)pCode, _SavedCodeSize, memory_manipulation::get_region_infos(pCode).rights);
             goto error;
+        }
 
         // Copy the original code
         memcpy(_OriginalTrampolineAddress, pCode, _SavedCodeSize);
@@ -497,7 +539,32 @@ namespace mini_detour
             SPDLOG_INFO("Absolute hook {} >= {}", relocatable_size, AbsJump::GetOpcodeSize(pCode));
 
             abs_jump.SetAddr(detour_func);
+
+#ifdef USE_SPDLOG
+            {
+                size_t dbg_opcode_size = _SavedCodeSize;
+                std::stringstream sstr;
+                for (int i = 0; i < dbg_opcode_size; ++i)
+                {
+                    sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)pCode[i];
+                }
+                SPDLOG_INFO("Before write {}", sstr.str());
+            }
+#endif
+
             abs_jump.WriteOpcodes(pCode);
+
+#ifdef USE_SPDLOG
+            {
+                size_t dbg_opcode_size = abs_jump.GetOpcodeSize();
+                std::stringstream sstr;
+                for (int i = 0; i < dbg_opcode_size; ++i)
+                {
+                    sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)pCode[i];
+                }
+                SPDLOG_INFO("After write {}", sstr.str());
+            }
+#endif
         }
         else
         {
@@ -506,11 +573,15 @@ namespace mini_detour
             // Setup the trampoline
             void* jump_mem = mm.GetFreeJump(func);
             if (jump_mem == nullptr)
+            {
+                SPDLOG_ERROR("Failed to get memory for jump.");
                 goto error;
+            }
 
             if (!memory_manipulation::memory_protect(jump_mem, AbsJump::GetMaxOpcodeSize(), memory_manipulation::memory_rights::mem_rwx))
             {
                 mm.FreeJump(jump_mem);
+                SPDLOG_ERROR("Failed to protect jump memory.");
                 goto error;
             }
 
@@ -522,9 +593,34 @@ namespace mini_detour
 
             RelJump hook_jump;
             hook_jump.SetAddr(absolute_addr_to_relative(pCode, jump_mem));
+
+#ifdef USE_SPDLOG
+            {
+                size_t dbg_opcode_size = _SavedCodeSize;
+                std::stringstream sstr;
+                for (int i = 0; i < dbg_opcode_size; ++i)
+                {
+                    sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)pCode[i];
+                }
+                SPDLOG_INFO("Before write {}", sstr.str());
+            }
+#endif
+
             hook_jump.WriteOpcodes(pCode);
 
             trampoline_address = jump_mem;
+
+#ifdef USE_SPDLOG
+            {
+                size_t dbg_opcode_size = hook_jump.GetOpcodeSize();
+                std::stringstream sstr;
+                for (int i = 0; i < dbg_opcode_size; ++i)
+                {
+                    sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)pCode[i];
+                }
+                SPDLOG_INFO("After write {}", sstr.str());
+            }
+#endif
         }
 
         // Try to restore memory rights, if it fails, no problem, we are just a bit too permissive
@@ -534,6 +630,7 @@ namespace mini_detour
         memory_manipulation::memory_protect(pCode, relocatable_size, memory_manipulation::memory_rights::mem_rx);
         memory_manipulation::flush_instruction_cache(pCode, relocatable_size);
 
+        _OriginalFuncAddress = func;
         _DetourFunc = detour_func;
         _RestoreAddress = pCode;
 

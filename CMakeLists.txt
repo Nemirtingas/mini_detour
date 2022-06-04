@@ -83,6 +83,7 @@ if(BUILD_TESTS)
     C_VISIBILITY_PRESET hidden
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
+	CXX_STANDARD 14
   )
   
   target_link_libraries(
@@ -122,6 +123,7 @@ if(BUILD_TESTS)
     C_VISIBILITY_PRESET hidden
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
+	CXX_STANDARD 14
   )
 
   target_link_libraries(

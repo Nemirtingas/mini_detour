@@ -181,14 +181,11 @@ TEST_CASE("Hook function", "[Hook function]") {
     SPDLOG_INFO("Calling puts...");
     puts("Unhooked Test");
     CHECK(Myputs_called == false);
-
-    SPDLOG_INFO("Hooking puts again...");
-    CHECK(puts_hook.hook_func((void*)&puts, (void*)&Myputs) != nullptr);
     
     SPDLOG_INFO("Calling do_something...");
     CHECK(do_something(5, 8) == 13);
 
-    SPDLOG_INFO("Hooking do_somthing...");
+    SPDLOG_INFO("Hooking do_something...");
     CHECK(do_something_hook.hook_func((void*)&do_something, (void*)Mydo_something) != nullptr);
     
     if (do_something_hook.get_original_func<void*>() != nullptr)

@@ -8,6 +8,74 @@
 #include <unistd.h>
 #include <errno.h>
 
+#ifdef USE_SPDLOG
+
+std::string kern_return_t_2_str(kern_return_t v)
+{
+#define CASE_TO_STRING(x) case x: return #x;
+    switch (v)
+    {
+        CASE_TO_STRING(KERN_SUCCESS);
+        CASE_TO_STRING(KERN_INVALID_ADDRESS);
+        CASE_TO_STRING(KERN_PROTECTION_FAILURE);
+        CASE_TO_STRING(KERN_NO_SPACE);
+        CASE_TO_STRING(KERN_INVALID_ARGUMENT);
+        CASE_TO_STRING(KERN_FAILURE);
+        CASE_TO_STRING(KERN_RESOURCE_SHORTAGE);
+        CASE_TO_STRING(KERN_NOT_RECEIVER);
+        CASE_TO_STRING(KERN_NO_ACCESS);
+        CASE_TO_STRING(KERN_MEMORY_FAILURE);
+        CASE_TO_STRING(KERN_MEMORY_ERROR);
+        CASE_TO_STRING(KERN_ALREADY_IN_SET);
+        CASE_TO_STRING(KERN_NOT_IN_SET);
+        CASE_TO_STRING(KERN_NAME_EXISTS);
+        CASE_TO_STRING(KERN_ABORTED);
+        CASE_TO_STRING(KERN_INVALID_NAME);
+        CASE_TO_STRING(KERN_INVALID_TASK);
+        CASE_TO_STRING(KERN_INVALID_RIGHT);
+        CASE_TO_STRING(KERN_INVALID_VALUE);
+        CASE_TO_STRING(KERN_UREFS_OVERFLOW);
+        CASE_TO_STRING(KERN_INVALID_CAPABILITY);
+        CASE_TO_STRING(KERN_RIGHT_EXISTS);
+        CASE_TO_STRING(KERN_INVALID_HOST);
+        CASE_TO_STRING(KERN_MEMORY_PRESENT);
+        CASE_TO_STRING(KERN_MEMORY_DATA_MOVED);
+        CASE_TO_STRING(KERN_MEMORY_RESTART_COPY);
+        CASE_TO_STRING(KERN_INVALID_PROCESSOR_SET);
+        CASE_TO_STRING(KERN_POLICY_LIMIT);
+        CASE_TO_STRING(KERN_INVALID_POLICY);
+        CASE_TO_STRING(KERN_INVALID_OBJECT);
+        CASE_TO_STRING(KERN_ALREADY_WAITING);
+        CASE_TO_STRING(KERN_DEFAULT_SET);
+        CASE_TO_STRING(KERN_EXCEPTION_PROTECTED);
+        CASE_TO_STRING(KERN_INVALID_LEDGER);
+        CASE_TO_STRING(KERN_INVALID_MEMORY_CONTROL);
+        CASE_TO_STRING(KERN_INVALID_SECURITY);
+        CASE_TO_STRING(KERN_NOT_DEPRESSED);
+        CASE_TO_STRING(KERN_TERMINATED);
+        CASE_TO_STRING(KERN_LOCK_SET_DESTROYED);
+        CASE_TO_STRING(KERN_LOCK_UNSTABLE);
+        CASE_TO_STRING(KERN_LOCK_OWNED);
+        CASE_TO_STRING(KERN_LOCK_OWNED_SELF);
+        CASE_TO_STRING(KERN_SEMAPHORE_DESTROYED);
+        CASE_TO_STRING(KERN_RPC_SERVER_TERMINATED);
+        CASE_TO_STRING(KERN_RPC_TERMINATE_ORPHAN);
+        CASE_TO_STRING(KERN_RPC_CONTINUE_ORPHAN);
+        CASE_TO_STRING(KERN_NOT_SUPPORTED);
+        CASE_TO_STRING(KERN_NODE_DOWN);
+        CASE_TO_STRING(KERN_NOT_WAITING);
+        CASE_TO_STRING(KERN_OPERATION_TIMED_OUT);
+        CASE_TO_STRING(KERN_CODESIGN_ERROR);
+        CASE_TO_STRING(KERN_POLICY_STATIC);
+        CASE_TO_STRING(KERN_INSUFFICIENT_BUFFER_SIZE);
+    }
+#undef CASE_TO_STRING
+
+    return std::string("Unknown value: ") + std::to_string(v);
+}
+
+#endif
+
 namespace memory_manipulation {
     size_t memory_protect_rights_to_native(memory_rights rights)
     {
@@ -63,13 +131,20 @@ namespace memory_manipulation {
 
     bool memory_protect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
     {
-        region_infos_t infos = get_region_infos(address);
-        bool res = mach_vm_protect(mach_task_self(), (mach_vm_address_t)address, size, FALSE, memory_protect_rights_to_native(rights)) == KERN_SUCCESS;
+        kern_return_t kret;
+        region_infos_t infos;
+        if (old_rights != nullptr)
+            infos = get_region_infos(address);
+
+        kret = mach_vm_protect(mach_task_self(), (mach_vm_address_t)address, size, FALSE, memory_protect_rights_to_native(rights));
 
         if (old_rights != nullptr)
             *old_rights = infos.rights;
 
-        return res;
+        if (kret != KERN_SUCCESS)
+            SPDLOG_ERROR("mach_vm_protect failed with code: {}", kern_return_t_2_str(kret));
+
+        return kret == KERN_SUCCESS;
     }
 
     void memory_free(void* address, size_t size)
@@ -95,12 +170,13 @@ namespace memory_manipulation {
 
         if (address_hint != nullptr)
         {
-            address = reinterpret_cast<mach_vm_address_t>(page_round(address_hint, page_size())) + page_size();
             region_infos_t infos;
+            address = reinterpret_cast<mach_vm_address_t>(page_round(address_hint, page_size())) - page_size();
+
             size = page_addr_size((void*)address, size, page_size());
             int pages = size / page_size();
 
-            for (int i = 0; i < 100000 && (void*)address < max_user_address; ++i, address += page_size())
+            for (int i = 0; i < 100000; ++i, address -= page_size())
             {
                 bool found = true;
                 for (int j = 0; j < pages; ++j)
@@ -125,8 +201,8 @@ namespace memory_manipulation {
                 }
             }
 
-            address = reinterpret_cast<uintptr_t>(page_round(address_hint, page_size())) - page_size();
-            for (int i = 0; i < 100000; ++i, address -= page_size())
+            address = reinterpret_cast<mach_vm_address_t>(page_round(address_hint, page_size())) + page_size();
+            for (int i = 0; i < 100000 && (void*)address < max_user_address; ++i, address += page_size())
             {
                 bool found = true;
                 for (int j = 0; j < pages; ++j)
