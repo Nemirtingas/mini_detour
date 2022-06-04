@@ -159,9 +159,9 @@ namespace memory_manipulation {
         mach_vm_address_t address;
         mach_port_t task = mach_task_self();
 
-#if defined(MINIDETOUR_ARCH_X64)
+#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
         void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
-#elif defined(MINIDETOUR_ARCH_X86)
+#elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
         void* max_user_address = reinterpret_cast<void*>(0x70000000);
 #endif
 
