@@ -539,4 +539,442 @@ static constexpr auto displacement_only_addressing = 0x05;
 static constexpr auto sib_with_no_displacement = 0x04;
 static constexpr auto register_indirect_addressing_mode = 0x00;
 
+// 32Bits abs jump
+// PUSH XX XX XX XX
+// RET
+
+#pragma pack(push, 1)
+
+// Struct used by the memory manager to allocate trampolines
+struct memory_t
+{
+    uint8_t used;
+    uint8_t data[32]; // Max absolute jump size is 6 bytes
+};
+
+struct AbsJump
+{
+private:
+    uint8_t _code[6]; // 0x68        | PUSH
+                      // XX XX XX XX | ABS ADDR
+                      // 0xC3        | RET
+
+public:
+    AbsJump() :
+        _code{}
+    {
+        _code[0] = 0x68;
+        _code[5] = 0xC3;
+    }
+
+    inline void* GetAddr()
+    {
+        return *reinterpret_cast<void**>(&_code[1]);
+    }
+
+    inline void SetAddr(void* addr)
+    {
+        *reinterpret_cast<void**>(&_code[1]) = addr;
+    }
+
+    inline void WriteOpcodes(void* addr)
+    {
+        memcpy(addr, _code, GetOpcodeSize());
+    }
+
+    inline size_t GetOpcodeSize()
+    {
+        return 6;
+    }
+
+    static inline size_t GetOpcodeSize(void* addr)
+    {
+        return 6;
+    }
+
+    static constexpr size_t GetMaxOpcodeSize()
+    {
+        return 6;
+    }
+};
+
+struct RelJump
+{
+private:
+    uint8_t _code[5]; // E9       | JMP
+                      // XX XX XX | REL ADDR
+
+public:
+
+    RelJump() :
+        _code{}
+    {
+        _code[0] = 0xe9;
+    }
+
+
+    inline int32_t GetAddr()
+    {
+        return *reinterpret_cast<int32_t*>(&_code[1]);
+    }
+
+    inline void SetAddr(int32_t addr)
+    {
+        *reinterpret_cast<int32_t*>(&_code[1]) = addr;
+    }
+
+    inline void WriteOpcodes(void* addr)
+    {
+        assert(opcode_size != 0);
+
+        memcpy(addr, _code, GetOpcodeSize());
+    }
+
+    inline size_t GetOpcodeSize()
+    {
+        return 5;
+    }
+
+    static inline size_t GetOpcodeSize(void* addr)
+    {
+        return 5;
+    }
+
+    static constexpr size_t GetMaxOpcodeSize()
+    {
+        return 5;
+    }
+};
+#pragma pack(pop)
+
+////////////////////////////////////////////////////
+/// Tiny disasm
+bool is_opcode_terminating_function(void* pCode)
+{
+    switch (*static_cast<uint8_t*>(pCode))
+    {
+        case 0xc2: // RETN imm16
+        case 0xc3: // RETN
+        case 0xc9: // LEAVE
+        case 0xca: // RETF imm16
+        case 0xcb: // RETF
+        case 0xcc: // INT 3
+        case 0xcd: // INT imm8
+        case 0xce: // INTO eFlags
+        case 0xcf: // IRET Flags
+            return true;
+    }
+    return false;
+}
+
+int is_opcode_filler(uint8_t* pCode)
+{
+    if (pCode[0] == 0x90)
+    {
+        return 1;
+    }
+    if (pCode[0] == 0x66 && pCode[1] == 0x90)
+    {
+        return 2;
+    }
+    if (pCode[0] == 0x0F && pCode[1] == 0x1F && pCode[2] == 0x00)
+    {
+        return 3;
+    }
+    if (pCode[0] == 0x0F && pCode[1] == 0x1F && pCode[2] == 0x40 &&
+        pCode[3] == 0x00)
+    {
+        return 4;
+    }
+    if (pCode[0] == 0x0F && pCode[1] == 0x1F && pCode[2] == 0x44 &&
+        pCode[3] == 0x00 && pCode[4] == 0x00) {
+        return 5;
+    }
+    if (pCode[0] == 0x66 && pCode[1] == 0x0F && pCode[2] == 0x1F &&
+        pCode[3] == 0x44 && pCode[4] == 0x00 && pCode[5] == 0x00)
+    {
+        return 6;
+    }
+    if (pCode[0] == 0x0F && pCode[1] == 0x1F && pCode[2] == 0x80 &&
+        pCode[3] == 0x00 && pCode[4] == 0x00 && pCode[5] == 0x00 &&
+        pCode[6] == 0x00)
+    {
+        return 7;
+    }
+    if (pCode[0] == 0x0F && pCode[1] == 0x1F && pCode[2] == 0x84 &&
+        pCode[3] == 0x00 && pCode[4] == 0x00 && pCode[5] == 0x00 &&
+        pCode[6] == 0x00 && pCode[7] == 0x00)
+    {
+        return 8;
+    }
+    if (pCode[0] == 0x66 && pCode[1] == 0x0F && pCode[2] == 0x1F &&
+        pCode[3] == 0x84 && pCode[4] == 0x00 && pCode[5] == 0x00 &&
+        pCode[6] == 0x00 && pCode[7] == 0x00 && pCode[8] == 0x00)
+    {
+        return 9;
+    }
+    if (pCode[0] == 0x66 && pCode[1] == 0x66 && pCode[2] == 0x0F &&
+        pCode[3] == 0x1F && pCode[4] == 0x84 && pCode[5] == 0x00 &&
+        pCode[6] == 0x00 && pCode[7] == 0x00 && pCode[8] == 0x00 &&
+        pCode[9] == 0x00)
+    {
+        return 10;
+    }
+    if (pCode[0] == 0x66 && pCode[1] == 0x66 && pCode[2] == 0x66 &&
+        pCode[3] == 0x0F && pCode[4] == 0x1F && pCode[5] == 0x84 &&
+        pCode[6] == 0x00 && pCode[7] == 0x00 && pCode[8] == 0x00 &&
+        pCode[9] == 0x00 && pCode[10] == 0x00)
+    {
+        return 11;
+    }
+    // int 3.
+    if (pCode[0] == 0xcc)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+int read_mod_reg_rm_opcode(uint8_t* pCode, void** relocation)
+{
+    *relocation = nullptr;
+
+    // MOD-REG-R/M Byte
+    //  7 6    5 4 3    2 1 0 - bits
+    //[ MOD ][  REG  ][  R/M  ]
+    switch (pCode[1] & mod_mask) // Check MOD to know how many bytes we have after this opcode
+    {
+        case register_addressing_mode: return s_1byte_opcodes[*pCode].base_size; // register addressing mode [opcode] [R/M] [XX]
+        case four_bytes_signed_displacement:
+        {
+            switch (pCode[1] & rm_mask)
+            {
+                case sib_with_no_displacement: return s_1byte_opcodes[*pCode].base_size + 5; // address mode byte + 4 bytes displacement
+                default: return s_1byte_opcodes[*pCode].base_size + 4; // 4 bytes displacement
+            }
+        }
+        break;
+
+        case one_byte_signed_displacement:
+        {
+            switch (pCode[1] & rm_mask)
+            {
+                case sib_with_no_displacement: return s_1byte_opcodes[*pCode].base_size + 2; // address mode byte + 1 byte displacement
+                default: return s_1byte_opcodes[*pCode].base_size + 1; // 1 byte displacement
+            }
+        }
+        break;
+
+        default:
+            switch (pCode[1] & rm_mask)
+            {
+                case displacement_only_addressing:
+                {
+                    *relocation = pCode + s_1byte_opcodes[*pCode].base_size;
+                    return s_1byte_opcodes[*pCode].base_size + 4; // 4 bytes Displacement only addressing mode
+                }
+                break;
+
+                case sib_with_no_displacement: // SIB with no displacement
+                {
+                    if ((pCode[2] & 0x07) == 0x05)
+                    {// Check this: No displacement, but there is if the low octal is 5 ?
+                        return s_1byte_opcodes[*pCode].base_size + 5;
+                    }
+                    else
+                    {
+                        return s_1byte_opcodes[*pCode].base_size + 1;
+                    }
+                }
+                break;
+
+                case register_indirect_addressing_mode: // Register indirect addressing mode
+                default: return s_1byte_opcodes[*pCode].base_size;
+            }
+    }
+
+
+    // Never reached
+    return 0;
+}
+
+int read_opcode(void* _pCode, void** relocation)
+{
+    uint8_t* pCode = static_cast<uint8_t*>(_pCode);
+    int code_len = 0;
+
+    code_len = is_opcode_filler(pCode);
+    if (code_len)
+        return code_len;
+
+    if (s_1byte_opcodes[*pCode].base_size == 0)
+    {
+        SPDLOG_DEBUG("Unknown opcode {:02x}", pCode[0]);
+        SPDLOG_DEBUG("Next opcodes: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}", pCode[1], pCode[2], pCode[3], pCode[4], pCode[5], pCode[6]);
+
+        return 0;
+    }
+
+    if (s_1byte_opcodes[*pCode].has_r_m)
+    {
+        code_len = read_mod_reg_rm_opcode(pCode, relocation);
+        SPDLOG_DEBUG("Opcode {}, base_size: {}, has_r_m: {}, opcode_size: {}",
+            s_1byte_opcodes[*pCode].desc,
+            (int)s_1byte_opcodes[*pCode].base_size,
+            (int)s_1byte_opcodes[*pCode].has_r_m,
+            code_len);
+        return code_len;
+    }
+    else
+    {
+        SPDLOG_DEBUG("Opcode {}, size: {}", s_1byte_opcodes[*pCode].desc, (int)s_1byte_opcodes[*pCode].base_size);
+
+        switch (*pCode)
+        {
+            case 0x0f: // 2 bytes opcode
+                break;
+            case 0x64: // FS:
+            case 0x65: // GS:
+                return s_1byte_opcodes[*pCode].base_size + read_opcode(pCode + s_1byte_opcodes[*pCode].base_size, relocation);
+
+            case 0xe8: // CALL
+                // we can relocate a CALL, need to be carefull tho
+            case 0xe9: // JMP
+                // we can relocate a JMP
+                *relocation = pCode + 1;
+                return s_1byte_opcodes[*pCode].base_size;
+
+            case 0xf3: // REP
+                // This is some weird opcode. Its size changes depending on the next opcode
+                // TODO: need to look at this
+                if (pCode[1] == 0x0f)
+                {
+                    SPDLOG_DEBUG("REP: {:02x} {:02x} {:02x} {:02x}", pCode[0], pCode[1], pCode[2], pCode[3]);
+                    return 4;
+                }
+                return 0;
+
+            case 0xff: // Extended
+            {
+                switch (pCode[1])
+                {
+                    // Get the true function call
+                    // pCode = **reinterpret_cast<uint8_t***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
+                    // Call
+                    //case 0x15: return 6; //  This is an imported function
+                    // JMP
+                    case 0x25: return 6; //  This is an imported function
+                    default: return 0; // Didn't manage the whole 2bytes opcode range.
+                }
+            }
+
+            default:
+                return s_1byte_opcodes[*pCode].base_size;
+        }
+    }
+
+    // If we are here, then its a 2bytes opcode
+    if (s_2bytes_opcodes[*(pCode + 1)].base_size == 0)
+    {
+        SPDLOG_DEBUG("Unknown 2bytes opcode {:02x} {:02x}", pCode[0], pCode[1]);
+        SPDLOG_DEBUG("Next opcodes: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}", pCode[2], pCode[3], pCode[4], pCode[5], pCode[6], pCode[7]);
+
+        return 0;
+    }
+
+    ++pCode;
+    if (s_2bytes_opcodes[*pCode].has_r_m)
+    {
+        code_len = read_mod_reg_rm_opcode(pCode, relocation);
+        SPDLOG_DEBUG("Read {} bytes for 2bytes opcode {:02x} {:02x}", code_len, pCode[0], pCode[1]);
+        return code_len;
+    }
+    else
+    {
+        return s_2bytes_opcodes[*pCode].base_size;
+    }
+
+    return 0;
+}
+
+///////////////////////////////////////////
+// Tiny asm
+
+inline uint8_t* relative_addr_to_absolute(int32_t rel_addr, uint8_t* source_addr)
+{
+    return source_addr + rel_addr + 5;
+}
+
+inline int32_t absolute_addr_to_relative(void* opcode_addr, void* destination_addr)
+{
+    return reinterpret_cast<uint8_t*>(destination_addr) - reinterpret_cast<uint8_t*>(opcode_addr) - 5;
+}
+
+void enter_recursive_thunk(uint8_t*& pCode)
+{
+    while (1)
+    {
+        // If its an imported function.      CALL                JUMP
+        if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
+        {
+            // Get the real imported function address
+            pCode = **reinterpret_cast<uint8_t***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
+        }
+        else if (pCode[0] == 0xe8 || pCode[0] == 0xe9)
+        {
+            pCode = relative_addr_to_absolute(*(int32_t*)(pCode + 1), pCode);
+        }
+        else
+        {
+            break;
+        }
+    }
+}
+
+size_t get_relocatable_size(void* pCode, void** tmp_relocation, size_t wanted_relocatable_size)
+{
+    *tmp_relocation = nullptr;
+    size_t relocatable_size = 0;
+    while (relocatable_size < wanted_relocatable_size)
+    {
+        int opcode_size = read_opcode(pCode, tmp_relocation);
+        //  Unknown opcode, break now
+        if (opcode_size == 0 || is_opcode_terminating_function(pCode))
+            break;
+
+        if (*tmp_relocation != nullptr)
+        {
+            // I can handle jmp and/or call
+            if (*static_cast<uint8_t*>(pCode) == 0xe8)
+            {
+                //relocation_type = reloc_e::call;
+                break; // Don't handle this kind of relocation for now
+            }
+            else if (*static_cast<uint8_t*>(pCode) == 0xe9)
+            {
+                //relocation_type = reloc_e::jmp;
+                break; // Don't handle this kind of relocation for now
+            }
+            else
+            {
+                //relocation_type = reloc_e::other;
+                break; // Don't handle this kind of relocation for now
+            }
+        }
+
+        pCode = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(pCode) + opcode_size);
+        relocatable_size += opcode_size;
+    }
+
+    return relocatable_size;
+}
+
+bool addresses_are_relative_jumpable(void* source, void* dest)
+{
+    uintptr_t min_addr = reinterpret_cast<uintptr_t>(std::min(source, dest));
+    uintptr_t max_addr = reinterpret_cast<uintptr_t>(std::max(source, dest));
+    return (max_addr - min_addr) <= 0x7FFFFFF0;
+}
+
 #endif // MINI_DETOUR_X86_H

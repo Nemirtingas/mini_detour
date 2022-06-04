@@ -25,10 +25,13 @@ set(MINIDETOUR_HEADERS
 add_library(
   mini_detour
   src/mini_detour.cpp
-  src/mini_detour_x64.h
-  src/mini_detour_x86.h
-  src/mini_detour_arm64.h
   src/mini_detour_arm.h
+  src/mini_detour_arm64.h
+  src/mini_detour_x86.h
+  src/mini_detour_x64.h
+  src/mini_detour_linux.h
+  src/mini_detour_macos.h
+  src/mini_detour_windows.h
   include/mini_detour/mini_detour.h
 )
 

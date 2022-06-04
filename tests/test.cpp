@@ -146,31 +146,57 @@ int Mydo_something(int a, int b)
     return a * b;
 }
 
+int do_something2(int a, int b)
+{
+    return a - b;
+}
+
+mini_detour::hook do_something_hook2;
+int Mydo_something2(int a, int b)
+{
+    return a / b;
+}
+
 TEST_CASE("Hook function", "[Hook function]") {
 
     puts("Unhooked Test");
     REQUIRE(Myputs_called == false);
 
     REQUIRE(puts_hook.hook_func((void*)&puts, (void*)&Myputs) != nullptr);
+
     puts_hook.get_original_func<decltype(puts)*>()("Hooked but call original");
     REQUIRE(Myputs_called == false);
-
+    
     puts("Hook Test");
     REQUIRE(Myputs_called == true);
-
+    
     REQUIRE(puts_hook.restore_func() != nullptr);
     Myputs_called = false;
-
+    
     puts("Unhooked Test");
     REQUIRE(Myputs_called == false);
 
+    REQUIRE(puts_hook.hook_func((void*)&puts, (void*)&Myputs) != nullptr);
+    
     REQUIRE(do_something(5, 8) == 13);
     do_something_hook.hook_func((void*)&do_something, (void*)Mydo_something);
-
+    
     if (do_something_hook.get_original_func<void*>() != nullptr)
     {
         REQUIRE(do_something_hook.get_original_func<decltype(do_something)*>()(5, 8) == 13);
         REQUIRE(do_something(5, 8) == 40);
         REQUIRE(do_something_hook.restore_func() != nullptr);
+        REQUIRE(do_something(5, 8) == 13);
+    }
+
+    REQUIRE(do_something2(8, 4) == 4);
+    do_something_hook2.hook_func((void*)&do_something2, (void*)Mydo_something2);
+
+    if (do_something_hook2.get_original_func<void*>() != nullptr)
+    {
+        REQUIRE(do_something_hook2.get_original_func<decltype(do_something2)*>()(8, 4) == 4);
+        REQUIRE(do_something2(8, 4) == 2);
+        REQUIRE(do_something_hook2.restore_func() != nullptr);
+        REQUIRE(do_something2(8, 4) == 4);
     }
 }

@@ -60,7 +60,7 @@ namespace mini_detour
         // The content is the saved code + abs jump to original code
         void* _OriginalTrampolineAddress;
         // The hook address
-        void* detour_func;
+        void* _DetourFunc;
         // Optional, if we have space for only a relative jump, we need a trampoline
         void* trampoline_address;
 
@@ -86,7 +86,7 @@ namespace mini_detour
         template<typename T>
         inline T get_hook_func()
         {
-            return reinterpret_cast<T>(detour_func);
+            return reinterpret_cast<T>(_DetourFunc);
         }
 
         // Call the original func
