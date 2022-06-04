@@ -625,8 +625,6 @@ public:
 
     inline void WriteOpcodes(void* addr)
     {
-        assert(opcode_size != 0);
-
         memcpy(addr, _code, GetOpcodeSize());
     }
 
