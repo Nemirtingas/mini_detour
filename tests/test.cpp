@@ -2,6 +2,7 @@
 #include "catch.hpp"
 
 #include <mini_detour/mini_detour.h>
+#include <spdlog/spdlog-inl.h>
 #include <iostream>
 
 static void* mem;
@@ -162,30 +163,43 @@ TEST_CASE("Hook function", "[Hook function]") {
     puts("Unhooked Test");
     CHECK(Myputs_called == false);
 
+    SPDLOG_INFO("Hooking puts...");
     CHECK(puts_hook.hook_func((void*)&puts, (void*)&Myputs) != nullptr);
 
+    SPDLOG_INFO("Calling original puts...");
     puts_hook.get_original_func<decltype(puts)*>()("Hooked but call original");
     CHECK(Myputs_called == false);
     
+    SPDLOG_INFO("Calling puts...");
     puts("Hook Test");
     CHECK(Myputs_called == true);
     
+    SPDLOG_INFO("Restoring puts...");
     CHECK(puts_hook.restore_func() != nullptr);
     Myputs_called = false;
     
+    SPDLOG_INFO("Calling puts...");
     puts("Unhooked Test");
     CHECK(Myputs_called == false);
 
+    SPDLOG_INFO("Hooking puts again...");
     CHECK(puts_hook.hook_func((void*)&puts, (void*)&Myputs) != nullptr);
     
+    SPDLOG_INFO("Calling do_something...");
     CHECK(do_something(5, 8) == 13);
+
+    SPDLOG_INFO("Hooking do_somthing...");
     CHECK(do_something_hook.hook_func((void*)&do_something, (void*)Mydo_something) != nullptr);
     
     if (do_something_hook.get_original_func<void*>() != nullptr)
     {
+        SPDLOG_INFO("Calling original do_something...");
         CHECK(do_something_hook.get_original_func<decltype(do_something)*>()(5, 8) == 13);
+        SPDLOG_INFO("Calling do_something...");
         CHECK(do_something(5, 8) == 40);
+        SPDLOG_INFO("Restoring do_something...");
         CHECK(do_something_hook.restore_func() != nullptr);
+        SPDLOG_INFO("Calling do_something...");
         CHECK(do_something(5, 8) == 13);
     }
 
