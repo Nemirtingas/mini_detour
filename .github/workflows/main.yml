@@ -24,11 +24,11 @@ jobs:
           useVcpkgToolchainFile: false
           buildDirectory: '${{ runner.workspace }}/b/ninja/'
           cmakeGenerator: Ninja
-          cmakeBuildType: 'Release'
+          cmakeBuildType: 'Debug'
           cmakeListsOrSettingsJson: CMakeListsTxtAdvanced
-          cmakeAppendedArgs: ' -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON"'
+          cmakeAppendedArgs: ' -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON"'
           buildWithCMake: true
-          buildWithCMakeArgs: '--config Release --parallel'
+          buildWithCMakeArgs: '--config Debug --parallel'
       
       - name: Linux tests
         if: matrix.os == 'ubuntu-latest'
@@ -45,11 +45,11 @@ jobs:
           useVcpkgToolchainFile: false
           buildDirectory: '${{ runner.workspace }}/b/ninja/'
           cmakeGenerator: Ninja
-          cmakeBuildType: 'Release'
+          cmakeBuildType: 'Debug'
           cmakeListsOrSettingsJson: CMakeListsTxtAdvanced
-          cmakeAppendedArgs: ' -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON"'
+          cmakeAppendedArgs: ' -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON"'
           buildWithCMake: true
-          buildWithCMakeArgs: '--config Release --parallel'
+          buildWithCMakeArgs: '--config Debug --parallel'
       
       - name: MacOS tests
         if: matrix.os == 'macos-latest'
@@ -66,15 +66,15 @@ jobs:
           useVcpkgToolchainFile: false
           buildDirectory: '${{ runner.workspace }}/b/ninja/'
           cmakeGenerator: Ninja
-          cmakeBuildType: 'Release'
+          cmakeBuildType: 'Debug'
           cmakeListsOrSettingsJson: CMakeListsTxtAdvanced
-          cmakeAppendedArgs: ' -DCMAKE_PREFIX_PATH=${{env.MINGW_BASE_DIR}} -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON"'
+          cmakeAppendedArgs: ' -DCMAKE_PREFIX_PATH=${{env.MINGW_BASE_DIR}} -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON"'
           buildWithCMake: true
-          buildWithCMakeArgs: '--config Release --parallel'
+          buildWithCMakeArgs: '--config Debug --parallel'
           
       - name: Windows tests
         if: matrix.os == 'windows-latest'
         shell: powershell
         run: |
           #Get-ChildItem -Recurse -Filter '*' ${{ runner.workspace }}\b;
-          ${{ runner.workspace }}\b\ninja\Release\tests.exe
+          ${{ runner.workspace }}\b\ninja\Debug\tests.exe
