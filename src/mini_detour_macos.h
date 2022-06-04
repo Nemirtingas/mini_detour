@@ -82,7 +82,7 @@ namespace memory_manipulation {
     {
         kern_return_t kret;
         mach_vm_address_t address;
-        mach_port_t task;
+        mach_port_t task = mach_task_self();
 
 #if defined(MINIDETOUR_ARCH_X64)
         void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
@@ -106,7 +106,7 @@ namespace memory_manipulation {
                 for (int j = 0; j < pages; ++j)
                 {
                     infos = get_region_infos((void*)address);
-                    if (infos.start != nullptr)
+                    if (infos.start == (void*)address)
                     {
                         found = false;
                         break;
@@ -118,6 +118,7 @@ namespace memory_manipulation {
                     kret = mach_vm_allocate(task, &address, (mach_vm_size_t)size, VM_FLAGS_FIXED);
                     if (kret == KERN_SUCCESS)
                     {
+                        SPDLOG_INFO("Allocated {} for address {}", (void*)address, (void*)bkp);
                         memory_protect(reinterpret_cast<void*>(address), size, rights);
                         return reinterpret_cast<void*>(address);
                     }
@@ -131,7 +132,7 @@ namespace memory_manipulation {
                 for (int j = 0; j < pages; ++j)
                 {
                     infos = get_region_infos((void*)address);
-                    if (infos.start != nullptr)
+                    if (infos.start == (void*)address)
                     {
                         found = false;
                         break;
@@ -143,6 +144,7 @@ namespace memory_manipulation {
                     kret = mach_vm_allocate(task, &address, (mach_vm_size_t)size, VM_FLAGS_FIXED);
                     if (kret == KERN_SUCCESS)
                     {
+                        SPDLOG_INFO("Allocated {} for address {}", (void*)address, (void*)bkp);
                         memory_protect(reinterpret_cast<void*>(address), size, rights);
                         return reinterpret_cast<void*>(address);
                     }

@@ -144,19 +144,19 @@ public:
         return jump;
     }
 
-    void* GetFreeJump(void* hint_addr)
+    void* GetFreeJump(void* address_hint)
     {
         constexpr uint8_t empty_region[AbsJump::GetMaxOpcodeSize()] = {};
         for (auto jumps_region : jumps_regions)
         {
             void* region_base = jumps_region;
-            if (addresses_are_relative_jumpable(hint_addr, jumps_region))
+            if (addresses_are_relative_jumpable(address_hint, jumps_region))
             {
                 for (int i = 0; i < jumps_in_region(); ++i)
                 {
                     if (memcmp(jumps_region, empty_region, AbsJump::GetMaxOpcodeSize()) == 0)
                     {
-                        SPDLOG_INFO("Using free jump {} in region {}", region_base, jumps_region);
+                        SPDLOG_INFO("Using free jump {} in region {} for {}", region_base, jumps_region, address_hint);
                         return jumps_region;
                     }
                     jumps_region = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(jumps_region) + AbsJump::GetMaxOpcodeSize());
@@ -164,14 +164,14 @@ public:
             }
         }
 
-        void* res = AllocJumpsRegion(hint_addr);
+        void* res = AllocJumpsRegion(address_hint);
         if (res == nullptr)
         {
-            SPDLOG_INFO("Couldn't find a suitable free jump and couldn't allocate one near {}, hooking will fail.", hint_addr);
+            SPDLOG_INFO("Couldn't find a suitable free jump and couldn't allocate one near {}, hooking will fail.", address_hint);
         }
         else
         {
-            SPDLOG_INFO("Couldn't find a suitable free jump but allocated a new region near {} at {}.", hint_addr, res);
+            SPDLOG_INFO("Couldn't find a suitable free jump but allocated a new region near {} at {}.", address_hint, res);
         }
         return res;
     }
