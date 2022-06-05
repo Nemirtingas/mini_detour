@@ -63,6 +63,19 @@ target_include_directories(
   $<INSTALL_INTERFACE:include>
 )
 
+if(APPLE)
+  add_executable(
+    macos_permission_fix
+    tests/macos_permission_fix.cpp
+  )
+
+  set_target_properties(macos_permission_fix PROPERTIES
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+  )
+endif()
+
 if(BUILD_TESTS)
   add_library(
     mini_detour_test
@@ -83,7 +96,7 @@ if(BUILD_TESTS)
     C_VISIBILITY_PRESET hidden
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
-	CXX_STANDARD 14
+    CXX_STANDARD 14
   )
   
   target_link_libraries(
@@ -123,7 +136,7 @@ if(BUILD_TESTS)
     C_VISIBILITY_PRESET hidden
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
-	CXX_STANDARD 14
+    CXX_STANDARD 14
   )
 
   target_link_libraries(

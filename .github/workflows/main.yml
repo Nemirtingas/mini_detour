@@ -56,6 +56,7 @@ jobs:
         shell: bash
         run: |
           #find ${{ runner.workspace }}/b;
+          ${{ runner.workspace }}/b/ninja/macos_permission_fix ${{ runner.workspace }}/b/ninja/tests
           ${{ runner.workspace }}/b/ninja/tests
         
       - name: Windows cmake
