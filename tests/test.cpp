@@ -167,7 +167,10 @@ TEST_CASE("Hook function", "[Hook function]") {
     CHECK(puts_hook.hook_func((void*)&puts, (void*)&Myputs) != nullptr);
 
     SPDLOG_INFO("Calling original puts...");
-    puts_hook.get_original_func<decltype(puts)*>()("Hooked but call original");
+	if(puts_hook.get_original_func<decltype(puts)*>() != nullptr)
+	{
+		puts_hook.get_original_func<decltype(puts)*>()("Hooked but call original");
+	}
     CHECK(Myputs_called == false);
     
     SPDLOG_INFO("Calling puts...");
