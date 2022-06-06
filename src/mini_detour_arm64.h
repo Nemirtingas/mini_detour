@@ -152,19 +152,41 @@ public:
         if ((b & 0xFC) != 0x14)
             return 0;
 
-        return (b & 0x3FFFFFFF) * 4;
+        union
+        {
+            struct {
+                int32_t rel_addr : 26;
+                int32_t pad : 6;
+            };
+            int32_t addr;
+        } v{};
+
+        v.rel_addr = b & 0x3FFFFFFF;
+
+        return v.addr * 4;
     }
 
-    // Positiv: 0x000000 : 0xFFFFFFC
     inline void SetAddr(int32_t addr)
     {
-        assert((addr % 4) == 0);
-        // 134217724 Max int26_t value * 4 because jump is 4 bytes aligned
-        // 134217728 Min int26_t value * 4 because jump is 4 bytes aligned
-        assert((addr <= 134217724 && addr >= -134217728));
-        b = 0x14000000 | ((addr / 4) & 0x03FFFFFF);
+        union
+        {
+            struct {
+                int32_t rel_addr : 26;
+                int32_t pad : 6;
+            };
+            int32_t addr;
+        } v{};
 
-        SPDLOG_INFO("{:08x} {}", b, addr & 0x03FFFFFF);
+        assert((addr % 4) == 0);
+        //  134217724 Max int26_t value * 4 because jump is 4 bytes aligned
+        // -134217728 Min int26_t value * 4 because jump is 4 bytes aligned
+        assert((addr <= 134217724 && addr >= -134217728));
+
+        v.rel_addr = addr / 4;
+
+        b = 0x14000000 | v.addr;
+
+        SPDLOG_INFO("{:08x} {}", b, v.addr);
     }
 
     inline void WriteOpcodes(void* addr)
