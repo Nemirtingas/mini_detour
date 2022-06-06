@@ -299,12 +299,12 @@ inline intptr_t absolute_addr_to_relative(void* opcode_addr, void* destination_a
     return static_cast<uint8_t*>(destination_addr) - static_cast<uint8_t*>(opcode_addr);
 }
 
-void enter_recursive_thunk(uint8_t*& pCode)
+void enter_recursive_thunk(void*& pCode)
 {
     // TODO
 }
 
-size_t get_relocatable_size(void* pCode, void** tmp_relocation, size_t wanted_relocatable_size)
+size_t get_relocatable_size(void* pCode, void** tmp_relocation, bool ignore_relocation, size_t wanted_relocatable_size)
 {
     *tmp_relocation = nullptr;
     size_t relocatable_size = 0;
@@ -318,7 +318,7 @@ size_t get_relocatable_size(void* pCode, void** tmp_relocation, size_t wanted_re
             break;
         }
 
-        if (*tmp_relocation != nullptr)
+        if (!ignore_relocation && *tmp_relocation != nullptr)
         {
             break;
         }
