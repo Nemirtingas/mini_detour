@@ -5,7 +5,6 @@ cmake_minimum_required(VERSION 3.15)
 
 if(APPLE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
-  
 endif()
 
 set(CMAKE_C_STANDARD_LIBRARIES "" CACHE STRING "" FORCE)
@@ -15,8 +14,16 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(USE_SPDLOG "Enable logs with SPDLOG" OFF)
-option(BUILD_TESTS "Build tests" OFF)
+option(BUILD_MINIDETOUR_TESTS "Build tests" OFF)
+
+set(CAPSTONE_ARM_SUPPORT ON CACHE BOOL "" FORCE)
+set(CAPSTONE_ARM64_SUPPORT ON CACHE BOOL "" FORCE)
+set(CAPSTONE_X86_SUPPORT ON CACHE BOOL "" FORCE)
+set(CAPSTONE_ARCHITECTURE_DEFAULT OFF CACHE BOOL "" FORCE)
+set(CAPSTONE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(CAPSTONE_BUILD_CSTOOL OFF CACHE BOOL "" FORCE)
+set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+add_subdirectory(deps/capstone EXCLUDE_FROM_ALL)
 
 set(MINIDETOUR_HEADERS
   ${CMAKE_CURRENT_SOURCE_DIR}/include/mini_detour/mini_detour.h
@@ -25,6 +32,14 @@ set(MINIDETOUR_HEADERS
 add_library(
   mini_detour
   src/mini_detour.cpp
+  src/mini_detour_arm.h
+  src/mini_detour_arm64.h
+  src/mini_detour_x86.h
+  src/mini_detour_x64.h
+  src/mini_detour_linux.h
+  src/mini_detour_macos.h
+  src/mini_detour_windows.h
+  include/mini_detour/mini_detour.h
 )
 
 set_target_properties(mini_detour PROPERTIES
@@ -38,8 +53,9 @@ set_target_properties(mini_detour PROPERTIES
 target_link_libraries(
   mini_detour
   PUBLIC
-  $<$<BOOL:${USE_SPDLOG}>:spdlog::spdlog>
-  
+  capstone::capstone-static
+	
+  $<$<BOOL:${WIN32}>:shell32>
   # For library UNIX loading
   $<$<NOT:$<BOOL:${WIN32}>>:dl>
 )
@@ -57,13 +73,71 @@ target_include_directories(
   $<INSTALL_INTERFACE:include>
 )
 
-target_compile_definitions(
-  mini_detour
-  PRIVATE
-  $<$<BOOL:${USE_SPDLOG}>:USE_SPDLOG>
-)
+if(APPLE)
+  add_executable(
+    macos_permission_fix
+    tests/macos_permission_fix.cpp
+  )
 
-if(BUILD_TESTS)
+  set_target_properties(macos_permission_fix PROPERTIES
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+  )
+endif()
+
+if(BUILD_MINIDETOUR_TESTS)
+  add_library(
+    mini_detour_test
+    src/mini_detour.cpp
+    src/mini_detour_arm.h
+    src/mini_detour_arm64.h
+    src/mini_detour_x86.h
+    src/mini_detour_x64.h
+    src/mini_detour_linux.h
+    src/mini_detour_macos.h
+    src/mini_detour_windows.h
+    include/mini_detour/mini_detour.h
+  )
+  
+  set_target_properties(mini_detour_test PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+    CXX_STANDARD 14
+  )
+  
+  target_link_libraries(
+    mini_detour_test
+    PUBLIC
+	capstone::capstone-static
+    
+	$<$<BOOL:${WIN32}>:shell32>
+    # For library UNIX loading
+    $<$<NOT:$<BOOL:${WIN32}>>:dl>
+  )
+  
+  target_compile_options(
+    mini_detour_test
+    PRIVATE
+    $<$<BOOL:${MSVC}>:/MP>
+  )
+  
+  target_include_directories(
+    mini_detour_test
+    PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+  )
+  
+  target_compile_definitions(
+    mini_detour_test
+    PRIVATE
+    USE_SPDLOG
+  )
+
   add_executable(
     tests
     tests/test.cpp
@@ -74,12 +148,13 @@ if(BUILD_TESTS)
     C_VISIBILITY_PRESET hidden
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
+    CXX_STANDARD 14
   )
 
   target_link_libraries(
     tests
     PRIVATE
-    mini_detour
+    mini_detour_test
   )
 
   target_include_directories(

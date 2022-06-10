@@ -2,6 +2,7 @@
 #include "catch.hpp"
 
 #include <mini_detour/mini_detour.h>
+#include <spdlog/spdlog-inl.h>
 #include <iostream>
 
 static void* mem;
@@ -29,40 +30,40 @@ int main(int argc, char* argv[]) {
 
 TEST_CASE("Memory allocation", "[mem alloc]") {
     mem = memory_manipulation::memory_alloc((void*)&main, alloc_size, memory_manipulation::memory_rights::mem_none);
-    REQUIRE(mem != nullptr);
+    CHECK(mem != nullptr);
 }
 
 TEST_CASE("Memory protect", "[memprotect]") {
     memory_manipulation::memory_rights old_rights;
 
-    REQUIRE(mem != nullptr);
+    CHECK(mem != nullptr);
 
 #if defined(TESTS_OS_WINDOWS)
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_r, &old_rights) == true);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_r, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_none);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_w, &old_rights) == true);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_w, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_r);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_x, &old_rights) == true);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_x, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_rw); // Windows doesn't have a pure w
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rw, &old_rights) == true);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rw, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_x);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rx, &old_rights) == true);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rx, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_rw);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_wx, &old_rights) == true);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_wx, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_rx);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rwx, &old_rights) == true);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rwx, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_rwx); // Windows doesn't have a pure wx
 
     auto infos = memory_manipulation::get_region_infos(mem);
-    REQUIRE(infos.start != nullptr);
-    REQUIRE(infos.end != nullptr);
-    REQUIRE(infos.rights == memory_manipulation::memory_rights::mem_rwx);
+    CHECK(infos.start != nullptr);
+    CHECK(infos.end != nullptr);
+    CHECK(infos.rights == memory_manipulation::memory_rights::mem_rwx);
 #elif defined(TESTS_OS_LINUX)
     CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_r, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_none);
@@ -86,35 +87,35 @@ TEST_CASE("Memory protect", "[memprotect]") {
     CHECK(old_rights == memory_manipulation::memory_rights::mem_wx);
 
     auto infos = memory_manipulation::get_region_infos(mem);
-    REQUIRE(infos.start != nullptr);
-    REQUIRE(infos.end != nullptr);
+    CHECK(infos.start != nullptr);
+    CHECK(infos.end != nullptr);
     CHECK(infos.rights == memory_manipulation::memory_rights::mem_rwx);
 #elif defined(TESTS_OS_APPLE)
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_r, &old_rights) == true);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_r, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_none);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_w, &old_rights) == true);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_w, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_r);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_x, &old_rights) == true);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_x, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_w);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rw, &old_rights) == true);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rw, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_x);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rx, &old_rights) == true);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rx, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_rw);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_wx, &old_rights) == true);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_wx, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_rx);
 
-    REQUIRE(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rwx, &old_rights) == true);
+    CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rwx, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_wx);
 
     auto infos = memory_manipulation::get_region_infos(mem);
-    REQUIRE(infos.start != nullptr);
-    REQUIRE(infos.end != nullptr);
-    REQUIRE(infos.rights == memory_manipulation::memory_rights::mem_rwx);
+    CHECK(infos.start != nullptr);
+    CHECK(infos.end != nullptr);
+    CHECK(infos.rights == memory_manipulation::memory_rights::mem_rwx);
 #endif
 }
 
@@ -146,31 +147,89 @@ int Mydo_something(int a, int b)
     return a * b;
 }
 
+int do_something2(int a, int b)
+{
+    return a - b;
+}
+
+mini_detour::hook do_something_hook2;
+int Mydo_something2(int a, int b)
+{
+    return a / b;
+}
+
 TEST_CASE("Hook function", "[Hook function]") {
 
     puts("Unhooked Test");
-    REQUIRE(Myputs_called == false);
+    CHECK(Myputs_called == false);
 
-    REQUIRE(puts_hook.hook_func((void*)&puts, (void*)&Myputs) != nullptr);
-    puts_hook.get_original_func<decltype(puts)*>()("Hooked but call original");
-    REQUIRE(Myputs_called == false);
+    SPDLOG_INFO("Hooking puts...");
+    CHECK(puts_hook.hook_func((void*)&puts, (void*)&Myputs) != nullptr);
 
+    SPDLOG_INFO("Calling original puts...");
+	if(puts_hook.get_original_func<decltype(puts)*>() != nullptr)
+	{
+		puts_hook.get_original_func<decltype(puts)*>()("Hooked but call original");
+	}
+    CHECK(Myputs_called == false);
+    
+    SPDLOG_INFO("Calling puts...");
     puts("Hook Test");
-    REQUIRE(Myputs_called == true);
-
-    REQUIRE(puts_hook.restore_func() != nullptr);
+    CHECK(Myputs_called == true);
+    
+    SPDLOG_INFO("Restoring puts...");
+    CHECK(puts_hook.restore_func() != nullptr);
     Myputs_called = false;
-
+    
+    SPDLOG_INFO("Calling puts...");
     puts("Unhooked Test");
-    REQUIRE(Myputs_called == false);
+    CHECK(Myputs_called == false);
+    
+    SPDLOG_INFO("Calling do_something...");
+    CHECK(do_something(5, 8) == 13);
 
-    REQUIRE(do_something(5, 8) == 13);
-    do_something_hook.hook_func((void*)&do_something, (void*)Mydo_something);
-
+    SPDLOG_INFO("Hooking do_something...");
+    CHECK(do_something_hook.hook_func((void*)&do_something, (void*)Mydo_something) != nullptr);
+    
     if (do_something_hook.get_original_func<void*>() != nullptr)
     {
-        REQUIRE(do_something_hook.get_original_func<decltype(do_something)*>()(5, 8) == 13);
-        REQUIRE(do_something(5, 8) == 40);
-        REQUIRE(do_something_hook.restore_func() != nullptr);
+        int r;
+        SPDLOG_INFO("Calling original do_something...");
+        r = do_something_hook.get_original_func<decltype(do_something)*>()(5, 8);
+        CHECK(r == 13);
+
+        SPDLOG_INFO("Calling do_something...");
+        r = do_something(5, 8);
+        CHECK(r == 40);
+
+        SPDLOG_INFO("Restoring do_something...");
+        CHECK(do_something_hook.restore_func() != nullptr);
+
+        SPDLOG_INFO("Calling do_something...");
+        r = do_something(5, 8);
+        CHECK(r == 13);
+    }
+
+    CHECK(do_something2(8, 4) == 4);
+    CHECK(do_something_hook2.hook_func((void*)&do_something2, (void*)Mydo_something2) != nullptr);
+
+    if (do_something_hook2.get_original_func<void*>() != nullptr)
+    {
+        int r;
+
+        SPDLOG_INFO("Calling original do_something2...");
+        r = do_something_hook2.get_original_func<decltype(do_something2)*>()(8, 4);
+        CHECK(r == 4);
+
+        SPDLOG_INFO("Calling do_something2...");
+        r = do_something2(8, 4);
+        CHECK(r == 2);
+
+        SPDLOG_INFO("Restoring do_something2...");
+        CHECK(do_something_hook2.restore_func() != nullptr);
+
+        SPDLOG_INFO("Calling do_something2...");
+        r = do_something2(8, 4);
+        CHECK(r == 4);
     }
 }
