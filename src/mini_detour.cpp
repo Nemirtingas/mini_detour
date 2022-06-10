@@ -94,6 +94,187 @@ struct fmt::formatter<memory_manipulation::memory_rights> {
     #endif
 #endif
 
+//#include <keystone/keystone.h>
+#include <capstone/capstone.h>
+
+//class CodeAsm {
+//    ks_engine* _Engine;
+//    std::string _AssemblySource;
+//    unsigned char *_BinaryCode;
+//    size_t _BinaryCodeSize;
+//
+//    bool _IsHandleValid()
+//    {
+//        return _Engine != nullptr;
+//    }
+//
+//    void _FreeBinaryCode()
+//    {
+//        if (_BinaryCode != nullptr)
+//        {
+//            ks_free(_BinaryCode);
+//            _BinaryCode = nullptr;
+//            _BinaryCodeSize = 0;
+//        }
+//    }
+//
+//    void _FreeEngine()
+//    {
+//        if (!_IsHandleValid())
+//            return;
+//        
+//        ks_close(_Engine);
+//        _Engine = nullptr;
+//    }
+//
+//public:
+//    CodeAsm():
+//        _Engine{ nullptr },
+//        _BinaryCode{ nullptr },
+//        _BinaryCodeSize{ 0 }
+//    {}
+//
+//    ~CodeAsm()
+//    {
+//        _FreeBinaryCode();
+//        _FreeEngine();
+//    }
+//
+//    ks_err Init(ks_arch arch, ks_mode mode)
+//    {
+//        _FreeEngine();
+//
+//        return ks_open(arch, mode, &_Engine);
+//    }
+//
+//    void AddSource(std::string const& str)
+//    {
+//        _AssemblySource.append(str.data(), str.length());
+//    }
+//
+//    void AddSourceLine(std::string const& str)
+//    {
+//        AddSource(str);
+//        if(str[str.length()-1] != '\n')
+//            _AssemblySource += '\n';
+//    }
+//
+//    ks_err Build(uint64_t base_address)
+//    {
+//        if (!_IsHandleValid())
+//            return ks_err::KS_ERR_HANDLE;
+//
+//        size_t ignored;
+//
+//        _FreeBinaryCode();
+//
+//        if (ks_asm(_Engine, _AssemblySource.c_str(), base_address, &_BinaryCode, &_BinaryCodeSize, &ignored) != 0)
+//            return ks_errno(_Engine);
+//
+//        return ks_err::KS_ERR_OK;
+//    }
+//
+//    std::vector<uint8_t> GetBinary() const
+//    {
+//        return std::vector<uint8_t>{(const uint8_t*)_BinaryCode, (const uint8_t*)_BinaryCode + _BinaryCodeSize};
+//    }
+//
+//    static int RuntimeEndianness()
+//    {
+//        uint32_t x{ 0x12345678 };
+//        uint8_t e = *(uint8_t*)&x;
+//        return static_cast<int>(e == 0x12 ? ks_mode::KS_MODE_BIG_ENDIAN : ks_mode::KS_MODE_LITTLE_ENDIAN);
+//    }
+//};
+
+class CodeDisasm
+{
+    csh _DisasmHandle;
+    cs_insn _CurrentInstruction;
+    cs_detail _InstructionDetails;
+
+    inline bool _IsHandleValid()
+    {
+        return _DisasmHandle != 0;
+    }
+
+    inline void _CloseHandle()
+    {
+        if (_IsHandleValid())
+        {
+            cs_close(&_DisasmHandle);
+            _DisasmHandle = 0;
+        }
+    }
+
+public:
+    CodeDisasm() :
+        _DisasmHandle{},
+        _CurrentInstruction{},
+        _InstructionDetails{}
+    {
+        _CurrentInstruction.detail = &_InstructionDetails;
+    }
+
+    ~CodeDisasm()
+    {
+        _CloseHandle();
+    }
+
+    cs_err Init(cs_arch arch, cs_mode mode)
+    {
+        _CloseHandle();
+
+        cs_err err;
+        if ((err = cs_open(arch, mode, &_DisasmHandle)) != cs_err::CS_ERR_OK)
+            return err;
+
+        if ((err = cs_option(_DisasmHandle, cs_opt_type::CS_OPT_DETAIL, cs_opt_value::CS_OPT_ON)) != cs_err::CS_ERR_OK)
+            return err;
+
+        return cs_err::CS_ERR_OK;
+    }
+
+    bool Disasm(const uint8_t** ppCode, size_t* pszCode, uint64_t* pAddr)
+    {
+        if (!_IsHandleValid())
+            return false;
+
+        return cs_disasm_iter(_DisasmHandle, ppCode, pszCode, pAddr, &_CurrentInstruction);
+    }
+
+    const cs_insn& GetInstruction() const
+    {
+        return _CurrentInstruction;
+    }
+
+    bool IsInstructionTerminating() const
+    {
+        for (int i = 0; i < _CurrentInstruction.detail->groups_count; ++i)
+        {
+            switch (_CurrentInstruction.detail->groups[i])
+            {
+                case cs_group_type::CS_GRP_INT:
+                case cs_group_type::CS_GRP_RET:
+                case cs_group_type::CS_GRP_IRET:
+                case cs_group_type::CS_GRP_BRANCH_RELATIVE:
+                case cs_group_type::CS_GRP_CALL:
+                case cs_group_type::CS_GRP_JUMP:
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    static int RuntimeEndianness()
+    {
+        uint32_t x{ 0x12345678 };
+        uint8_t e = *(uint8_t*)&x;
+        return static_cast<int>(e == 0x12 ? cs_mode::CS_MODE_BIG_ENDIAN : cs_mode::CS_MODE_LITTLE_ENDIAN);
+    }
+};
+
 inline size_t region_size();
 inline size_t jumps_in_region();
 inline size_t page_addr_size(void* addr, size_t len, size_t page_size);
@@ -281,436 +462,505 @@ static MemoryManager mm;
 
 namespace mini_detour
 {
+    class HookImpl
+    {
+        // Where the original bytes were modified for hook
+        void* _OriginalFuncAddress;
+        // Saved code to restore
+        uint8_t _SavedCodeSize;
+        uint8_t* _SavedCode;
+        // Where the original relocation is, to call the original function
+        // The content is the saved code + abs jump to original code
+        void* _OriginalTrampolineAddress;
+        // The hook address
+        void* _DetourFunc;
+        // Optional, if we have space for only a relative jump, we need a trampoline
+        void* trampoline_address;
+        bool restore_on_destroy;
+
+    public:
+        void* _DetourCallFunc;
+        // This can be different than _OriginalTrampolineAddress on ARM Thumb for example
+        void* _OriginalTrampolineCallAddress;
+
+        HookImpl() :
+            _OriginalFuncAddress{},
+            _SavedCodeSize(0),
+            _SavedCode(nullptr),
+            _OriginalTrampolineAddress(nullptr),
+            _DetourFunc(nullptr),
+            trampoline_address(nullptr),
+            restore_on_destroy(true),
+            _DetourCallFunc(nullptr),
+            _OriginalTrampolineCallAddress(nullptr)
+        {}
+
+        HookImpl(HookImpl&& other) noexcept
+        {
+            if (this != &other)
+            {
+                _OriginalFuncAddress = std::move(other._OriginalFuncAddress);
+                _SavedCodeSize = std::move(other._SavedCodeSize);
+                _SavedCode = std::move(other._SavedCode);
+                _OriginalTrampolineAddress = std::move(other._OriginalTrampolineAddress);
+                _DetourFunc = std::move(other._DetourFunc);
+                trampoline_address = std::move(other.trampoline_address);
+                restore_on_destroy = std::move(other.restore_on_destroy);
+                _DetourCallFunc = std::move(other._DetourCallFunc);
+                _OriginalTrampolineCallAddress = std::move(other._OriginalTrampolineCallAddress);
+
+                other.restore_on_destroy = false;
+            }
+        }
+
+        HookImpl& operator=(HookImpl&& other) noexcept
+        {
+            if (this != &other)
+            {
+                _OriginalFuncAddress = std::move(other._OriginalFuncAddress);
+                _SavedCodeSize = std::move(other._SavedCodeSize);
+                _SavedCode = std::move(other._SavedCode);
+                _OriginalTrampolineAddress = std::move(other._OriginalTrampolineAddress);
+                _DetourFunc = std::move(other._DetourFunc);
+                trampoline_address = std::move(other.trampoline_address);
+                restore_on_destroy = std::move(other.restore_on_destroy);
+                _DetourCallFunc = std::move(other._DetourCallFunc);
+                _OriginalTrampolineCallAddress = std::move(other._OriginalTrampolineCallAddress);
+
+                other.restore_on_destroy = false;
+            }
+
+            return *this;
+        }
+
+        ~HookImpl()
+        {
+            if (restore_on_destroy)
+            {
+                RestoreFunc();
+            }
+        }
+
+        void Reset()
+        {
+            if (trampoline_address != nullptr)
+            {// If we have a trampoline, clear it
+                mm.FreeJump(trampoline_address);
+                trampoline_address = nullptr;
+            }
+
+            mm.FreeTrampoline(_OriginalTrampolineAddress);
+            free(_SavedCode);
+
+            _SavedCodeSize = 0;
+            _SavedCode = nullptr;
+            _OriginalTrampolineAddress = nullptr;
+            _OriginalFuncAddress = nullptr;
+        }
+
+        bool CanHook(void* func)
+        {
+            if (_OriginalFuncAddress != nullptr)
+                return false;
+
+            int code_mode = 0;
+            cs_err disasm_err;
+            CodeDisasm disasm;
+#if defined(MINIDETOUR_ARCH_X86)
+            disasm_err = disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_32 | CodeDisasm::RuntimeEndianness()));
+#elif defined(MINIDETOUR_ARCH_X64)
+            disasm_err = disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_64 | CodeDisasm::RuntimeEndianness()));
+#elif defined(MINIDETOUR_ARCH_ARM)
+            code_mode = reinterpret_cast<uintptr_t>(func) & 1;
+            disasm_err = disasm.Init(cs_arch::CS_ARCH_ARM, (cs_mode)((code_mode ? cs_mode::CS_MODE_THUMB : cs_mode::CS_MODE_ARM) | CodeDisasm::RuntimeEndianness()));
+
+            // Sanitize address for ARM/THUMB valid opcodes.
+            func = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(func) & ~1);
+
+#elif defined(MINIDETOUR_ARCH_ARM64)
+            disasm_err = disasm.Init(cs_arch::CS_ARCH_ARM64, (cs_mode)(cs_mode::CS_MODE_ARM | CodeDisasm::RuntimeEndianness()));
+#endif
+
+            if (disasm_err != cs_err::CS_ERR_OK)
+                return false;
+
+            size_t relative_jump_size = RelJump::GetOpcodeSize(func, reinterpret_cast<void*>(0xfffffff0), code_mode, code_mode);
+            size_t absolute_jump_size = AbsJump::GetOpcodeSize(func, code_mode, code_mode);
+            size_t smallest_jump_size = std::min(relative_jump_size, absolute_jump_size);
+
+            _EnterRecursiveThunk(func);
+            return _GetRelocatableSize(func, false, disasm, absolute_jump_size) >= smallest_jump_size;
+        }
+
+        static bool ReplaceFunc(void* func, void* hook_func)
+        {
+            int func_mode = 0;
+            int hook_mode = 0;
+            cs_err disasm_err;
+            CodeDisasm disasm;
+#if defined(MINIDETOUR_ARCH_X86)
+            disasm_err = disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_32 | CodeDisasm::RuntimeEndianness()));
+#elif defined(MINIDETOUR_ARCH_X64)
+            disasm_err = disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_64 | CodeDisasm::RuntimeEndianness()));
+#elif defined(MINIDETOUR_ARCH_ARM)
+            func_mode = reinterpret_cast<uintptr_t>(func) & 1;
+            hook_mode = reinterpret_cast<uintptr_t>(hook_func) & 1;
+            disasm_err = disasm.Init(cs_arch::CS_ARCH_ARM, (cs_mode)((func_mode ? cs_mode::CS_MODE_THUMB : cs_mode::CS_MODE_ARM) | CodeDisasm::RuntimeEndianness()));
+
+            // Sanitize address for ARM/THUMB valid opcodes.
+            func = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(func) & ~1);
+            hook_func = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(hook_func) & ~1);
+
+#elif defined(MINIDETOUR_ARCH_ARM64)
+            disasm_err = disasm.Init(cs_arch::CS_ARCH_ARM64, (cs_mode)(cs_mode::CS_MODE_ARM | CodeDisasm::RuntimeEndianness()));
+#endif
+
+            if (disasm_err != cs_err::CS_ERR_OK)
+                return false;
+
+            size_t relative_jump_size = RelJump::GetOpcodeSize(func, hook_func, func_mode, hook_mode);
+            size_t absolute_jump_size = AbsJump::GetOpcodeSize(hook_func, func_mode, hook_mode);
+            size_t smallest_jump_size = std::min(relative_jump_size, absolute_jump_size);
+
+            size_t relocatable_size = 0;
+            
+            _EnterRecursiveThunk(func);
+            
+            relocatable_size = _GetRelocatableSize(func, true, disasm, absolute_jump_size);
+            
+            // can't even make a relative jump
+            if (relocatable_size < smallest_jump_size)
+                return false;
+            
+            if (!memory_manipulation::memory_protect(func, relocatable_size, memory_manipulation::memory_rights::mem_rwx))
+                return false;
+            
+            if (relocatable_size >= absolute_jump_size)
+            {
+                AbsJump::WriteOpcodes(func, hook_func, func_mode, hook_mode);
+            }
+            else
+            {
+                // Setup the trampoline
+                void* jump_mem = mm.GetFreeJump(func);
+                if (jump_mem == nullptr)
+                    return false;
+            
+                if (!memory_manipulation::memory_protect(jump_mem, AbsJump::GetMaxOpcodeSize(), memory_manipulation::memory_rights::mem_rwx))
+                {
+                    mm.FreeJump(jump_mem);
+                    return false;
+                }
+            
+                AbsJump::WriteOpcodes(jump_mem, hook_func, func_mode, hook_mode);
+            
+                memory_manipulation::memory_protect(jump_mem, AbsJump::GetMaxOpcodeSize(), memory_manipulation::memory_rights::mem_rx);
+                memory_manipulation::flush_instruction_cache(jump_mem, AbsJump::GetMaxOpcodeSize());
+            
+                RelJump::WriteOpcodes(func, jump_mem, func_mode, hook_mode);
+            }
+            
+            memory_manipulation::memory_protect(func, relocatable_size, memory_manipulation::memory_rights::mem_rx);
+            memory_manipulation::flush_instruction_cache(func, relocatable_size);
+
+            return true;
+        }
+
+        void* HookFunc(void* func, void* hook_func)
+        {
+            if (_OriginalTrampolineAddress != nullptr)
+                return _OriginalTrampolineAddress;
+
+            int func_mode = 0;
+            int hook_mode = 0;
+            cs_err disasm_err;
+            CodeDisasm disasm;
+
+#if defined(MINIDETOUR_ARCH_X86)
+            disasm_err = disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_32 | CodeDisasm::RuntimeEndianness()));
+#elif defined(MINIDETOUR_ARCH_X64)
+            disasm_err = disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_64 | CodeDisasm::RuntimeEndianness()));
+#elif defined(MINIDETOUR_ARCH_ARM)
+            func_mode = reinterpret_cast<uintptr_t>(func) & 1;
+            hook_mode = reinterpret_cast<uintptr_t>(hook_func) & 1;
+            disasm_err = disasm.Init(cs_arch::CS_ARCH_ARM, (cs_mode)((func_mode ? cs_mode::CS_MODE_THUMB : cs_mode::CS_MODE_ARM) | CodeDisasm::RuntimeEndianness()));
+
+            // Sanitize address for ARM/THUMB valid opcodes.
+            func = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(func) & ~1);
+            hook_func = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(hook_func) & ~1);
+
+#elif defined(MINIDETOUR_ARCH_ARM64)
+            disasm_err = disasm.Init(cs_arch::CS_ARCH_ARM64, (cs_mode)(cs_mode::CS_MODE_ARM | CodeDisasm::RuntimeEndianness()));
+#endif
+
+            if (disasm_err != cs_err::CS_ERR_OK)
+                return nullptr;
+
+            size_t relative_jump_size = RelJump::GetOpcodeSize(func, hook_func, func_mode, hook_mode);
+            size_t absolute_jump_size = AbsJump::GetOpcodeSize(hook_func, func_mode, hook_mode);
+            size_t smallest_jump_size = std::min(relative_jump_size, absolute_jump_size);
+
+            size_t relocatable_size = 0;
+            size_t total_original_trampoline_size = 0;
+
+            _EnterRecursiveThunk(func);
+
+            relocatable_size = _GetRelocatableSize(func, false, disasm, absolute_jump_size);
+
+            SPDLOG_INFO("Needed relocatable size: found({}), rel({}), abs({})", relocatable_size, relative_jump_size, absolute_jump_size);
+
+            if (relocatable_size < smallest_jump_size)
+            {
+                SPDLOG_ERROR("Relocatable size was too small {} < {}", relocatable_size, smallest_jump_size);
+                goto error;
+            }
+
+            _SavedCodeSize = relocatable_size;
+            _SavedCode = (uint8_t*)malloc(sizeof(uint8_t) * relocatable_size);
+            if (_SavedCode == nullptr)
+            {
+                SPDLOG_ERROR("Failed to malloc {} for code save.", relocatable_size);
+                goto error;
+            }
+
+            // Save the original code
+            memcpy(_SavedCode, func, _SavedCodeSize);
+
+            // The total number of bytes to copy from the original function + abs jump for trampoline
+            total_original_trampoline_size = _SavedCodeSize + AbsJump::GetOpcodeSize(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(func) + _SavedCodeSize), func_mode, hook_mode);
+            
+            _OriginalTrampolineAddress = mm.GetFreeTrampoline(total_original_trampoline_size);
+            if (_OriginalTrampolineAddress == nullptr)
+            {
+                SPDLOG_ERROR("Failed to get memory for trampoline.");
+                goto error;
+            }
+
+            // RWX on our original trampoline func
+            if (!memory_manipulation::memory_protect(_OriginalTrampolineAddress, total_original_trampoline_size, memory_manipulation::memory_rights::mem_rwx))
+            {
+                SPDLOG_ERROR("Failed to protect trampoline memory ({} : {}), current rights: {}.", _OriginalTrampolineAddress, total_original_trampoline_size, memory_manipulation::get_region_infos(_OriginalTrampolineAddress).rights);
+                goto error;
+            }
+
+            // RWX on the orignal func
+            if (!memory_manipulation::memory_protect(func, _SavedCodeSize, memory_manipulation::memory_rights::mem_rwx))
+            {
+                SPDLOG_ERROR("Failed to protect function memory ({} : {}), current rights: {}.", func, _SavedCodeSize, memory_manipulation::get_region_infos(func).rights);
+                goto error;
+            }
+
+            // Copy the original code
+            memcpy(_OriginalTrampolineAddress, func, _SavedCodeSize);
+
+            // Write the absolute jump
+            AbsJump::WriteOpcodes(
+                reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + _SavedCodeSize),
+                reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(func) + _SavedCodeSize),
+                func_mode,  // Write the trampoline in the same
+                func_mode); // mode as the original function mode
+
+            if (relocatable_size >= absolute_jump_size)
+            {
+                SPDLOG_INFO("Absolute hook {} >= {}", relocatable_size, absolute_jump_size);
+
+#ifdef USE_SPDLOG
+                {
+                    size_t dbg_opcode_size = _SavedCodeSize;
+                    std::stringstream sstr;
+                    for (int i = 0; i < dbg_opcode_size; ++i)
+                    {
+                        sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)reinterpret_cast<uint8_t*>(func)[i];
+                    }
+                    SPDLOG_INFO("Before write {}", sstr.str());
+                }
+#endif
+
+                AbsJump::WriteOpcodes(func, hook_func, func_mode, hook_mode);
+
+#ifdef USE_SPDLOG
+                {
+                    size_t dbg_opcode_size = absolute_jump_size;
+                    std::stringstream sstr;
+                    for (int i = 0; i < dbg_opcode_size; ++i)
+                    {
+                        sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)reinterpret_cast<uint8_t*>(func)[i];
+                    }
+                    SPDLOG_INFO("After write {}", sstr.str());
+                }
+#endif
+            }
+            else
+            {
+                SPDLOG_INFO("Relative hook");
+
+                // Setup the trampoline
+                void* jump_mem = mm.GetFreeJump(func);
+                if (jump_mem == nullptr)
+                {
+                    SPDLOG_ERROR("Failed to get memory for jump.");
+                    goto error;
+                }
+
+                if (!memory_manipulation::memory_protect(jump_mem, AbsJump::GetMaxOpcodeSize(), memory_manipulation::memory_rights::mem_rwx))
+                {
+                    mm.FreeJump(jump_mem);
+                    SPDLOG_ERROR("Failed to protect jump memory.");
+                    goto error;
+                }
+
+                SPDLOG_INFO("Trampoline located at: {}", jump_mem);
+                AbsJump::WriteOpcodes(jump_mem, hook_func, func_mode, hook_mode);
+
+                memory_manipulation::memory_protect(jump_mem, AbsJump::GetMaxOpcodeSize(), memory_manipulation::memory_rights::mem_rx);
+                memory_manipulation::flush_instruction_cache(jump_mem, AbsJump::GetMaxOpcodeSize());
+
+#ifdef USE_SPDLOG
+                {
+                    size_t dbg_opcode_size = _SavedCodeSize;
+                    std::stringstream sstr;
+                    for (int i = 0; i < dbg_opcode_size; ++i)
+                    {
+                        sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)reinterpret_cast<uint8_t*>(func)[i];
+                    }
+                    SPDLOG_INFO("Before write {}", sstr.str());
+                }
+#endif
+
+#ifndef USE_SPDLOG
+                RelJump::WriteOpcodes(func, jump_mem, func_mode, hook_mode);
+#else
+                {
+                    size_t dbg_opcode_size = RelJump::WriteOpcodes(func, jump_mem, func_mode, hook_mode);
+                    std::stringstream sstr;
+                    for (int i = 0; i < dbg_opcode_size; ++i)
+                    {
+                        sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)reinterpret_cast<uint8_t*>(func)[i];
+                    }
+                    SPDLOG_INFO("After write {}", sstr.str());
+                }
+#endif
+                trampoline_address = jump_mem;
+            }
+
+            // Try to restore memory rights, if it fails, no problem, we are just a bit too permissive
+            memory_manipulation::memory_protect(_OriginalTrampolineAddress, total_original_trampoline_size, memory_manipulation::memory_rights::mem_rx);
+            memory_manipulation::flush_instruction_cache(_OriginalTrampolineAddress, total_original_trampoline_size);
+
+            memory_manipulation::memory_protect(func, relocatable_size, memory_manipulation::memory_rights::mem_rx);
+            memory_manipulation::flush_instruction_cache(func, relocatable_size);
+
+            _OriginalFuncAddress = func;
+            _DetourFunc = hook_func;
+
+#if defined(MINIDETOUR_ARCH_ARM)
+            _OriginalTrampolineCallAddress = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) | (func_mode ? 1 : 0));
+            _DetourCallFunc = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_DetourFunc) | (hook_mode ? 1 : 0));
+#else
+            _OriginalTrampolineCallAddress = _OriginalTrampolineAddress;
+            _DetourCallFunc = _DetourFunc;
+#endif
+
+            return _OriginalTrampolineCallAddress;
+        error:
+            _SavedCodeSize = 0;
+            if (_SavedCode != nullptr)
+            {
+                free(_SavedCode);
+                _SavedCode = nullptr;
+            }
+            if (_OriginalTrampolineAddress != nullptr)
+            {
+                mm.FreeTrampoline(_OriginalTrampolineAddress);
+                _OriginalTrampolineAddress = nullptr;
+            }
+
+            _OriginalFuncAddress = nullptr;
+
+            return nullptr;
+        }
+
+        void* RestoreFunc()
+        {
+            void* res = nullptr;
+            if (_OriginalFuncAddress == nullptr)
+                return res;
+
+            if (!memory_manipulation::memory_protect(_OriginalFuncAddress, _SavedCodeSize, memory_manipulation::memory_rights::mem_rwx))
+                return res;
+
+            SPDLOG_INFO("Restoring hook");
+
+            memcpy(_OriginalFuncAddress, _SavedCode, _SavedCodeSize);
+            memory_manipulation::memory_protect(_OriginalFuncAddress, _SavedCodeSize, memory_manipulation::memory_rights::mem_rx);
+            memory_manipulation::flush_instruction_cache(_OriginalFuncAddress, _SavedCodeSize);
+
+            SPDLOG_INFO("Restored hook");
+
+            res = _OriginalFuncAddress;
+            Reset();
+
+            return res;
+        }
+    };
+
     hook::hook() :
-        _SavedCodeSize(0),
-        _SavedCode(nullptr),
-        _OriginalTrampolineAddress(nullptr),
-        _DetourFunc(nullptr),
-        trampoline_address(nullptr),
-        restore_on_destroy(true)
+        _Impl(new HookImpl)
     {}
 
     hook::hook(hook&& other) noexcept
     {
-        if (this != &other)
-        {
-            _SavedCodeSize = std::move(other._SavedCodeSize);
-            _SavedCode = std::move(other._SavedCode);
-            _OriginalTrampolineAddress = std::move(other._OriginalTrampolineAddress);
-            _DetourFunc = std::move(other._DetourFunc);
-            trampoline_address = std::move(other.trampoline_address);
-            restore_on_destroy = std::move(other.restore_on_destroy);
-
-            other.restore_on_destroy = false;
-        }
+        auto t = other._Impl;
+        other._Impl = nullptr;
+        _Impl = t;
     }
 
     hook& hook::operator=(hook&& other) noexcept
     {
-        if (this != &other)
-        {
-            _SavedCodeSize = std::move(other._SavedCodeSize);
-            _SavedCode = std::move(other._SavedCode);
-            _OriginalTrampolineAddress = std::move(other._OriginalTrampolineAddress);
-            _DetourFunc = std::move(other._DetourFunc);
-            trampoline_address = std::move(other.trampoline_address);
-            restore_on_destroy = std::move(other.restore_on_destroy);
-
-            other.restore_on_destroy = false;
-        }
+        auto t = other._Impl;
+        other._Impl = _Impl;
+        _Impl = t;
 
         return *this;
     }
 
     hook::~hook()
     {
-        if (restore_on_destroy)
-        {
-            restore_func();
-        }
+        delete _Impl;
     }
 
     void hook::reset()
     {
-        if (trampoline_address != nullptr)
-        {// If we have a trampoline, clear it
-            mm.FreeJump(trampoline_address);
-            trampoline_address = nullptr;
-        }
-
-        mm.FreeTrampoline(_OriginalTrampolineAddress);
-        free(_SavedCode);
-
-        _SavedCodeSize = 0;
-        _SavedCode = nullptr;
-        _OriginalTrampolineAddress = nullptr;
-        _OriginalFuncAddress = nullptr;
+        _Impl->Reset();
     }
 
     bool hook::can_hook(void* func)
     {
-        if (_OriginalFuncAddress != nullptr)
-            return false;
-
-        void* relocation = nullptr;
-
-        enter_recursive_thunk(func);
-
-        return get_relocatable_size(func, &relocation, false, AbsJump::GetOpcodeSize(func)) >= std::min(AbsJump::GetOpcodeSize(func), RelJump::GetOpcodeSize(func));
+        return _Impl->CanHook(func);
     }
 
     bool hook::replace_func(void* func, void* hook_func)
     {
-        size_t relocatable_size = 0;
-
-        void* tmp_relocation = nullptr;
-        AbsJump abs_jump;
-
-        enter_recursive_thunk(func);
-
-        relocatable_size = get_relocatable_size(func, &tmp_relocation, true, AbsJump::GetOpcodeSize(hook_func));
-
-        // can't even make a relative jump
-        if (relocatable_size < std::min(AbsJump::GetOpcodeSize(hook_func), RelJump::GetOpcodeSize(hook_func)))
-            return false;
-
-        if (!memory_manipulation::memory_protect(func, relocatable_size, memory_manipulation::memory_rights::mem_rwx))
-            return false;
-
-        if (relocatable_size >= AbsJump::GetOpcodeSize(hook_func))
-        {
-            AbsJump hook_jump;
-            hook_jump.SetAddr(hook_func);
-            hook_jump.WriteOpcodes(func);
-
-            memory_manipulation::memory_protect(func, hook_jump.GetOpcodeSize(), memory_manipulation::memory_rights::mem_rx);
-            memory_manipulation::flush_instruction_cache(func, hook_jump.GetOpcodeSize());
-        }
-        else
-        {
-            // Setup the trampoline
-            void* jump_mem = mm.GetFreeJump(func);
-            if (jump_mem == nullptr)
-                return false;
-
-            if (!memory_manipulation::memory_protect(jump_mem, AbsJump::GetMaxOpcodeSize(), memory_manipulation::memory_rights::mem_rwx))
-            {
-                mm.FreeJump(jump_mem);
-                return false;
-            }
-
-            abs_jump.SetAddr(hook_func);
-            abs_jump.WriteOpcodes(jump_mem);
-
-            memory_manipulation::memory_protect(jump_mem, AbsJump::GetMaxOpcodeSize(), memory_manipulation::memory_rights::mem_rx);
-            memory_manipulation::flush_instruction_cache(jump_mem, AbsJump::GetMaxOpcodeSize());
-
-            RelJump hook_jump;
-            hook_jump.SetAddr((intptr_t)func - (intptr_t)jump_mem);
-            hook_jump.WriteOpcodes(func);
-        }
-
-        memory_manipulation::memory_protect(func, relocatable_size, memory_manipulation::memory_rights::mem_rx);
-        memory_manipulation::flush_instruction_cache(func, relocatable_size);
-
-        return true;
-
+        return HookImpl::ReplaceFunc(func, hook_func);
     }
 
     void* hook::hook_func(void* func, void* detour_func)
     {
-        if (_OriginalTrampolineAddress != nullptr)
-            return _OriginalTrampolineAddress;
-
-        size_t relocatable_size = 0;
-
-        size_t total_original_trampoline_size = 0;
-        AbsJump abs_jump;
-
-        enter_recursive_thunk(func);
-
-        void* tmp_relocation;
-        relocatable_size = get_relocatable_size(func, &tmp_relocation, false, AbsJump::GetOpcodeSize(detour_func));
-
-        SPDLOG_INFO("Needed relocatable size: found({}), rel({}), abs({})", relocatable_size, RelJump::GetOpcodeSize(func), AbsJump::GetOpcodeSize(func));
-
-        if (relocatable_size < std::min(AbsJump::GetOpcodeSize(detour_func), RelJump::GetOpcodeSize(detour_func)))
-        {
-            SPDLOG_ERROR("Relocatable size was too small {} < {}", relocatable_size, std::min(AbsJump::GetOpcodeSize(func), RelJump::GetOpcodeSize(func)));
-            goto error;
-        }
-
-        _SavedCodeSize = relocatable_size;
-        _SavedCode = (uint8_t*)malloc(sizeof(uint8_t) * relocatable_size);
-        if (_SavedCode == nullptr)
-        {
-            SPDLOG_ERROR("Failed to malloc {} for code save.", relocatable_size);
-            goto error;
-        }
-
-        // Save the original code
-        memcpy(_SavedCode, func, _SavedCodeSize);
-
-        // The total number of bytes to copy from the original function + abs jump for trampoline
-        abs_jump.SetAddr(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(func) + _SavedCodeSize));
-        total_original_trampoline_size = _SavedCodeSize + abs_jump.GetOpcodeSize();
-
-        _OriginalTrampolineAddress = mm.GetFreeTrampoline(total_original_trampoline_size);
-        if (_OriginalTrampolineAddress == nullptr)
-        {
-            SPDLOG_ERROR("Failed to get memory for trampoline.");
-            goto error;
-        }
-
-        // RWX on our original trampoline func
-        if (!memory_manipulation::memory_protect(_OriginalTrampolineAddress, total_original_trampoline_size, memory_manipulation::memory_rights::mem_rwx))
-        {
-            SPDLOG_ERROR("Failed to protect trampoline memory ({} : {}), current rights: {}.", _OriginalTrampolineAddress, total_original_trampoline_size, memory_manipulation::get_region_infos(_OriginalTrampolineAddress).rights);
-            goto error;
-        }
-
-        // RWX on the orignal func
-        if (!memory_manipulation::memory_protect(func, _SavedCodeSize, memory_manipulation::memory_rights::mem_rwx))
-        {
-            SPDLOG_ERROR("Failed to protect function memory ({} : {}), current rights: {}.", func, _SavedCodeSize, memory_manipulation::get_region_infos(func).rights);
-            goto error;
-        }
-
-        // Copy the original code
-        memcpy(_OriginalTrampolineAddress, func, _SavedCodeSize);
-
-        // Write the absolute jump
-        abs_jump.WriteOpcodes(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + _SavedCodeSize));
-
-        if (relocatable_size >= AbsJump::GetOpcodeSize(func))
-        {
-            SPDLOG_INFO("Absolute hook {} >= {}", relocatable_size, AbsJump::GetOpcodeSize(func));
-
-            abs_jump.SetAddr(detour_func);
-
-#ifdef USE_SPDLOG
-            {
-                size_t dbg_opcode_size = _SavedCodeSize;
-                std::stringstream sstr;
-                for (int i = 0; i < dbg_opcode_size; ++i)
-                {
-                    sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)reinterpret_cast<uint8_t*>(func)[i];
-                }
-                SPDLOG_INFO("Before write {}", sstr.str());
-            }
-#endif
-
-            abs_jump.WriteOpcodes(func);
-
-#ifdef USE_SPDLOG
-            {
-                size_t dbg_opcode_size = abs_jump.GetOpcodeSize();
-                std::stringstream sstr;
-                for (int i = 0; i < dbg_opcode_size; ++i)
-                {
-                    sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)reinterpret_cast<uint8_t*>(func)[i];
-                }
-                SPDLOG_INFO("After write {}", sstr.str());
-            }
-#endif
-        }
-        else
-        {
-            SPDLOG_INFO("Relative hook");
-
-            // Setup the trampoline
-            void* jump_mem = mm.GetFreeJump(func);
-            if (jump_mem == nullptr)
-            {
-                SPDLOG_ERROR("Failed to get memory for jump.");
-                goto error;
-            }
-
-            if (!memory_manipulation::memory_protect(jump_mem, AbsJump::GetMaxOpcodeSize(), memory_manipulation::memory_rights::mem_rwx))
-            {
-                mm.FreeJump(jump_mem);
-                SPDLOG_ERROR("Failed to protect jump memory.");
-                goto error;
-            }
-
-            abs_jump.SetAddr(detour_func);
-            abs_jump.WriteOpcodes(jump_mem);
-
-            memory_manipulation::memory_protect(jump_mem, AbsJump::GetMaxOpcodeSize(), memory_manipulation::memory_rights::mem_rx);
-            memory_manipulation::flush_instruction_cache(jump_mem, AbsJump::GetMaxOpcodeSize());
-
-            RelJump hook_jump;
-            hook_jump.SetAddr(absolute_addr_to_relative(func, jump_mem));
-
-#ifdef USE_SPDLOG
-            {
-                size_t dbg_opcode_size = _SavedCodeSize;
-                std::stringstream sstr;
-                for (int i = 0; i < dbg_opcode_size; ++i)
-                {
-                    sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)reinterpret_cast<uint8_t*>(func)[i];
-                }
-                SPDLOG_INFO("Before write {}", sstr.str());
-            }
-#endif
-
-            hook_jump.WriteOpcodes(func);
-
-            trampoline_address = jump_mem;
-
-#ifdef USE_SPDLOG
-            {
-                size_t dbg_opcode_size = hook_jump.GetOpcodeSize();
-                std::stringstream sstr;
-                for (int i = 0; i < dbg_opcode_size; ++i)
-                {
-                    sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)reinterpret_cast<uint8_t*>(func)[i];
-                }
-                SPDLOG_INFO("After write {}", sstr.str());
-            }
-#endif
-        }
-
-        // Try to restore memory rights, if it fails, no problem, we are just a bit too permissive
-        memory_manipulation::memory_protect(_OriginalTrampolineAddress, total_original_trampoline_size, memory_manipulation::memory_rights::mem_rx);
-        memory_manipulation::flush_instruction_cache(_OriginalTrampolineAddress, total_original_trampoline_size);
-
-        memory_manipulation::memory_protect(func, relocatable_size, memory_manipulation::memory_rights::mem_rx);
-        memory_manipulation::flush_instruction_cache(func, relocatable_size);
-
-        _OriginalFuncAddress = func;
-        _DetourFunc = detour_func;
-
-        return _OriginalTrampolineAddress;
-    error:
-        _SavedCodeSize = 0;
-        if (_SavedCode != nullptr)
-        {
-            free(_SavedCode);
-            _SavedCode = nullptr;
-        }
-        if (_OriginalTrampolineAddress != nullptr)
-        {
-            mm.FreeTrampoline(_OriginalTrampolineAddress);
-            _OriginalTrampolineAddress = nullptr;
-        }
-
-        _OriginalFuncAddress = nullptr;
-
-        return nullptr;
+        return _Impl->HookFunc(func, detour_func);
     }
 
     void* hook::restore_func()
     {
-        void* res = nullptr;
-        if (_OriginalFuncAddress == nullptr)
-            return res;
+        return _Impl->RestoreFunc();
+    }
 
-        if (!memory_manipulation::memory_protect(_OriginalFuncAddress, _SavedCodeSize, memory_manipulation::memory_rights::mem_rwx))
-            return res;
+    void* hook::get_hook_func()
+    {
+        return _Impl->_DetourCallFunc;
+    }
 
-        SPDLOG_INFO("Restoring hook");
-
-        memcpy(_OriginalFuncAddress, _SavedCode, _SavedCodeSize);
-        memory_manipulation::memory_protect(_OriginalFuncAddress, _SavedCodeSize, memory_manipulation::memory_rights::mem_rx);
-        memory_manipulation::flush_instruction_cache(_OriginalFuncAddress, _SavedCodeSize);
-
-        SPDLOG_INFO("Restored hook");
-
-        res = _OriginalFuncAddress;
-        reset();
-
-        return res;
+    void* hook::get_original_func()
+    {
+        return _Impl->_OriginalTrampolineCallAddress;
     }
 }
-
-//------------------------------------------------------------------------------//
-
-
-/* ------ DOCUMENTATION ------
-http://www.c-jump.com/CIS77/CPU/x86/lecture.html                <- some help to understand [MOD][REG][R/M] (see paragraph #6)
-http://shell-storm.org/online/Online-Assembler-and-Disassembler <- online assembler
-http://ref.x86asm.net/coder32.html                              <- opcodes reference
-
-X86
-
-push ebx     : 0x53
-sub  esp ??  : 0x83 0xEC 0x??
-call ????????: 0xE8 0x?? 0x?? 0x?? 0x??
-
-
-// relative jmp: ???????? = dst_addr - curr_addr - 5
-jmp ???????? : 0xe9 0x?? 0x?? 0x?? 0x??
-destination = 0x8dba8
-jmp location: 0x91995 - opcodes: e9 0e c2 ff ff
-0e c2 ff ff = 0x8dba8 - 0x91995 - 5
-
-// short jmp: ?? = dst_addr - curr_addr - 2
-jmp short ??: 0xeb 0x??
-destination = 0x91964
-jmp location: 0x9198f - opcodes: 0xeb 0xd3
-d3 = 0x91964 - 0x9198f - 2
-
-X64
-Reuse x86 relative jmp method to jmp to trampoline
-From trampoline make an absolute jmp
-
-Example:
-Trampoline Addr 0x20000:
-FuncToHook 0x10000:
-
-FuncToHook Code:
-0x90 NOP
-0x90 NOP
-0x90 NOP
-0x90 NOP
-0x90 NOP
-
-Hook The Func:
-FuncToHook Code:
-0xE9 JMP
-0xFB Relative Hook Addr
-0xFF Relative Hook Addr
-0x00 Relative Hook Addr
-0x00 Relative Hook Addr
-
-AArch64 // Need to align code on 4 bytes address (opcode are 4bytes fixed length)
-
-Registers 	Description
-X0 – X7     arguments and return value
-X8 – X18    temporary registers
-X19 – X28   callee-saved registers
-X29         frame pointer
-X30         link register
-SP          stack pointer
-
-ldr x8, #8 // 48 00 00 58 : Load value at PointerCode + 8 into x8
-br  x8     // 00 01 1F D6 : Branch to value in x8
-XX XX XX XX XX XX XX XX // Value at PointerCode + 8
-
-movz // Load 16 bits imm into register with zero padding
-
-movk // Load 16 bits imm into register with shift
-movk R, #IMM16, Shift
-
-movz:
-Byte 1
-11010010: d2
-
-100XXXXX: X: 5 bits IMM16
-
-XXXXXXXX: X: 8 bits IMM16
-
-XXXYYYYY: X: 3bits IMM16 Y: 5 bits register select
-
-
-
-Load 0xcdef89ab45670123 into x0:
-11110010
-
-movk x0, #0x0123, lsl 0
-movk x0, #0x4567, lsl 16
-movk x0, #0x89ab, lsl 32
-movk x0, #0xcdef, lsl 48
-
-*/

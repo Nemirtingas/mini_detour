@@ -5,7 +5,6 @@ cmake_minimum_required(VERSION 3.15)
 
 if(APPLE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
-  
 endif()
 
 set(CMAKE_C_STANDARD_LIBRARIES "" CACHE STRING "" FORCE)
@@ -15,7 +14,16 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(BUILD_TESTS "Build tests" OFF)
+option(BUILD_MINIDETOUR_TESTS "Build tests" OFF)
+
+set(CAPSTONE_ARM_SUPPORT ON CACHE BOOL "" FORCE)
+set(CAPSTONE_ARM64_SUPPORT ON CACHE BOOL "" FORCE)
+set(CAPSTONE_X86_SUPPORT ON CACHE BOOL "" FORCE)
+set(CAPSTONE_ARCHITECTURE_DEFAULT OFF CACHE BOOL "" FORCE)
+set(CAPSTONE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(CAPSTONE_BUILD_CSTOOL OFF CACHE BOOL "" FORCE)
+set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+add_subdirectory(deps/capstone EXCLUDE_FROM_ALL)
 
 set(MINIDETOUR_HEADERS
   ${CMAKE_CURRENT_SOURCE_DIR}/include/mini_detour/mini_detour.h
@@ -45,7 +53,9 @@ set_target_properties(mini_detour PROPERTIES
 target_link_libraries(
   mini_detour
   PUBLIC
-  
+  capstone::capstone-static
+	
+  $<$<BOOL:${WIN32}>:shell32>
   # For library UNIX loading
   $<$<NOT:$<BOOL:${WIN32}>>:dl>
 )
@@ -76,7 +86,7 @@ if(APPLE)
   )
 endif()
 
-if(BUILD_TESTS)
+if(BUILD_MINIDETOUR_TESTS)
   add_library(
     mini_detour_test
     src/mini_detour.cpp
@@ -102,7 +112,9 @@ if(BUILD_TESTS)
   target_link_libraries(
     mini_detour_test
     PUBLIC
+	capstone::capstone-static
     
+	$<$<BOOL:${WIN32}>:shell32>
     # For library UNIX loading
     $<$<NOT:$<BOOL:${WIN32}>>:dl>
   )

@@ -196,12 +196,10 @@ TEST_CASE("Hook function", "[Hook function]") {
         int r;
         SPDLOG_INFO("Calling original do_something...");
         r = do_something_hook.get_original_func<decltype(do_something)*>()(5, 8);
-        SPDLOG_INFO("Result: {}", r);
         CHECK(r == 13);
 
         SPDLOG_INFO("Calling do_something...");
         r = do_something(5, 8);
-        SPDLOG_INFO("Result: {}", r);
         CHECK(r == 40);
 
         SPDLOG_INFO("Restoring do_something...");
@@ -209,7 +207,6 @@ TEST_CASE("Hook function", "[Hook function]") {
 
         SPDLOG_INFO("Calling do_something...");
         r = do_something(5, 8);
-        SPDLOG_INFO("Result: {}", r);
         CHECK(r == 13);
     }
 
@@ -222,12 +219,10 @@ TEST_CASE("Hook function", "[Hook function]") {
 
         SPDLOG_INFO("Calling original do_something2...");
         r = do_something_hook2.get_original_func<decltype(do_something2)*>()(8, 4);
-        SPDLOG_INFO("Result: {}", r);
         CHECK(r == 4);
 
         SPDLOG_INFO("Calling do_something2...");
         r = do_something2(8, 4);
-        SPDLOG_INFO("Result: {}", r);
         CHECK(r == 2);
 
         SPDLOG_INFO("Restoring do_something2...");
@@ -235,7 +230,6 @@ TEST_CASE("Hook function", "[Hook function]") {
 
         SPDLOG_INFO("Calling do_something2...");
         r = do_something2(8, 4);
-        SPDLOG_INFO("Result: {}", r);
         CHECK(r == 4);
     }
 }

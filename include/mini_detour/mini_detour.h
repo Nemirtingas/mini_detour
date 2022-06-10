@@ -50,18 +50,7 @@ namespace mini_detour
 {
     class hook
     {
-        // Where the original bytes were modified for hook
-        void* _OriginalFuncAddress;
-        // Saved code to restore
-        uint8_t _SavedCodeSize;
-        uint8_t* _SavedCode;
-        // Where the original relocation is, to call the original function
-        // The content is the saved code + abs jump to original code
-        void* _OriginalTrampolineAddress;
-        // The hook address
-        void* _DetourFunc;
-        // Optional, if we have space for only a relative jump, we need a trampoline
-        void* trampoline_address;
+        class HookImpl* _Impl;
 
     public:
         // Set this to true to restore the original function on hook destruction
@@ -80,19 +69,21 @@ namespace mini_detour
         static bool replace_func(void* func, void* hook_func);
         void* hook_func(void* func, void* hook_func);
         void* restore_func();
+        void* get_hook_func();
+        void* get_original_func();
 
         // Call the hook func
         template<typename T>
         inline T get_hook_func()
         {
-            return reinterpret_cast<T>(_DetourFunc);
+            return reinterpret_cast<T>(get_hook_func());
         }
 
         // Call the original func
         template<typename T>
         inline T get_original_func()
         {
-            return reinterpret_cast<T>(_OriginalTrampolineAddress);
+            return reinterpret_cast<T>(get_original_func());
         }
     };
 }
