@@ -828,10 +828,11 @@ namespace mini_detour
 #endif
 
 #ifndef USE_SPDLOG
-                RelJump::WriteOpcodes(func, jump_mem, func_mode, hook_mode);
+                // Relative jump shoud have the same mode as the hooked function
+                RelJump::WriteOpcodes(func, jump_mem, func_mode, func_mode);
 #else
                 {
-                    size_t dbg_opcode_size = RelJump::WriteOpcodes(func, jump_mem, func_mode, hook_mode);
+                    size_t dbg_opcode_size = RelJump::WriteOpcodes(func, jump_mem, func_mode, func_mode);
                     std::stringstream sstr;
                     for (int i = 0; i < dbg_opcode_size; ++i)
                     {

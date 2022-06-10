@@ -67,6 +67,7 @@ struct AbsJump
             addr16 = uint16_t(addr >> 16);
             opcode[4] = 0xf2C0 | ((addr16 & 0x800) >> 1) | ((addr16 & 0xf000) >> 12); // movt r0, addr & 0xffff0000
             opcode[5] = (addr16 & 0xff) | ((addr16 & 0x700) << 4); // movt r0, addr & 0xffff0000
+
             opcode[6] = 0xb401; // push {r0}
 
             opcode[7] = 0xf85d;
