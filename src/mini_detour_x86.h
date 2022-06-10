@@ -43,7 +43,7 @@ struct AbsJump
     }
 
     static inline size_t GetOpcodeSize(void* jump_destination, int source_mode, int dest_mode)
-    
+    {
         // PUSH
         // ABS ADDR
         // RET
@@ -75,9 +75,8 @@ struct RelJump
         return GetMaxOpcodeSize();
     }
 
-    static inline size_t GetOpcodeSize(CodeAsm& assembler, void* source, void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t GetOpcodeSize(void* source, void* jump_destination, int source_mode, int dest_mode)
     {
-        (void)assembler; (void)source; (void)jump_destination;
         // E9          | JMP
         // XX XX XX XX | REL ADDR
         return 5;

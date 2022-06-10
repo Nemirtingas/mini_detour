@@ -364,7 +364,7 @@ public:
             void* region_base = jumps_region;
             if (addresses_are_relative_jumpable(address_hint, jumps_region))
             {
-                for (int i = 0; i < jumps_in_region(); ++i)
+                for (size_t i = 0; i < jumps_in_region(); ++i)
                 {
                     if (memcmp(jumps_region, empty_region, AbsJump::GetMaxOpcodeSize()) == 0)
                     {
@@ -467,7 +467,7 @@ namespace mini_detour
         // Where the original bytes were modified for hook
         void* _OriginalFuncAddress;
         // Saved code to restore
-        uint8_t _SavedCodeSize;
+        size_t _SavedCodeSize;
         uint8_t* _SavedCode;
         // Where the original relocation is, to call the original function
         // The content is the saved code + abs jump to original code
@@ -768,7 +768,7 @@ namespace mini_detour
                 {
                     size_t dbg_opcode_size = _SavedCodeSize;
                     std::stringstream sstr;
-                    for (int i = 0; i < dbg_opcode_size; ++i)
+                    for (size_t i = 0; i < dbg_opcode_size; ++i)
                     {
                         sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)reinterpret_cast<uint8_t*>(func)[i];
                     }
@@ -782,7 +782,7 @@ namespace mini_detour
                 {
                     size_t dbg_opcode_size = absolute_jump_size;
                     std::stringstream sstr;
-                    for (int i = 0; i < dbg_opcode_size; ++i)
+                    for (size_t i = 0; i < dbg_opcode_size; ++i)
                     {
                         sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)reinterpret_cast<uint8_t*>(func)[i];
                     }
@@ -819,7 +819,7 @@ namespace mini_detour
                 {
                     size_t dbg_opcode_size = _SavedCodeSize;
                     std::stringstream sstr;
-                    for (int i = 0; i < dbg_opcode_size; ++i)
+                    for (size_t i = 0; i < dbg_opcode_size; ++i)
                     {
                         sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)reinterpret_cast<uint8_t*>(func)[i];
                     }
@@ -834,7 +834,7 @@ namespace mini_detour
                 {
                     size_t dbg_opcode_size = RelJump::WriteOpcodes(func, jump_mem, func_mode, func_mode);
                     std::stringstream sstr;
-                    for (int i = 0; i < dbg_opcode_size; ++i)
+                    for (size_t i = 0; i < dbg_opcode_size; ++i)
                     {
                         sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)reinterpret_cast<uint8_t*>(func)[i];
                     }
