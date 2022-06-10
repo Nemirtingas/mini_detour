@@ -172,7 +172,12 @@ size_t _GetRelocatableSize(void* pCode, bool ignore_relocation, CodeDisasm& disa
         if ((disasm.GetInstruction().detail->x86.modrm & modrm_mask) == 0x05)
         {// Relative addressing opcode
             if (!ignore_relocation)
+            {
+#ifdef USE_SPDLOG
+                SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
+#endif
                 break;
+            }
         }
 
 #ifdef USE_SPDLOG

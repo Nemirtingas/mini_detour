@@ -85,7 +85,7 @@ struct AbsJump
 
         uint32_t* opcode = reinterpret_cast<uint32_t*>(source);
 
-        switch (GetOpcodeSize(jump_destination))
+        switch (GetOpcodeSize(jump_destination, source_mode, dest_mode))
         {
             case 20:
                 opcode[0] = movz;
@@ -211,6 +211,9 @@ size_t _GetRelocatableSize(void* pCode, bool ignore_relocation, CodeDisasm& disa
             if (ignore_relocation) // Last instruction, overwrite it if we're ignoring relocations
                 relocatable_size += disasm.GetInstruction().size;
 
+#ifdef USE_SPDLOG
+            SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
+#endif
             break;
         }
 
