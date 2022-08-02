@@ -136,7 +136,7 @@ void _EnterRecursiveThunk(void*& _pCode)
     _pCode = pCode;
 }
 
-size_t _GetRelocatableSize(void* pCode, bool ignore_relocation, CodeDisasm& disasm, size_t wanted_relocatable_size)
+size_t _GetRelocatableSize(void* pCode, void*& jump_destination, size_t& jump_destination_size, bool ignore_relocation, CodeDisasm& disasm, size_t wanted_relocatable_size)
 {
     // MOD-REG-R/M Byte
     //  7 6    5 4 3    2 1 0 - bits
@@ -152,6 +152,9 @@ size_t _GetRelocatableSize(void* pCode, bool ignore_relocation, CodeDisasm& disa
 
     memcpy(code_buffer, pCode, 80);
 
+    jump_destination = nullptr;
+    jump_destination_size = 0;
+
     size_t relocatable_size = 0;
     while (relocatable_size < wanted_relocatable_size)
     {
@@ -161,7 +164,15 @@ size_t _GetRelocatableSize(void* pCode, bool ignore_relocation, CodeDisasm& disa
         if (disasm.IsInstructionTerminating())
         {
             if (ignore_relocation) // Last instruction, overwrite it if we're ignoring relocations
+            {
                 relocatable_size += disasm.GetInstruction().size;
+            }
+            else if (disasm.GetJumpType() == 3)
+            {
+                jump_destination = reinterpret_cast<void*>(disasm.GetInstruction().detail->x86.operands[0].imm);
+                jump_destination_size += disasm.GetInstruction().size;
+                relocatable_size += jump_destination_size;
+            }
 
 #ifdef USE_SPDLOG
             SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);

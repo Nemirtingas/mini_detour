@@ -200,7 +200,7 @@ void _EnterRecursiveThunk(void*& pCode)
     // TODO
 }
 
-size_t _GetRelocatableSize(void* pCode, bool ignore_relocation, CodeDisasm& disasm, size_t wanted_relocatable_size)
+size_t _GetRelocatableSize(void* pCode, void*& jump_destination, size_t& jump_destination_size, bool ignore_relocation, CodeDisasm& disasm, size_t wanted_relocatable_size)
 {
     uint8_t code_buffer[80];
     const uint8_t* code_iterator = code_buffer;
@@ -208,6 +208,9 @@ size_t _GetRelocatableSize(void* pCode, bool ignore_relocation, CodeDisasm& disa
     uint64_t code_addr = reinterpret_cast<uint64_t>(pCode);
 
     memcpy(code_buffer, reinterpret_cast<void*>(code_addr), 80);
+
+    jump_destination = nullptr;
+    jump_destination_size = 0;
 
     size_t relocatable_size = 0;
     while (relocatable_size < wanted_relocatable_size)
