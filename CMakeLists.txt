@@ -16,17 +16,95 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(BUILD_MINIDETOUR_TESTS "Build tests" OFF)
 
-set(CAPSTONE_ARM_SUPPORT ON CACHE BOOL "" FORCE)
-set(CAPSTONE_ARM64_SUPPORT ON CACHE BOOL "" FORCE)
-set(CAPSTONE_X86_SUPPORT ON CACHE BOOL "" FORCE)
-set(CAPSTONE_ARCHITECTURE_DEFAULT OFF CACHE BOOL "" FORCE)
-set(CAPSTONE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(CAPSTONE_BUILD_CSTOOL OFF CACHE BOOL "" FORCE)
-set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-add_subdirectory(deps/capstone EXCLUDE_FROM_ALL)
-
 set(MINIDETOUR_HEADERS
   ${CMAKE_CURRENT_SOURCE_DIR}/include/mini_detour/mini_detour.h
+)
+
+set(CAPSTONE_SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/cs.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/MCInst.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/MCInstrDesc.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/MCRegisterInfo.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/SStream.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/utils.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/ARM/ARMDisassembler.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/ARM/ARMInstPrinter.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/ARM/ARMMapping.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/ARM/ARMModule.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/AArch64/AArch64BaseInfo.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/AArch64/AArch64Disassembler.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/AArch64/AArch64InstPrinter.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/AArch64/AArch64Mapping.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/AArch64/AArch64Module.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86Disassembler.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86DisassemblerDecoder.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86IntelInstPrinter.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86Mapping.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86Module.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86ATTInstPrinter.c
+)
+
+set(CAPSTONE_HEADERS
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include/capstone/arm64.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include/capstone/arm.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include/capstone/capstone.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include/capstone/evm.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include/capstone/mips.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include/capstone/ppc.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include/capstone/x86.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include/capstone/sparc.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include/capstone/systemz.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include/capstone/xcore.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include/capstone/m68k.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include/capstone/tms320c64x.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include/capstone/m680x.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include/capstone/mos65xx.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include/capstone/platform.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/cs_priv.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/LEB128.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/MathExtras.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/MCDisassembler.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/MCFixedLenDisassembler.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/MCInst.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/MCInstrDesc.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/MCRegisterInfo.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/SStream.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/utils.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/ARM/ARMAddressingModes.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/ARM/ARMBaseInfo.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/ARM/ARMDisassembler.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/ARM/ARMGenAsmWriter.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/ARM/ARMGenDisassemblerTables.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/ARM/ARMGenInstrInfo.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/ARM/ARMGenRegisterInfo.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/ARM/ARMGenSubtargetInfo.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/ARM/ARMInstPrinter.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/ARM/ARMMapping.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/AArch64/AArch64AddressingModes.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/AArch64/AArch64BaseInfo.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/AArch64/AArch64Disassembler.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/AArch64/AArch64GenAsmWriter.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/AArch64/AArch64GenDisassemblerTables.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/AArch64/AArch64GenInstrInfo.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/AArch64/AArch64GenRegisterInfo.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/AArch64/AArch64GenSubtargetInfo.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/AArch64/AArch64InstPrinter.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/AArch64/AArch64Mapping.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86BaseInfo.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86Disassembler.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86DisassemblerDecoder.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86DisassemblerDecoderCommon.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86GenAsmWriter.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86GenAsmWriter1.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86GenAsmWriter1_reduce.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86GenAsmWriter_reduce.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86GenDisassemblerTables.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86GenDisassemblerTables_reduce.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86GenInstrInfo.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86GenInstrInfo_reduce.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86GenRegisterInfo.inc
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86InstPrinter.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/arch/X86/X86Mapping.h
 )
 
 add_library(
@@ -40,6 +118,9 @@ add_library(
   src/mini_detour_macos.h
   src/mini_detour_windows.h
   include/mini_detour/mini_detour.h
+  
+  ${CAPSTONE_HEADERS}
+  ${CAPSTONE_SOURCES}
 )
 
 set_target_properties(mini_detour PROPERTIES
@@ -53,11 +134,19 @@ set_target_properties(mini_detour PROPERTIES
 target_link_libraries(
   mini_detour
   PUBLIC
-  capstone::capstone-static
 	
   $<$<BOOL:${WIN32}>:shell32>
   # For library UNIX loading
   $<$<NOT:$<BOOL:${WIN32}>>:dl>
+)
+
+target_compile_definitions(
+  mini_detour
+  PRIVATE
+  -DCAPSTONE_USE_SYS_DYN_MEM
+  -DCAPSTONE_HAS_X86
+  -DCAPSTONE_HAS_ARM64
+  -DCAPSTONE_HAS_ARM
 )
 
 target_compile_options(
@@ -70,6 +159,7 @@ target_include_directories(
   mini_detour
   PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include>
   $<INSTALL_INTERFACE:include>
 )
 
@@ -98,6 +188,9 @@ if(BUILD_MINIDETOUR_TESTS)
     src/mini_detour_macos.h
     src/mini_detour_windows.h
     include/mini_detour/mini_detour.h
+	
+	${CAPSTONE_HEADERS}
+    ${CAPSTONE_SOURCES}
   )
   
   set_target_properties(mini_detour_test PROPERTIES
@@ -112,11 +205,19 @@ if(BUILD_MINIDETOUR_TESTS)
   target_link_libraries(
     mini_detour_test
     PUBLIC
-	capstone::capstone-static
     
 	$<$<BOOL:${WIN32}>:shell32>
     # For library UNIX loading
     $<$<NOT:$<BOOL:${WIN32}>>:dl>
+  )
+  
+  target_compile_definitions(
+    mini_detour_test
+    PRIVATE
+	-DCAPSTONE_USE_SYS_DYN_MEM
+    -DCAPSTONE_HAS_X86
+	-DCAPSTONE_HAS_ARM64
+	-DCAPSTONE_HAS_ARM
   )
   
   target_compile_options(
@@ -129,6 +230,7 @@ if(BUILD_MINIDETOUR_TESTS)
     mini_detour_test
     PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include>
     $<INSTALL_INTERFACE:include>
   )
   
