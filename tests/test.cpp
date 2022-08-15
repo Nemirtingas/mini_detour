@@ -282,8 +282,8 @@ TEST_CASE("Hook small function with call", "[Hook function]") {
 
     mini_detour::hook test_hook;
 
-    memory_manipulation::memory_protect(test_func, 8, memory_manipulation::memory_rights::mem_rwx);
-    void* nothing_addr = nothing;
+    memory_manipulation::memory_protect((void*)test_func, 8, memory_manipulation::memory_rights::mem_rwx);
+    void* nothing_addr = (void*)nothing;
 
     _EnterRecursiveThunk(nothing_addr);
 
@@ -293,7 +293,7 @@ TEST_CASE("Hook small function with call", "[Hook function]") {
     SPDLOG_INFO("Calling test_func");
     test_func();
 
-    (void*&)bkp = test_hook.hook_func(test_func, my_test_func);
+    (void*&)bkp = test_hook.hook_func((void*)test_func, (void*)my_test_func);
 
     SPDLOG_INFO("Calling test_func");
     test_func();
