@@ -815,12 +815,15 @@ namespace mini_detour
                 // Saved opcodes
                 // jump ORIGINAL CALL DESTINATION
 
+                // Copy the original code
+                memcpy(reinterpret_cast<void*>(_OriginalTrampolineAddress), func, _SavedCodeSize - jump_destination_size);
+
                 uintptr_t call_ret_addr = reinterpret_cast<uintptr_t>(func) + _SavedCodeSize;
                 size_t push_size = CpuPush::GetOpcodeSize(call_ret_addr);
-                CpuPush::WriteOpcodes(_OriginalTrampolineAddress, call_ret_addr);
-
-                // Copy the original code
-                memcpy(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + push_size), func, _SavedCodeSize - jump_destination_size);
+                CpuPush::WriteOpcodes(
+                    reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + _SavedCodeSize - jump_destination_size),
+                    call_ret_addr
+                );
 
                 AbsJump::WriteOpcodes(
                     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + push_size + _SavedCodeSize - jump_destination_size),

@@ -141,14 +141,9 @@ struct CpuPush
     {
         // 68          | PUSH
         // LL LL LL LL | LOW IMM32
-        // C7 44 24 04 | mov DWORD PTR [rsp + 4], HIGH IMM32
+        // C7 44 24 04 | MOV DWORD PTR [rsp + 4], HIGH IMM32
         // HH HH HH HH
-        if (value & 0xffffffff00000000)
-            return 13;
-
-        // 68          | PUSH
-        // XX XX XX XX | IMM32
-        return 5;
+        return (value & 0xffffffff00000000 ? 13 : 5);
     }
 
     static constexpr size_t GetMaxOpcodeSize()

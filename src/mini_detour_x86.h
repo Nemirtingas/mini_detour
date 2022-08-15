@@ -101,7 +101,7 @@ struct CpuPush
         };
 
         *reinterpret_cast<uint32_t*>(&code[1]) = value;
-        memcpy(source, code, GetOpcodeSize());
+        memcpy(source, code, 5);
 
         return 5;
     }

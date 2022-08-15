@@ -18,6 +18,35 @@ const int alloc_size = 50;
 #define TESTS_OS_APPLE
 #endif
 
+inline void* relative_addr_to_absolute(void* source_addr, int32_t rel_addr)
+{
+    return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(source_addr) + rel_addr + 5);
+}
+
+static void _EnterRecursiveThunk(void*& _pCode)
+{
+    uint8_t* pCode = reinterpret_cast<uint8_t*>(_pCode);
+    while (1)
+    {
+        // If its an imported function.      CALL                JUMP
+        if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
+        {
+            // Get the real imported function address
+            pCode = **reinterpret_cast<uint8_t***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
+        }
+        else if (pCode[0] == 0xe8 || pCode[0] == 0xe9)
+        {
+            pCode = (uint8_t*)relative_addr_to_absolute(pCode, *(int32_t*)(pCode + 1));
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    _pCode = pCode;
+}
+
 int main(int argc, char* argv[]) {
     // global setup...
 
@@ -232,4 +261,41 @@ TEST_CASE("Hook function", "[Hook function]") {
         r = do_something2(8, 4);
         CHECK(r == 4);
     }
+}
+
+auto test_func = (void(*)())((void*)"\x50\xE8\x00\x00\x00\x00\x58\xc3");
+
+void(*bkp)();
+
+void nothing()
+{
+    SPDLOG_INFO("Called nothing.");
+}
+
+void my_test_func()
+{
+    SPDLOG_INFO("Called my_test_func");
+    bkp();
+}
+
+TEST_CASE("Hook small function with call", "[Hook function]") {
+
+    mini_detour::hook test_hook;
+
+    memory_manipulation::memory_protect(test_func, 8, memory_manipulation::memory_rights::mem_rwx);
+    void* nothing_addr = nothing;
+
+    _EnterRecursiveThunk(nothing_addr);
+
+    int32_t jump_addr = reinterpret_cast<uint8_t*>(nothing_addr) - (reinterpret_cast<uint8_t*>(test_func) + 1 + 5);
+    *reinterpret_cast<int32_t*>(reinterpret_cast<uintptr_t>(test_func) + 2) = jump_addr;
+
+    SPDLOG_INFO("Calling test_func");
+    test_func();
+
+    (void*&)bkp = test_hook.hook_func(test_func, my_test_func);
+
+    SPDLOG_INFO("Calling test_func");
+    test_func();
+
 }
