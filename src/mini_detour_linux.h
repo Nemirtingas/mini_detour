@@ -31,7 +31,7 @@ namespace memory_manipulation {
     {
         region_infos_t res{};
 
-        uint64_t target = (uint64_t)address;
+        uintptr_t target = (uintptr_t)address;
         std::ifstream f("/proc/self/maps");
         std::string s;
         while (std::getline(f, s))
@@ -39,8 +39,8 @@ namespace memory_manipulation {
             if (!s.empty() && s.find("vdso") == std::string::npos && s.find("vsyscall") == std::string::npos)
             {
                 char* strend = &s[0];
-                uint64_t start = strtoul(strend, &strend, 16);
-                uint64_t end = strtoul(strend + 1, &strend, 16);
+                uintptr_t start = (uintptr_t)strtoul(strend, &strend, 16);
+                uintptr_t end = (uintptr_t)strtoul(strend + 1, &strend, 16);
                 if (start != 0 && end != 0 && start <= target && target < end) {
                     res.start = (void*)start;
                     res.end = (void*)end;
