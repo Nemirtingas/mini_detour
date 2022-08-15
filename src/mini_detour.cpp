@@ -295,6 +295,12 @@ inline size_t region_size();
 inline size_t jumps_in_region();
 inline size_t page_addr_size(void* addr, size_t len, size_t page_size);
 
+enum class JumpType_e
+{
+    Jump,
+    Call,
+};
+
 #if defined(MINIDETOUR_OS_WINDOWS)
 #include "mini_detour_windows.h"
 
@@ -581,6 +587,8 @@ namespace mini_detour
 
             void* jump_destination;
             size_t jump_destination_size;
+            JumpType_e jump_type;
+
             int code_mode = 0;
             cs_err disasm_err;
             CodeDisasm disasm;
@@ -607,13 +615,14 @@ namespace mini_detour
             size_t smallest_jump_size = std::min(relative_jump_size, absolute_jump_size);
 
             _EnterRecursiveThunk(func);
-            return _GetRelocatableSize(func, jump_destination, jump_destination_size, false, disasm, absolute_jump_size) >= smallest_jump_size;
+            return _GetRelocatableSize(func, jump_destination, jump_destination_size, jump_type, false, disasm, absolute_jump_size) >= smallest_jump_size;
         }
 
         static bool ReplaceFunc(void* func, void* hook_func)
         {
             void* jump_destination;
             size_t jump_destination_size;
+            JumpType_e jump_type;
 
             int func_mode = 0;
             int hook_mode = 0;
@@ -647,7 +656,7 @@ namespace mini_detour
             
             _EnterRecursiveThunk(func);
             
-            relocatable_size = _GetRelocatableSize(func, jump_destination, jump_destination_size, true, disasm, absolute_jump_size);
+            relocatable_size = _GetRelocatableSize(func, jump_destination, jump_destination_size, jump_type, true, disasm, absolute_jump_size);
             
             // can't even make a relative jump
             if (relocatable_size < smallest_jump_size)
@@ -698,6 +707,7 @@ namespace mini_detour
             CodeDisasm disasm;
             void* jump_destination;
             size_t jump_destination_size;
+            JumpType_e jump_type;
 
 #if defined(MINIDETOUR_ARCH_X86)
             disasm_err = disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_32 | CodeDisasm::RuntimeEndianness()));
@@ -728,7 +738,7 @@ namespace mini_detour
 
             _EnterRecursiveThunk(func);
 
-            relocatable_size = _GetRelocatableSize(func, jump_destination, jump_destination_size, false, disasm, absolute_jump_size);
+            relocatable_size = _GetRelocatableSize(func, jump_destination, jump_destination_size, jump_type, false, disasm, absolute_jump_size);
 
             SPDLOG_INFO("Needed relocatable size: found({}), rel({}), abs({})", relocatable_size, relative_jump_size, absolute_jump_size);
 
@@ -773,22 +783,47 @@ namespace mini_detour
                 goto error;
             }
 
-            // Copy the original code
-            memcpy(_OriginalTrampolineAddress, func, _SavedCodeSize - jump_destination_size);
-
             // Write the absolute jump
             if (jump_destination == nullptr)
             {
+                // Copy the original code
+                memcpy(_OriginalTrampolineAddress, func, _SavedCodeSize - jump_destination_size);
+
                 AbsJump::WriteOpcodes(
                     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + _SavedCodeSize),
                     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(func) + _SavedCodeSize),
                     func_mode,  // Write the trampoline in the same
                     func_mode); // mode as the original function mode
             }
-            else
+            else if(jump_type == JumpType_e::Jump)
             {
+                // Copy the original code
+                memcpy(_OriginalTrampolineAddress, func, _SavedCodeSize - jump_destination_size);
+
                 AbsJump::WriteOpcodes(
                     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + _SavedCodeSize - jump_destination_size),
+                    reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(jump_destination)),
+                    func_mode,  // Write the trampoline in the same
+                    func_mode); // mode as the original function mode
+            }
+            else if (jump_type == JumpType_e::Call)
+            {
+                // Works only on x86 (32 and 64 bits)
+                // on arm, return address is in LR
+                // Basically, push and abritrary return address:
+                // push CALL RETURN ADDRESS
+                // Saved opcodes
+                // jump ORIGINAL CALL DESTINATION
+
+                uintptr_t call_ret_addr = reinterpret_cast<uintptr_t>(func) + _SavedCodeSize;
+                size_t push_size = CpuPush::GetOpcodeSize(call_ret_addr);
+                CpuPush::WriteOpcodes(_OriginalTrampolineAddress, call_ret_addr);
+
+                // Copy the original code
+                memcpy(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + push_size), func, _SavedCodeSize - jump_destination_size);
+
+                AbsJump::WriteOpcodes(
+                    reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + push_size + _SavedCodeSize - jump_destination_size),
                     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(jump_destination)),
                     func_mode,  // Write the trampoline in the same
                     func_mode); // mode as the original function mode
