@@ -783,12 +783,12 @@ namespace mini_detour
                 goto error;
             }
 
+            // Copy the original code
+            memcpy(_OriginalTrampolineAddress, func, _SavedCodeSize - jump_destination_size);
+
             // Write the absolute jump
             if (jump_destination == nullptr)
             {
-                // Copy the original code
-                memcpy(_OriginalTrampolineAddress, func, _SavedCodeSize - jump_destination_size);
-
                 AbsJump::WriteOpcodes(
                     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + _SavedCodeSize),
                     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(func) + _SavedCodeSize),
@@ -797,9 +797,6 @@ namespace mini_detour
             }
             else if(jump_type == JumpType_e::Jump)
             {
-                // Copy the original code
-                memcpy(_OriginalTrampolineAddress, func, _SavedCodeSize - jump_destination_size);
-
                 AbsJump::WriteOpcodes(
                     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + _SavedCodeSize - jump_destination_size),
                     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(jump_destination)),
@@ -814,9 +811,6 @@ namespace mini_detour
                 // push CALL RETURN ADDRESS
                 // Saved opcodes
                 // jump ORIGINAL CALL DESTINATION
-
-                // Copy the original code
-                memcpy(reinterpret_cast<void*>(_OriginalTrampolineAddress), func, _SavedCodeSize - jump_destination_size);
 
                 uintptr_t call_ret_addr = reinterpret_cast<uintptr_t>(func) + _SavedCodeSize;
                 size_t push_size = CpuPush::GetOpcodeSize(call_ret_addr);
