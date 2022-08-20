@@ -110,6 +110,52 @@ struct RelJump
         return 5;
     }
 };
+
+struct CpuPush
+{
+    static size_t WriteOpcodes(void* source, uint64_t value)
+    {
+        uint8_t code[13] =
+        {
+            0x68,                   // PUSH
+            0x00, 0x00, 0x00, 0x00, // IMM32
+            0xC7, 0x44, 0x24, 0x04, // mov DWORD PTR [rsp + 4], HIGH IMM32
+            0x00, 0x00, 0x00, 0x00,
+        };
+
+        *reinterpret_cast<uint32_t*>(&code[1]) = static_cast<uint32_t>(value);
+
+        if (value & 0xffffffff00000000)
+        {    
+            *reinterpret_cast<uint32_t*>(&code[9]) = static_cast<uint32_t>(value >> 32);
+            memcpy(source, code, 13);
+            return 13;
+        }
+
+        memcpy(source, code, 5);
+
+        return 5;
+    }
+
+    static constexpr size_t GetOpcodeSize(uint64_t value)
+    {
+        // 68          | PUSH
+        // LL LL LL LL | LOW IMM32
+        // C7 44 24 04 | MOV DWORD PTR [rsp + 4], HIGH IMM32
+        // HH HH HH HH
+        return (value & 0xffffffff00000000 ? 13 : 5);
+    }
+
+    static constexpr size_t GetMaxOpcodeSize()
+    {
+        // 68          | PUSH
+        // LL LL LL LL | LOW IMM32
+        // C7 44 24 04 | mov DWORD PTR [rsp + 4], HIGH IMM32
+        // HH HH HH HH
+        return 13;
+    }
+};
+
 #pragma pack(pop)
 
 void _EnterRecursiveThunk(void*& _pCode)
@@ -136,7 +182,7 @@ void _EnterRecursiveThunk(void*& _pCode)
     _pCode = pCode;
 }
 
-size_t _GetRelocatableSize(void* pCode, void*& jump_destination, size_t& jump_destination_size, bool ignore_relocation, CodeDisasm& disasm, size_t wanted_relocatable_size)
+size_t _GetRelocatableSize(void* pCode, void*& jump_destination, size_t& jump_destination_size, JumpType_e& jump_type, bool ignore_relocation, CodeDisasm& disasm, size_t wanted_relocatable_size)
 {
     // MOD-REG-R/M Byte
     //  7 6    5 4 3    2 1 0 - bits
@@ -172,6 +218,14 @@ size_t _GetRelocatableSize(void* pCode, void*& jump_destination, size_t& jump_de
                 jump_destination = reinterpret_cast<void*>(disasm.GetInstruction().detail->x86.operands[0].imm);
                 jump_destination_size += disasm.GetInstruction().size;
                 relocatable_size += jump_destination_size;
+                jump_type = JumpType_e::Jump;
+            }
+            else if (disasm.GetJumpType() == 5)
+            {
+                jump_destination = reinterpret_cast<void*>(disasm.GetInstruction().detail->x86.operands[0].imm);
+                jump_destination_size += disasm.GetInstruction().size;
+                relocatable_size += jump_destination_size;
+                jump_type = JumpType_e::Call;
             }
 
 #ifdef USE_SPDLOG

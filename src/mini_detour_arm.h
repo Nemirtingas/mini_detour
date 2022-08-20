@@ -92,7 +92,7 @@ struct AbsJump
         }
     }
 
-    static inline size_t GetOpcodeSize(void* jump_destination, int source_mode, int dest_mode)
+    static constexpr size_t GetOpcodeSize(void* jump_destination, int source_mode, int dest_mode)
     {
         return source_mode ? 20 : 8;
     }
@@ -193,6 +193,24 @@ struct RelJump
         return 4;
     }
 };
+
+struct CpuPush
+{
+    static size_t WriteOpcodes(void* source, uint32_t value)
+    {
+        return 0;
+    }
+
+    static constexpr size_t GetOpcodeSize(uint32_t value)
+    {
+        return 0;
+    }
+
+    static constexpr size_t GetMaxOpcodeSize()
+    {
+        return 0;
+    }
+};
 #pragma pack(pop)
 
 void _EnterRecursiveThunk(void*& pCode)
@@ -200,7 +218,7 @@ void _EnterRecursiveThunk(void*& pCode)
     // TODO
 }
 
-size_t _GetRelocatableSize(void* pCode, void*& jump_destination, size_t& jump_destination_size, bool ignore_relocation, CodeDisasm& disasm, size_t wanted_relocatable_size)
+size_t _GetRelocatableSize(void* pCode, void*& jump_destination, size_t& jump_destination_size, JumpType_e& jump_type, bool ignore_relocation, CodeDisasm& disasm, size_t wanted_relocatable_size)
 {
     uint8_t code_buffer[80];
     const uint8_t* code_iterator = code_buffer;
@@ -221,7 +239,15 @@ size_t _GetRelocatableSize(void* pCode, void*& jump_destination, size_t& jump_de
         if (disasm.IsInstructionTerminating())
         {
             if (ignore_relocation) // Last instruction, overwrite it if we're ignoring relocations
+            {
                 relocatable_size += disasm.GetInstruction().size;
+            }
+            else if (disasm.GetJumpType() == 3)
+            {// Don't handle arm64 jump/call relocation.
+                //jump_destination = reinterpret_cast<void*>(disasm.GetInstruction().detail->x86.operands[0].imm);
+                //jump_destination_size += disasm.GetInstruction().size;
+                //relocatable_size += jump_destination_size;
+            }
 
 #ifdef USE_SPDLOG
             SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
