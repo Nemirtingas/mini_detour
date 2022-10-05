@@ -152,6 +152,33 @@ TEST_CASE("Memory free", "[memfree]") {
     memory_manipulation::memory_free(mem, alloc_size);
 }
 
+TEST_CASE("Memory mappings", "[vmmap]") {
+    auto maps = memory_manipulation::get_all_allocated_regions();
+
+    for (auto const& map : maps)
+    {
+        char rights_str[4]{};
+
+        if (map.rights & memory_manipulation::memory_rights::mem_r)
+            rights_str[0] = 'r';
+        else
+            rights_str[0] = '-';
+
+        if (map.rights & memory_manipulation::memory_rights::mem_w)
+            rights_str[1] = 'w';
+        else
+            rights_str[1] = '-';
+
+        if (map.rights & memory_manipulation::memory_rights::mem_x)
+            rights_str[2] = 'x';
+        else
+            rights_str[2] = '-';
+
+        SPDLOG_INFO("[{}-{}]: [{}]", map.start, map.end, rights_str);
+    }
+}
+
+
 bool Myputs_called = false;
 mini_detour::hook puts_hook;
 

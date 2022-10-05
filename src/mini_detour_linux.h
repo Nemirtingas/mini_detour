@@ -62,6 +62,45 @@ namespace memory_manipulation {
         return res;
     }
 
+    std::vector<region_infos_t> get_all_allocated_regions()
+    {
+        std::vector<region_infos_t> mappings;
+
+        std::ifstream f("/proc/self/maps");
+        std::string s;
+        while (std::getline(f, s))
+        {
+            if (!s.empty() && s.find("vdso") == std::string::npos && s.find("vsyscall") == std::string::npos)
+            {
+                char* strend = &s[0];
+                uintptr_t start = (uintptr_t)strtoul(strend, &strend, 16);
+                uintptr_t end = (uintptr_t)strtoul(strend + 1, &strend, 16);
+                if (start != 0 && end != 0)
+                {
+                    memory_rights rights = memory_rights::mem_none;
+
+                    ++strend;
+                    if (strend[0] == 'r')
+                        (unsigned int&)rights |= mem_r;
+
+                    if (strend[1] == 'w')
+                        (unsigned int&)rights |= mem_w;
+
+                    if (strend[2] == 'x')
+                        (unsigned int&)rights |= mem_x;
+
+                    mappings.emplace_back(region_infos_t{
+                        rights,
+                        (void*)start,
+                        (void*)end,
+                    });
+                }
+            }
+        }
+
+        return mappings;
+    }
+
     bool memory_protect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
     {
         region_infos_t infos;

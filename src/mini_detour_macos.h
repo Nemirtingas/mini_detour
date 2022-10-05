@@ -124,6 +124,41 @@ namespace memory_manipulation {
         return res;
     }
 
+    std::vector<region_infos_t> get_all_allocated_regions()
+    {
+        std::vector<region_infos_t> mappings;
+
+        mach_vm_address_t vm_address = 0;
+        mach_vm_size_t size;
+        vm_region_basic_info_data_64_t infos;
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object_name = MACH_PORT_NULL;
+
+        while (mach_vm_region(mach_task_self(), &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name) == KERN_SUCCESS)
+        {
+            memory_rights rights = memory_rights::mem_none;
+
+            if (infos.protection & VM_PROT_READ)
+                (unsigned int&)rights |= mem_r;
+
+            if (infos.protection & VM_PROT_WRITE)
+                (unsigned int&)rights |= mem_w;
+
+            if (infos.protection & VM_PROT_EXECUTE)
+                (unsigned int&)rights |= mem_x;
+
+            mappings.emplace_back(region_infos_t{
+                rights,
+                (void*)vm_address,
+                (void*)(vm_address + size),
+            });
+
+            vm_address += size;
+        }
+
+        return mappings;
+    }
+
     size_t page_size()
     {
         return sysconf(_SC_PAGESIZE);

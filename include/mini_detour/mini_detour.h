@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <vector>
 
 namespace memory_manipulation
 {
@@ -40,6 +41,7 @@ namespace memory_manipulation
 
     size_t page_size();
     region_infos_t get_region_infos(void* address);
+    std::vector<region_infos_t> get_all_allocated_regions();
     bool memory_protect(void* address, size_t size, memory_rights rights, memory_rights* old_rights = nullptr);
     void memory_free(void* address, size_t size);
     void* memory_alloc(void* address_hint, size_t size, memory_rights rights);

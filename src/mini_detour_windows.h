@@ -53,10 +53,35 @@ namespace memory_manipulation {
         {
             res.start = infos.BaseAddress;
             res.end = (uint8_t*)res.start + infos.RegionSize;
-            res.rights = memory_native_to_protect_rights(infos.Protect);
+            res.rights = memory_native_to_protect_rights(infos.Protect & 0xFF);
         }
 
         return res;
+    }
+
+    std::vector<region_infos_t> get_all_allocated_regions()
+    {
+        HANDLE process_handle = GetCurrentProcess();
+        LPVOID search_addr = nullptr;
+        MEMORY_BASIC_INFORMATION mem_infos{};
+
+        std::vector<region_infos_t> mappings;
+
+        mappings.reserve(256);
+        while (VirtualQueryEx(process_handle, search_addr, &mem_infos, sizeof(mem_infos)) != 0)
+        {
+            if (mem_infos.State == MEM_COMMIT || mem_infos.State == MEM_RESERVE)
+            {
+                mappings.emplace_back(region_infos_t{
+                    memory_manipulation::memory_native_to_protect_rights(mem_infos.Protect),
+                    mem_infos.BaseAddress,
+                    reinterpret_cast<LPVOID>(reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize),
+                });
+            }
+            search_addr = reinterpret_cast<LPVOID>(reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize);
+        }
+
+        return mappings;
     }
 
     bool memory_protect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
@@ -65,7 +90,7 @@ namespace memory_manipulation {
         bool res = VirtualProtect(address, size, memory_protect_rights_to_native(rights), &oldProtect) != FALSE;
 
         if (old_rights != nullptr)
-            *old_rights = memory_native_to_protect_rights(oldProtect);
+            *old_rights = memory_native_to_protect_rights(oldProtect & 0xFF);
 
         return res;
     }
