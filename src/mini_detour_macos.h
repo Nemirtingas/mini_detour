@@ -111,7 +111,7 @@ namespace memory_manipulation {
 
         if (ret == KERN_SUCCESS)
         {
-            if (static_cast<uintptr_t>(vm_address) <= static_cast<uintptr_t>(address) && static_cast<uintptr_t>(address) < static_cast<uintptr_t>(vm_address) + size)
+            if (static_cast<uintptr_t>(vm_address) <= reinterpret_cast<uintptr_t>(address) && reinterpret_cast<uintptr_t>(address) < static_cast<uintptr_t>(vm_address) + size)
             {
                 res.start = (uintptr_t)vm_address;
                 res.end = res.start + size;
