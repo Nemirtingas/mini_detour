@@ -164,7 +164,7 @@ TEST_CASE("Memory mappings", "[vmmap]") {
         else
             rights_str[2] = '-';
 
-        SPDLOG_INFO("[{}-{}]: [{}]", map.start, map.end, rights_str);
+        SPDLOG_INFO("[{:016X}-{:016X}]: [{}]", map.start, map.end, rights_str);
     }
 }
 
