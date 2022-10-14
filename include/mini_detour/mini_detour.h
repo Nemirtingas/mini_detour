@@ -23,8 +23,8 @@ namespace memory_manipulation
     struct region_infos_t
     {
         memory_rights rights;
-        void* start;
-        void* end;
+        uintptr_t start;
+        uintptr_t end;
     };
 
     inline void* page_round_up(void* _addr, size_t page_size)

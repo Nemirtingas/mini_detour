@@ -88,11 +88,6 @@ TEST_CASE("Memory protect", "[memprotect]") {
 
     CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rwx, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_rwx); // Windows doesn't have a pure wx
-
-    auto infos = memory_manipulation::get_region_infos(mem);
-    CHECK(infos.start != nullptr);
-    CHECK(infos.end != nullptr);
-    CHECK(infos.rights == memory_manipulation::memory_rights::mem_rwx);
 #elif defined(TESTS_OS_LINUX)
     CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_r, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_none);
@@ -114,11 +109,6 @@ TEST_CASE("Memory protect", "[memprotect]") {
 
     CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rwx, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_wx);
-
-    auto infos = memory_manipulation::get_region_infos(mem);
-    CHECK(infos.start != nullptr);
-    CHECK(infos.end != nullptr);
-    CHECK(infos.rights == memory_manipulation::memory_rights::mem_rwx);
 #elif defined(TESTS_OS_APPLE)
     CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_r, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_none);
@@ -140,12 +130,12 @@ TEST_CASE("Memory protect", "[memprotect]") {
 
     CHECK(memory_manipulation::memory_protect(mem, alloc_size, memory_manipulation::memory_rights::mem_rwx, &old_rights) == true);
     CHECK(old_rights == memory_manipulation::memory_rights::mem_wx);
+#endif
 
     auto infos = memory_manipulation::get_region_infos(mem);
-    CHECK(infos.start != nullptr);
-    CHECK(infos.end != nullptr);
+    CHECK(infos.start != 0);
+    CHECK(infos.end != 0);
     CHECK(infos.rights == memory_manipulation::memory_rights::mem_rwx);
-#endif
 }
 
 TEST_CASE("Memory free", "[memfree]") {
@@ -174,7 +164,7 @@ TEST_CASE("Memory mappings", "[vmmap]") {
         else
             rights_str[2] = '-';
 
-        SPDLOG_INFO("[{}-{}]: [{}]", map.start, map.end, rights_str);
+        SPDLOG_INFO("[{:016X}-{:016X}]: [{}]", map.start, map.end, rights_str);
     }
 }
 

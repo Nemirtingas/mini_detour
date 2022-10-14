@@ -31,6 +31,8 @@ namespace memory_manipulation {
     {
         region_infos_t res{};
 
+        unsigned int rights = memory_rights::mem_unset;
+
         uintptr_t target = (uintptr_t)address;
         std::ifstream f("/proc/self/maps");
         std::string s;
@@ -42,23 +44,28 @@ namespace memory_manipulation {
                 uintptr_t start = (uintptr_t)strtoul(strend, &strend, 16);
                 uintptr_t end = (uintptr_t)strtoul(strend + 1, &strend, 16);
                 if (start != 0 && end != 0 && start <= target && target < end) {
-                    res.start = (void*)start;
-                    res.end = (void*)end;
+                    res.start = start;
+                    res.end = end;
+
+                    rights = mem_none;
 
                     ++strend;
                     if (strend[0] == 'r')
-                        (unsigned int&)res.rights |= mem_r;
+                        rights |= mem_r;
 
                     if (strend[1] == 'w')
-                        (unsigned int&)res.rights |= mem_w;
+                        rights |= mem_w;
 
                     if (strend[2] == 'x')
-                        (unsigned int&)res.rights |= mem_x;
+                        rights |= mem_x;
 
                     break;
                 }
             }
         }
+
+        res.rights = (memory_rights)rights;
+
         return res;
     }
 
@@ -77,22 +84,22 @@ namespace memory_manipulation {
                 uintptr_t end = (uintptr_t)strtoul(strend + 1, &strend, 16);
                 if (start != 0 && end != 0)
                 {
-                    memory_rights rights = memory_rights::mem_none;
+                    unsigned int rights = mem_none;
 
                     ++strend;
                     if (strend[0] == 'r')
-                        (unsigned int&)rights |= mem_r;
+                        rights |= mem_r;
 
                     if (strend[1] == 'w')
-                        (unsigned int&)rights |= mem_w;
+                        rights |= mem_w;
 
                     if (strend[2] == 'x')
-                        (unsigned int&)rights |= mem_x;
+                        rights |= mem_x;
 
                     mappings.emplace_back(region_infos_t{
-                        rights,
-                        (void*)start,
-                        (void*)end,
+                        (memory_rights)rights,
+                        start,
+                        end,
                     });
                 }
             }
@@ -136,7 +143,7 @@ namespace memory_manipulation {
                 for (int j = 0; j < pages; ++j)
                 {
                     infos = get_region_infos((void*)address);
-                    if (infos.start != nullptr)
+                    if (infos.start != 0)
                     {
                         found = false;
                         break;
@@ -158,7 +165,7 @@ namespace memory_manipulation {
                 for (int j = 0; j < pages; ++j)
                 {
                     infos = get_region_infos((void*)address);
-                    if (infos.start != nullptr)
+                    if (infos.start != 0)
                     {
                         found = false;
                         break;
