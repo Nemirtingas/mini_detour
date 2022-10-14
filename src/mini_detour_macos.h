@@ -104,22 +104,32 @@ namespace memory_manipulation {
         mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
         mach_port_t object_name = MACH_PORT_NULL;
 
+        unsigned int rights = mem_unset;
+
+        // mach_vm_region returns the region or the next region to vm_address, so if the region queried is free, it will not return the free region but the next one.
         ret = mach_vm_region(mach_task_self(), &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name);
 
         if (ret == KERN_SUCCESS)
         {
-            res.start = (void*)vm_address;
-            res.end = (void*)((uint64_t)vm_address + size);
+            if (reinterpret_cast<uintptr_t>(vm_address) <= reinterpret_cast<uintptr_t>(address) && reinterpret_cast<uintptr_t>(address) < reinterpret_cast<uintptr_t>(vm_address) + size)
+            {
+                res.start = (uintptr_t)vm_address;
+                res.end = res.start + size;
 
-            if (infos.protection & VM_PROT_READ)
-                (unsigned int&)res.rights |= mem_r;
+                rights = mem_none;
 
-            if (infos.protection & VM_PROT_WRITE)
-                (unsigned int&)res.rights |= mem_w;
+                if (infos.protection & VM_PROT_READ)
+                    rights |= mem_r;
 
-            if (infos.protection & VM_PROT_EXECUTE)
-                (unsigned int&)res.rights |= mem_x;
+                if (infos.protection & VM_PROT_WRITE)
+                    rights |= mem_w;
+
+                if (infos.protection & VM_PROT_EXECUTE)
+                    rights |= mem_x;
+            }
         }
+
+        res.rights = (memory_rights)rights;
 
         return res;
     }
@@ -136,21 +146,21 @@ namespace memory_manipulation {
 
         while (mach_vm_region(mach_task_self(), &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name) == KERN_SUCCESS)
         {
-            memory_rights rights = memory_rights::mem_none;
+            unsigned int rights = memory_rights::mem_none;
 
             if (infos.protection & VM_PROT_READ)
-                (unsigned int&)rights |= mem_r;
+                rights |= mem_r;
 
             if (infos.protection & VM_PROT_WRITE)
-                (unsigned int&)rights |= mem_w;
+                rights |= mem_w;
 
             if (infos.protection & VM_PROT_EXECUTE)
-                (unsigned int&)rights |= mem_x;
+                rights |= mem_x;
 
             mappings.emplace_back(region_infos_t{
-                rights,
-                (void*)vm_address,
-                (void*)(vm_address + size),
+                (memory_rights)rights,
+                reinterpret_cast<uintptr_t>(vm_address),
+                reinterpret_cast<uintptr_t>(vm_address) + size,
             });
 
             vm_address += size;

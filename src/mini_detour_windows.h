@@ -51,8 +51,8 @@ namespace memory_manipulation {
         res.rights = mem_unset;
         if (VirtualQuery(address, &infos, sizeof(infos)) != 0)
         {
-            res.start = infos.BaseAddress;
-            res.end = (uint8_t*)res.start + infos.RegionSize;
+            res.start = (uintptr_t)infos.BaseAddress;
+            res.end = res.start + infos.RegionSize;
             res.rights = memory_native_to_protect_rights(infos.Protect & 0xFF);
         }
 
@@ -70,12 +70,12 @@ namespace memory_manipulation {
         mappings.reserve(256);
         while (VirtualQueryEx(process_handle, search_addr, &mem_infos, sizeof(mem_infos)) != 0)
         {
-            if (mem_infos.State == MEM_COMMIT || mem_infos.State == MEM_RESERVE)
+            if (mem_infos.State != MEM_FREE)
             {
                 mappings.emplace_back(region_infos_t{
                     memory_manipulation::memory_native_to_protect_rights(mem_infos.Protect),
-                    mem_infos.BaseAddress,
-                    reinterpret_cast<LPVOID>(reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize),
+                    (uintptr_t)mem_infos.BaseAddress,
+                    reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize,
                 });
             }
             search_addr = reinterpret_cast<LPVOID>(reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize);
