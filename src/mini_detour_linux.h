@@ -143,7 +143,7 @@ namespace memory_manipulation {
                 for (int j = 0; j < pages; ++j)
                 {
                     infos = get_region_infos((void*)address);
-                    if (infos.start != nullptr)
+                    if (infos.start != 0)
                     {
                         found = false;
                         break;
@@ -165,7 +165,7 @@ namespace memory_manipulation {
                 for (int j = 0; j < pages; ++j)
                 {
                     infos = get_region_infos((void*)address);
-                    if (infos.start != nullptr)
+                    if (infos.start != 0)
                     {
                         found = false;
                         break;

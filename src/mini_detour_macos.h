@@ -111,7 +111,7 @@ namespace memory_manipulation {
 
         if (ret == KERN_SUCCESS)
         {
-            if (reinterpret_cast<uintptr_t>(vm_address) <= reinterpret_cast<uintptr_t>(address) && reinterpret_cast<uintptr_t>(address) < reinterpret_cast<uintptr_t>(vm_address) + size)
+            if (static_cast<uintptr_t>(vm_address) <= static_cast<uintptr_t>(address) && static_cast<uintptr_t>(address) < static_cast<uintptr_t>(vm_address) + size)
             {
                 res.start = (uintptr_t)vm_address;
                 res.end = res.start + size;
@@ -159,8 +159,8 @@ namespace memory_manipulation {
 
             mappings.emplace_back(region_infos_t{
                 (memory_rights)rights,
-                reinterpret_cast<uintptr_t>(vm_address),
-                reinterpret_cast<uintptr_t>(vm_address) + size,
+                static_cast<uintptr_t>(vm_address),
+                static_cast<uintptr_t>(vm_address) + size,
             });
 
             vm_address += size;
@@ -227,7 +227,7 @@ namespace memory_manipulation {
                 for (int j = 0; j < pages; ++j)
                 {
                     infos = get_region_infos((void*)address);
-                    if (infos.start == (void*)address)
+                    if (infos.start == (uintptr_t)address)
                     {
                         found = false;
                         break;
@@ -253,7 +253,7 @@ namespace memory_manipulation {
                 for (int j = 0; j < pages; ++j)
                 {
                     infos = get_region_infos((void*)address);
-                    if (infos.start == (void*)address)
+                    if (infos.start == (uintptr_t)address)
                     {
                         found = false;
                         break;
