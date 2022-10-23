@@ -6,7 +6,7 @@
 #define NOMINMAX
 #include <Windows.h>
 
-namespace memory_manipulation {
+namespace MemoryManipulation {
     DWORD memory_protect_rights_to_native(memory_rights rights)
     {
         switch (rights)
@@ -36,14 +36,14 @@ namespace memory_manipulation {
         }
     }
 
-    size_t page_size()
+    size_t PageSize()
     {
         SYSTEM_INFO sysInfo;
         GetSystemInfo(&sysInfo);
         return sysInfo.dwPageSize;
     }
 
-    region_infos_t get_region_infos(void* address)
+    region_infos_t GetRegionInfos(void* address)
     {
         MEMORY_BASIC_INFORMATION infos;
         region_infos_t res{};
@@ -51,7 +51,7 @@ namespace memory_manipulation {
         res.rights = mem_unset;
         if (VirtualQuery(address, &infos, sizeof(infos)) != 0)
         {
-            res.start = (uintptr_t)infos.BaseAddress;
+            res.start = reinterpret_cast<uintptr_t>(infos.BaseAddress);
             res.end = res.start + infos.RegionSize;
             res.rights = memory_native_to_protect_rights(infos.Protect & 0xFF);
         }
@@ -59,32 +59,71 @@ namespace memory_manipulation {
         return res;
     }
 
-    std::vector<region_infos_t> get_all_allocated_regions()
+    std::vector<region_infos_t> GetAllRegions()
     {
         HANDLE process_handle = GetCurrentProcess();
         LPVOID search_addr = nullptr;
         MEMORY_BASIC_INFORMATION mem_infos{};
+        memory_rights rights;
+        std::string module_name;
+        std::wstring wmodule_name(1024, L'\0');
+        DWORD wmodule_name_size = 1024;
+        HMODULE module_handle;
 
         std::vector<region_infos_t> mappings;
 
         mappings.reserve(256);
         while (VirtualQueryEx(process_handle, search_addr, &mem_infos, sizeof(mem_infos)) != 0)
         {
+            rights = memory_rights::mem_unset;
+
             if (mem_infos.State != MEM_FREE)
             {
-                mappings.emplace_back(region_infos_t{
-                    memory_manipulation::memory_native_to_protect_rights(mem_infos.Protect),
-                    (uintptr_t)mem_infos.BaseAddress,
-                    reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize,
-                });
+                rights = MemoryManipulation::memory_native_to_protect_rights(mem_infos.Protect);
+
+                if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT|GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)mem_infos.BaseAddress, &module_handle) != FALSE && module_handle != nullptr)
+                {
+                    while (wmodule_name_size != 0)
+                    {
+                        wmodule_name_size = GetModuleFileNameW(module_handle, &wmodule_name[0], wmodule_name.size());
+                        if (wmodule_name_size == wmodule_name.size())
+                        {
+                            if (wmodule_name_size > 0x100000)
+                                break;
+
+                            wmodule_name_size *= 2;
+                            wmodule_name.resize(wmodule_name_size);
+                        }
+                        else if (wmodule_name_size != 0)
+                        {
+                            wmodule_name.resize(wmodule_name_size);
+                            wmodule_name_size = WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wmodule_name.length(), nullptr, 0, nullptr, nullptr);
+                            if (wmodule_name_size != 0)
+                            {
+                                module_name.resize(wmodule_name_size);
+                                WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wmodule_name.length(), &module_name[0], module_name.size(), nullptr, nullptr);
+                            }
+
+                            module_name.resize(module_name.capacity());
+                            break;
+                        }
+                    }
+                }
             }
+
+            mappings.emplace_back(region_infos_t{
+                rights,
+                reinterpret_cast<uintptr_t>(mem_infos.BaseAddress),
+                reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize,
+                std::move(module_name),
+            });
             search_addr = reinterpret_cast<LPVOID>(reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize);
         }
 
         return mappings;
     }
 
-    bool memory_protect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
+    bool MemoryProtect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
     {
         DWORD oldProtect;
         bool res = VirtualProtect(address, size, memory_protect_rights_to_native(rights), &oldProtect) != FALSE;
@@ -95,13 +134,13 @@ namespace memory_manipulation {
         return res;
     }
 
-    void memory_free(void* address, size_t size)
+    void MemoryFree(void* address, size_t size)
     {
         if (address != nullptr)
             VirtualFree(address, 0, MEM_RELEASE);
     }
 
-    void* memory_alloc(void* address_hint, size_t size, memory_rights rights)
+    void* MemoryAlloc(void* address_hint, size_t size, memory_rights rights)
     {
         MEMORY_BASIC_INFORMATION mbi;
 
@@ -151,9 +190,9 @@ namespace memory_manipulation {
         return nullptr;
     }
 
-    int flush_instruction_cache(void* pBase, size_t size)
+    int FlushInstructionCache(void* pBase, size_t size)
     {
-        return FlushInstructionCache(GetCurrentProcess(), pBase, size);
+        return ::FlushInstructionCache(GetCurrentProcess(), pBase, size);
     }
 }
 

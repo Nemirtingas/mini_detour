@@ -18,7 +18,7 @@
 #include <sstream>
 
 template <>
-struct fmt::formatter<memory_manipulation::memory_rights> {
+struct fmt::formatter<MemoryManipulation::memory_rights> {
     // Parses format specifications of the form ['f' | 'e'].
     constexpr auto parse(format_parse_context& ctx) {
         auto it = ctx.begin(), end = ctx.end();
@@ -34,13 +34,13 @@ struct fmt::formatter<memory_manipulation::memory_rights> {
     // Formats the point p using the parsed format specification (presentation)
     // stored in this formatter.
     template <typename FormatContext>
-    auto format(memory_manipulation::memory_rights rights, FormatContext& ctx) {
+    auto format(MemoryManipulation::memory_rights rights, FormatContext& ctx) {
         // auto format(const point &p, FormatContext &ctx) -> decltype(ctx.out()) // c++11
           // ctx.out() is an output iterator to write to.
         return format_to(ctx.out(), "{}{}{}",
-            rights & memory_manipulation::memory_rights::mem_r ? 'r' : '-',
-            rights & memory_manipulation::memory_rights::mem_w ? 'w' : '-',
-            rights & memory_manipulation::memory_rights::mem_x ? 'x' : '-');
+            rights & MemoryManipulation::memory_rights::mem_r ? 'r' : '-',
+            rights & MemoryManipulation::memory_rights::mem_w ? 'w' : '-',
+            rights & MemoryManipulation::memory_rights::mem_x ? 'x' : '-');
     }
 };
 
@@ -314,7 +314,7 @@ enum class JumpType_e
 
 inline size_t region_size()
 {
-    return memory_manipulation::page_size();
+    return MemoryManipulation::PageSize();
 }
 
 inline size_t jumps_in_region()
@@ -324,8 +324,8 @@ inline size_t jumps_in_region()
 
 inline size_t page_addr_size(void* addr, size_t len, size_t page_size)
 {
-    uintptr_t start_addr = reinterpret_cast<uintptr_t>(memory_manipulation::page_round(addr, page_size));
-    uintptr_t end_addr = reinterpret_cast<uintptr_t>(memory_manipulation::page_round_up(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(addr) + len), page_size));
+    uintptr_t start_addr = reinterpret_cast<uintptr_t>(MemoryManipulation::PageRound(addr, page_size));
+    uintptr_t end_addr = reinterpret_cast<uintptr_t>(MemoryManipulation::PageRoundUp(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(addr) + len), page_size));
     return end_addr - start_addr;
 }
 
@@ -341,17 +341,17 @@ public:
     ~MemoryManager()
     {
         for (auto& v : jumps_regions)
-            memory_manipulation::memory_free(v, region_size());
+            MemoryManipulation::MemoryFree(v, region_size());
 
         for (auto& v : trampolines_regions)
-            memory_manipulation::memory_free(v, region_size());
+            MemoryManipulation::MemoryFree(v, region_size());
     }
 
     void* AllocJumpsRegion(void* hint_addr)
     {
         void* jump = nullptr;
 
-        jump = memory_manipulation::memory_alloc(hint_addr, region_size(), memory_manipulation::memory_rights::mem_rwx);
+        jump = MemoryManipulation::MemoryAlloc(hint_addr, region_size(), MemoryManipulation::memory_rights::mem_rwx);
 
         if (jump != nullptr)
         {
@@ -362,7 +362,7 @@ public:
                 memset(jump, 0, region_size());
 
                 // Protect trampoline region memory
-                memory_manipulation::memory_protect(jump, region_size(), memory_manipulation::memory_rights::mem_rx);
+                MemoryManipulation::MemoryProtect(jump, region_size(), MemoryManipulation::memory_rights::mem_rx);
 
                 jumps_regions.emplace_back(jump);
             }
@@ -370,7 +370,7 @@ public:
             {
                 SPDLOG_INFO("Relative jump from {} to {} is impossible", hint_addr, jump);
 
-                memory_manipulation::memory_free(jump, region_size());
+                MemoryManipulation::MemoryFree(jump, region_size());
                 jump = nullptr;
             }
         }
@@ -414,17 +414,17 @@ public:
     {
         SPDLOG_DEBUG("Freeing jump {}", jump);
 
-        if (!memory_manipulation::memory_protect(jump, AbsJump::GetMaxOpcodeSize(), memory_manipulation::memory_rights::mem_rwx))
+        if (!MemoryManipulation::MemoryProtect(jump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::memory_rights::mem_rwx))
             return;
 
         memset(jump, 0, AbsJump::GetMaxOpcodeSize());
 
-        memory_manipulation::memory_protect(jump, AbsJump::GetMaxOpcodeSize(), memory_manipulation::memory_rights::mem_rx);
+        MemoryManipulation::MemoryProtect(jump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::memory_rights::mem_rx);
     }
 
     memory_t* AllocTrampolineRegion()
     {
-        memory_t* mem = (memory_t*)memory_manipulation::memory_alloc(nullptr, region_size(), memory_manipulation::memory_rights::mem_rwx);
+        memory_t* mem = (memory_t*)MemoryManipulation::MemoryAlloc(nullptr, region_size(), MemoryManipulation::memory_rights::mem_rwx);
         if (mem == nullptr)
             return nullptr;
 
@@ -447,11 +447,11 @@ public:
                 if (!memory->used)
                 {
                     SPDLOG_DEBUG("Using free memory at {}", (void*)memory);
-                    if (!memory_manipulation::memory_protect(memory, sizeof(memory_t), memory_manipulation::memory_rights::mem_rwx))
+                    if (!MemoryManipulation::MemoryProtect(memory, sizeof(memory_t), MemoryManipulation::memory_rights::mem_rwx))
                         return nullptr;
 
                     memory->used = 1;
-                    memory_manipulation::memory_protect(memory, sizeof(memory_t), memory_manipulation::memory_rights::mem_rx);
+                    MemoryManipulation::MemoryProtect(memory, sizeof(memory_t), MemoryManipulation::memory_rights::mem_rx);
                     return memory->data;
                 }
             }
@@ -472,11 +472,11 @@ public:
         SPDLOG_DEBUG("Freeing trampoline {}", trampoline);
         memory_t* mem = reinterpret_cast<memory_t*>(reinterpret_cast<uint8_t*>(trampoline) - offsetof(memory_t, data));
 
-        if (!memory_manipulation::memory_protect(mem, sizeof(memory_t), memory_manipulation::memory_rights::mem_rwx))
+        if (!MemoryManipulation::MemoryProtect(mem, sizeof(memory_t), MemoryManipulation::memory_rights::mem_rwx))
             return;
         mem->used = 0;
 
-        memory_manipulation::memory_protect(mem, sizeof(memory_t), memory_manipulation::memory_rights::mem_rx);
+        MemoryManipulation::MemoryProtect(mem, sizeof(memory_t), MemoryManipulation::memory_rights::mem_rx);
     }
 };
 
@@ -662,7 +662,7 @@ namespace mini_detour
             if (relocatable_size < smallest_jump_size)
                 return false;
             
-            if (!memory_manipulation::memory_protect(func, relocatable_size, memory_manipulation::memory_rights::mem_rwx))
+            if (!MemoryManipulation::MemoryProtect(func, relocatable_size, MemoryManipulation::memory_rights::mem_rwx))
                 return false;
             
             if (relocatable_size >= absolute_jump_size)
@@ -676,7 +676,7 @@ namespace mini_detour
                 if (jump_mem == nullptr)
                     return false;
             
-                if (!memory_manipulation::memory_protect(jump_mem, AbsJump::GetMaxOpcodeSize(), memory_manipulation::memory_rights::mem_rwx))
+                if (!MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::memory_rights::mem_rwx))
                 {
                     mm.FreeJump(jump_mem);
                     return false;
@@ -684,14 +684,14 @@ namespace mini_detour
             
                 AbsJump::WriteOpcodes(jump_mem, hook_func, func_mode, hook_mode);
             
-                memory_manipulation::memory_protect(jump_mem, AbsJump::GetMaxOpcodeSize(), memory_manipulation::memory_rights::mem_rx);
-                memory_manipulation::flush_instruction_cache(jump_mem, AbsJump::GetMaxOpcodeSize());
+                MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::memory_rights::mem_rx);
+                MemoryManipulation::FlushInstructionCache(jump_mem, AbsJump::GetMaxOpcodeSize());
             
                 RelJump::WriteOpcodes(func, jump_mem, func_mode, hook_mode);
             }
             
-            memory_manipulation::memory_protect(func, relocatable_size, memory_manipulation::memory_rights::mem_rx);
-            memory_manipulation::flush_instruction_cache(func, relocatable_size);
+            MemoryManipulation::MemoryProtect(func, relocatable_size, MemoryManipulation::memory_rights::mem_rx);
+            MemoryManipulation::FlushInstructionCache(func, relocatable_size);
 
             return true;
         }
@@ -770,16 +770,16 @@ namespace mini_detour
             }
 
             // RWX on our original trampoline func
-            if (!memory_manipulation::memory_protect(_OriginalTrampolineAddress, total_original_trampoline_size, memory_manipulation::memory_rights::mem_rwx))
+            if (!MemoryManipulation::MemoryProtect(_OriginalTrampolineAddress, total_original_trampoline_size, MemoryManipulation::memory_rights::mem_rwx))
             {
-                SPDLOG_ERROR("Failed to protect trampoline memory ({} : {}), current rights: {}.", _OriginalTrampolineAddress, total_original_trampoline_size, memory_manipulation::get_region_infos(_OriginalTrampolineAddress).rights);
+                SPDLOG_ERROR("Failed to protect trampoline memory ({} : {}), current rights: {}.", _OriginalTrampolineAddress, total_original_trampoline_size, MemoryManipulation::GetRegionInfos(_OriginalTrampolineAddress).rights);
                 goto error;
             }
 
             // RWX on the orignal func
-            if (!memory_manipulation::memory_protect(func, _SavedCodeSize, memory_manipulation::memory_rights::mem_rwx))
+            if (!MemoryManipulation::MemoryProtect(func, _SavedCodeSize, MemoryManipulation::memory_rights::mem_rwx))
             {
-                SPDLOG_ERROR("Failed to protect function memory ({} : {}), current rights: {}.", func, _SavedCodeSize, memory_manipulation::get_region_infos(func).rights);
+                SPDLOG_ERROR("Failed to protect function memory ({} : {}), current rights: {}.", func, _SavedCodeSize, MemoryManipulation::GetRegionInfos(func).rights);
                 goto error;
             }
 
@@ -868,7 +868,7 @@ namespace mini_detour
                     goto error;
                 }
 
-                if (!memory_manipulation::memory_protect(jump_mem, AbsJump::GetMaxOpcodeSize(), memory_manipulation::memory_rights::mem_rwx))
+                if (!MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::memory_rights::mem_rwx))
                 {
                     mm.FreeJump(jump_mem);
                     SPDLOG_ERROR("Failed to protect jump memory.");
@@ -878,8 +878,8 @@ namespace mini_detour
                 SPDLOG_INFO("Trampoline located at: {}", jump_mem);
                 AbsJump::WriteOpcodes(jump_mem, hook_func, func_mode, hook_mode);
 
-                memory_manipulation::memory_protect(jump_mem, AbsJump::GetMaxOpcodeSize(), memory_manipulation::memory_rights::mem_rx);
-                memory_manipulation::flush_instruction_cache(jump_mem, AbsJump::GetMaxOpcodeSize());
+                MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::memory_rights::mem_rx);
+                MemoryManipulation::FlushInstructionCache(jump_mem, AbsJump::GetMaxOpcodeSize());
 
 #ifdef USE_SPDLOG
                 {
@@ -911,11 +911,11 @@ namespace mini_detour
             }
 
             // Try to restore memory rights, if it fails, no problem, we are just a bit too permissive
-            memory_manipulation::memory_protect(_OriginalTrampolineAddress, total_original_trampoline_size, memory_manipulation::memory_rights::mem_rx);
-            memory_manipulation::flush_instruction_cache(_OriginalTrampolineAddress, total_original_trampoline_size);
+            MemoryManipulation::MemoryProtect(_OriginalTrampolineAddress, total_original_trampoline_size, MemoryManipulation::memory_rights::mem_rx);
+            MemoryManipulation::FlushInstructionCache(_OriginalTrampolineAddress, total_original_trampoline_size);
 
-            memory_manipulation::memory_protect(func, relocatable_size, memory_manipulation::memory_rights::mem_rx);
-            memory_manipulation::flush_instruction_cache(func, relocatable_size);
+            MemoryManipulation::MemoryProtect(func, relocatable_size, MemoryManipulation::memory_rights::mem_rx);
+            MemoryManipulation::FlushInstructionCache(func, relocatable_size);
 
             _OriginalFuncAddress = func;
             _DetourFunc = hook_func;
@@ -953,14 +953,14 @@ namespace mini_detour
             if (_OriginalFuncAddress == nullptr)
                 return res;
 
-            if (!memory_manipulation::memory_protect(_OriginalFuncAddress, _SavedCodeSize, memory_manipulation::memory_rights::mem_rwx))
+            if (!MemoryManipulation::MemoryProtect(_OriginalFuncAddress, _SavedCodeSize, MemoryManipulation::memory_rights::mem_rwx))
                 return res;
 
             SPDLOG_INFO("Restoring hook");
 
             memcpy(_OriginalFuncAddress, _SavedCode, _SavedCodeSize);
-            memory_manipulation::memory_protect(_OriginalFuncAddress, _SavedCodeSize, memory_manipulation::memory_rights::mem_rx);
-            memory_manipulation::flush_instruction_cache(_OriginalFuncAddress, _SavedCodeSize);
+            MemoryManipulation::MemoryProtect(_OriginalFuncAddress, _SavedCodeSize, MemoryManipulation::memory_rights::mem_rx);
+            MemoryManipulation::FlushInstructionCache(_OriginalFuncAddress, _SavedCodeSize);
 
             SPDLOG_INFO("Restored hook");
 
