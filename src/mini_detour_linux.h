@@ -43,7 +43,7 @@ namespace MemoryManipulation {
 
         while (std::getline(f, s))
         {
-            if (!s.empty() && s.find("vdso") == std::string::npos && s.find("vsyscall") == std::string::npos)
+            if (!s.empty())
             {
                 str_it = &s[0];
                 str_end = s.data() + s.length();
