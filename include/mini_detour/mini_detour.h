@@ -4,8 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <vector>
+#include <string>
 
-namespace memory_manipulation
+namespace MemoryManipulation
 {
     enum memory_rights
     {
@@ -25,27 +26,28 @@ namespace memory_manipulation
         memory_rights rights;
         uintptr_t start;
         uintptr_t end;
+        std::string module_name;
     };
 
-    inline void* page_round_up(void* _addr, size_t page_size)
+    inline void* PageRoundUp(void* _addr, size_t page_size)
     {
         size_t addr = (size_t)_addr;
         return (void*)((addr + (page_size - 1)) & (((size_t)-1) ^ (page_size - 1)));
     }
 
-    inline void* page_round(void* _addr, size_t page_size)
+    inline void* PageRound(void* _addr, size_t page_size)
     {
         size_t addr = (size_t)_addr;
         return (void*)(addr & (((size_t)-1) ^ (page_size - 1)));
     }
 
-    size_t page_size();
-    region_infos_t get_region_infos(void* address);
-    std::vector<region_infos_t> get_all_allocated_regions();
-    bool memory_protect(void* address, size_t size, memory_rights rights, memory_rights* old_rights = nullptr);
-    void memory_free(void* address, size_t size);
-    void* memory_alloc(void* address_hint, size_t size, memory_rights rights);
-    int flush_instruction_cache(void* address, size_t size);
+    size_t PageSize();
+    region_infos_t GetRegionInfos(void* address);
+    std::vector<region_infos_t> GetAllRegions();
+    bool MemoryProtect(void* address, size_t size, memory_rights rights, memory_rights* old_rights = nullptr);
+    void MemoryFree(void* address, size_t size);
+    void* MemoryAlloc(void* address_hint, size_t size, memory_rights rights);
+    int FlushInstructionCache(void* address, size_t size);
 }
     
 namespace mini_detour

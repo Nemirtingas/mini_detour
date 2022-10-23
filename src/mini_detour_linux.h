@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <errno.h>
 
-namespace memory_manipulation {
+namespace MemoryManipulation {
     int memory_protect_rights_to_native(memory_rights rights)
     {
         switch (rights)
@@ -22,42 +22,63 @@ namespace memory_manipulation {
         }
     }
 
-    size_t page_size()
+    size_t PageSize()
     {
         return sysconf(_SC_PAGESIZE);
     }
 
-    region_infos_t get_region_infos(void* address)
+    region_infos_t GetRegionInfos(void* address)
     {
         region_infos_t res{};
 
-        unsigned int rights = memory_rights::mem_unset;
+        char* str_it;
+        const char* str_end;
 
         uintptr_t target = (uintptr_t)address;
+        uintptr_t start;
+        uintptr_t end;
         std::ifstream f("/proc/self/maps");
         std::string s;
+        unsigned int rights = mem_unset;
+
         while (std::getline(f, s))
         {
             if (!s.empty() && s.find("vdso") == std::string::npos && s.find("vsyscall") == std::string::npos)
             {
-                char* strend = &s[0];
-                uintptr_t start = (uintptr_t)strtoul(strend, &strend, 16);
-                uintptr_t end = (uintptr_t)strtoul(strend + 1, &strend, 16);
+                str_it = &s[0];
+                str_end = s.data() + s.length();
+
+                start = (uintptr_t)strtoul(str_it, &str_it, 16);
+                end = (uintptr_t)strtoul(str_it + 1, &str_it, 16);
                 if (start != 0 && end != 0 && start <= target && target < end) {
                     res.start = start;
                     res.end = end;
 
                     rights = mem_none;
 
-                    ++strend;
-                    if (strend[0] == 'r')
+                    ++str_it;
+                    if (str_it[0] == 'r')
                         rights |= mem_r;
 
-                    if (strend[1] == 'w')
+                    if (str_it[1] == 'w')
                         rights |= mem_w;
 
-                    if (strend[2] == 'x')
+                    if (str_it[2] == 'x')
                         rights |= mem_x;
+
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        while (*str_it != ' ' && str_it < str_end)
+                        {
+                            ++str_it;
+                        }
+                        while (*str_it == ' ' && str_it < str_end)
+                        {
+                            ++str_it;
+                        }
+                    }
+
+                    res.module_name = str_it;
 
                     break;
                 }
@@ -65,41 +86,74 @@ namespace memory_manipulation {
         }
 
         res.rights = (memory_rights)rights;
-
         return res;
     }
 
-    std::vector<region_infos_t> get_all_allocated_regions()
+    std::vector<region_infos_t> GetAllRegions()
     {
         std::vector<region_infos_t> mappings;
 
+        char* str_it;
+        const char* str_end;
+        uintptr_t start;
+        uintptr_t end;
+        uintptr_t old_end(0);
+        unsigned int rights;
+
         std::ifstream f("/proc/self/maps");
         std::string s;
+
         while (std::getline(f, s))
         {
-            if (!s.empty() && s.find("vdso") == std::string::npos && s.find("vsyscall") == std::string::npos)
+            if (!s.empty())
             {
-                char* strend = &s[0];
-                uintptr_t start = (uintptr_t)strtoul(strend, &strend, 16);
-                uintptr_t end = (uintptr_t)strtoul(strend + 1, &strend, 16);
+                str_it = &s[0];
+                str_end = s.data() + s.length();
+                start = (uintptr_t)strtoul(str_it, &str_it, 16);
+                end = (uintptr_t)strtoul(str_it + 1, &str_it, 16);
                 if (start != 0 && end != 0)
                 {
-                    unsigned int rights = mem_none;
+                    if (old_end != start)
+                    {
+                        mappings.emplace_back(region_infos_t{
+                            memory_rights::mem_unset,
+                            old_end,
+                            start,
+                            std::string(),
+                        });
+                    }
 
-                    ++strend;
-                    if (strend[0] == 'r')
+                    old_end = end;
+
+                    rights = memory_rights::mem_none;
+
+                    ++str_it;
+                    if (str_it[0] == 'r')
                         rights |= mem_r;
 
-                    if (strend[1] == 'w')
+                    if (str_it[1] == 'w')
                         rights |= mem_w;
 
-                    if (strend[2] == 'x')
+                    if (str_it[2] == 'x')
                         rights |= mem_x;
+
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        while (*str_it != ' ' && str_it < str_end)
+                        {
+                            ++str_it;
+                        }
+                        while (*str_it == ' ' && str_it < str_end)
+                        {
+                            ++str_it;
+                        }
+                    }
 
                     mappings.emplace_back(region_infos_t{
                         (memory_rights)rights,
                         start,
                         end,
+                        str_it,
                     });
                 }
             }
@@ -108,13 +162,13 @@ namespace memory_manipulation {
         return mappings;
     }
 
-    bool memory_protect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
+    bool MemoryProtect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
     {
         region_infos_t infos;
         if(old_rights != nullptr)
-            infos = get_region_infos(address);
+            infos = GetRegionInfos(address);
 
-        bool res = mprotect(page_round(address, page_size()), page_addr_size(address, size, page_size()), memory_protect_rights_to_native(rights)) == 0;
+        bool res = mprotect(PageRound(address, PageSize()), page_addr_size(address, size, PageSize()), memory_protect_rights_to_native(rights)) == 0;
 
         if (old_rights != nullptr)
             *old_rights = infos.rights;
@@ -122,27 +176,27 @@ namespace memory_manipulation {
         return res;
     }
 
-    void memory_free(void* address, size_t size)
+    void MemoryFree(void* address, size_t size)
     {
         if (address != nullptr)
             munmap(address, size);
     }
 
-    void* memory_alloc(void* address_hint, size_t size, memory_rights rights)
+    void* MemoryAlloc(void* address_hint, size_t size, memory_rights rights)
     {
         if (address_hint != nullptr)
         {
-            uintptr_t address = reinterpret_cast<uintptr_t>(page_round(address_hint, page_size())) + page_size();
+            uintptr_t address = reinterpret_cast<uintptr_t>(PageRound(address_hint, PageSize())) + PageSize();
             region_infos_t infos;
-            size = page_addr_size((void*)address, size, page_size());
-            int pages = size / page_size();
+            size = page_addr_size((void*)address, size, PageSize());
+            int pages = size / PageSize();
 
-            for (int i = 0; i < 100000; ++i, address += page_size())
+            for (int i = 0; i < 100000; ++i, address += PageSize())
             {
                 bool found = true;
                 for (int j = 0; j < pages; ++j)
                 {
-                    infos = get_region_infos((void*)address);
+                    infos = GetRegionInfos((void*)address);
                     if (infos.start != 0)
                     {
                         found = false;
@@ -158,13 +212,13 @@ namespace memory_manipulation {
                 }
             }
 
-            address = reinterpret_cast<uintptr_t>(page_round(address_hint, page_size())) - page_size();
-            for (int i = 0; i < 100000; ++i, address -= page_size())
+            address = reinterpret_cast<uintptr_t>(PageRound(address_hint, PageSize())) - PageSize();
+            for (int i = 0; i < 100000; ++i, address -= PageSize())
             {
                 bool found = true;
                 for (int j = 0; j < pages; ++j)
                 {
-                    infos = get_region_infos((void*)address);
+                    infos = GetRegionInfos((void*)address);
                     if (infos.start != 0)
                     {
                         found = false;
@@ -186,7 +240,7 @@ namespace memory_manipulation {
         return mmap(address_hint, size, memory_protect_rights_to_native(rights), MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     }
 
-    int flush_instruction_cache(void* address, size_t size)
+    int FlushInstructionCache(void* address, size_t size)
     {
         return 1;
     }

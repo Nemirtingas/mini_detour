@@ -5,6 +5,7 @@
 #include <mach/mach_vm.h>
 #include <mach/vm_prot.h>
 #include <mach/vm_map.h>
+
 #include <unistd.h>
 #include <errno.h>
 
@@ -76,7 +77,7 @@ std::string kern_return_t_2_str(kern_return_t v)
 
 #endif
 
-namespace memory_manipulation {
+namespace MemoryManipulation {
     size_t memory_protect_rights_to_native(memory_rights rights)
     {
         switch (rights)
@@ -93,7 +94,7 @@ namespace memory_manipulation {
         }
     }
 
-    region_infos_t get_region_infos(void* address)
+    region_infos_t GetRegionInfos(void* address)
     {
         region_infos_t res{};
 
@@ -134,9 +135,12 @@ namespace memory_manipulation {
         return res;
     }
 
-    std::vector<region_infos_t> get_all_allocated_regions()
+    std::vector<region_infos_t> GetAllRegions()
     {
         std::vector<region_infos_t> mappings;
+
+        mach_port_t self_task = mach_task_self();
+        mach_vm_address_t old_end = 0;
 
         mach_vm_address_t vm_address = 0;
         mach_vm_size_t size;
@@ -144,9 +148,22 @@ namespace memory_manipulation {
         mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
         mach_port_t object_name = MACH_PORT_NULL;
 
-        while (mach_vm_region(mach_task_self(), &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name) == KERN_SUCCESS)
+        std::string module_name;
+        unsigned int rights;
+
+        while (mach_vm_region(self_task, &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name) == KERN_SUCCESS)
         {
-            unsigned int rights = memory_rights::mem_none;
+            if (old_end != vm_address)
+            {
+                mappings.emplace_back(region_infos_t{
+                    memory_rights::mem_unset,
+                    (uintptr_t)old_end,
+                    (uintptr_t)vm_address,
+                    std::string(),
+                });
+            }
+
+            rights = memory_rights::mem_none;
 
             if (infos.protection & VM_PROT_READ)
                 rights |= mem_r;
@@ -159,27 +176,29 @@ namespace memory_manipulation {
 
             mappings.emplace_back(region_infos_t{
                 (memory_rights)rights,
-                static_cast<uintptr_t>(vm_address),
-                static_cast<uintptr_t>(vm_address) + size,
+                (uintptr_t)vm_address,
+                (uintptr_t)vm_address + size,
+                std::move(module_name),
             });
 
             vm_address += size;
+            old_end = vm_address;
         }
 
         return mappings;
     }
 
-    size_t page_size()
+    size_t PageSize()
     {
         return sysconf(_SC_PAGESIZE);
     }
 
-    bool memory_protect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
+    bool MemoryProtect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
     {
         kern_return_t kret;
         region_infos_t infos;
         if (old_rights != nullptr)
-            infos = get_region_infos(address);
+            infos = GetRegionInfos(address);
 
         kret = mach_vm_protect(mach_task_self(), (mach_vm_address_t)address, size, FALSE, memory_protect_rights_to_native(rights));
 
@@ -192,13 +211,13 @@ namespace memory_manipulation {
         return kret == KERN_SUCCESS;
     }
 
-    void memory_free(void* address, size_t size)
+    void MemoryFree(void* address, size_t size)
     {
         if (address != nullptr)
             mach_vm_deallocate(mach_task_self(), (mach_vm_address_t)address, size);
     }
 
-    void* memory_alloc(void* address_hint, size_t size, memory_rights rights)
+    void* MemoryAlloc(void* address_hint, size_t size, memory_rights rights)
     {
         kern_return_t kret;
         mach_vm_address_t address;
@@ -216,17 +235,17 @@ namespace memory_manipulation {
         if (address_hint != nullptr)
         {
             region_infos_t infos;
-            address = reinterpret_cast<mach_vm_address_t>(page_round(address_hint, page_size())) - page_size();
+            address = reinterpret_cast<mach_vm_address_t>(PageRound(address_hint, PageSize())) - PageSize();
 
-            size = page_addr_size((void*)address, size, page_size());
-            int pages = size / page_size();
+            size = page_addr_size((void*)address, size, PageSize());
+            int pages = size / PageSize();
 
-            for (int i = 0; i < 100000; ++i, address -= page_size())
+            for (int i = 0; i < 100000; ++i, address -= PageSize())
             {
                 bool found = true;
                 for (int j = 0; j < pages; ++j)
                 {
-                    infos = get_region_infos((void*)address);
+                    infos = GetRegionInfos((void*)address);
                     if (infos.start == (uintptr_t)address)
                     {
                         found = false;
@@ -240,19 +259,19 @@ namespace memory_manipulation {
                     if (kret == KERN_SUCCESS)
                     {
                         SPDLOG_INFO("Allocated {} for hint {}", (void*)address, address_hint);
-                        memory_protect(reinterpret_cast<void*>(address), size, rights);
+                        MemoryProtect(reinterpret_cast<void*>(address), size, rights);
                         return reinterpret_cast<void*>(address);
                     }
                 }
             }
 
-            address = reinterpret_cast<mach_vm_address_t>(page_round(address_hint, page_size())) + page_size();
-            for (int i = 0; i < 100000 && (void*)address < max_user_address; ++i, address += page_size())
+            address = reinterpret_cast<mach_vm_address_t>(PageRound(address_hint, PageSize())) + PageSize();
+            for (int i = 0; i < 100000 && (void*)address < max_user_address; ++i, address += PageSize())
             {
                 bool found = true;
                 for (int j = 0; j < pages; ++j)
                 {
-                    infos = get_region_infos((void*)address);
+                    infos = GetRegionInfos((void*)address);
                     if (infos.start == (uintptr_t)address)
                     {
                         found = false;
@@ -266,7 +285,7 @@ namespace memory_manipulation {
                     if (kret == KERN_SUCCESS)
                     {
                         SPDLOG_INFO("Allocated {} for hint {}", (void*)address, address_hint);
-                        memory_protect(reinterpret_cast<void*>(address), size, rights);
+                        MemoryProtect(reinterpret_cast<void*>(address), size, rights);
                         return reinterpret_cast<void*>(address);
                     }
                 }
@@ -283,13 +302,13 @@ namespace memory_manipulation {
         }
         else
         {
-            memory_protect(reinterpret_cast<void*>(address), size, rights);
+            MemoryProtect(reinterpret_cast<void*>(address), size, rights);
         }
 
         return reinterpret_cast<void*>(address);
     }
 
-    int flush_instruction_cache(void* address, size_t size)
+    int FlushInstructionCache(void* address, size_t size)
     {
         return 1;
     }
