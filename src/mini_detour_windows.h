@@ -85,8 +85,8 @@ namespace MemoryManipulation {
                 {
                     while (wmodule_name_size != 0)
                     {
-                        wmodule_name_size = GetModuleFileNameW(module_handle, &wmodule_name[0], wmodule_name.capacity());
-                        if (wmodule_name_size == wmodule_name.capacity())
+                        wmodule_name_size = GetModuleFileNameW(module_handle, &wmodule_name[0], wmodule_name.size());
+                        if (wmodule_name_size == wmodule_name.size())
                         {
                             if (wmodule_name_size > 0x100000)
                                 break;
@@ -103,6 +103,8 @@ namespace MemoryManipulation {
                                 module_name.resize(wmodule_name_size);
                                 WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wmodule_name.length(), &module_name[0], module_name.size(), nullptr, nullptr);
                             }
+
+                            module_name.resize(module_name.capacity());
                             break;
                         }
                     }
