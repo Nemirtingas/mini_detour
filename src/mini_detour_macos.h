@@ -176,8 +176,8 @@ namespace MemoryManipulation {
 
             mappings.emplace_back(region_infos_t{
                 (memory_rights)rights,
-                (uintptr_t)vm_address,
-                (uintptr_t)vm_address + size,
+                static_cast<uintptr_t>(vm_address),
+                static_cast<uintptr_t>(vm_address + size),
                 std::move(module_name),
             });
 
