@@ -969,7 +969,7 @@ namespace mini_detour
 
             res = _OriginalFuncAddress;
 
-            if (std::equal(buffer.begin(), buffer.end(), _HookCode.begin(), _HookCode.end()))
+            if (std::equal(buffer.begin(), buffer.end(), _HookCode.begin(), _HookCode.end(), []( char l, char r ) { return l == r; }))
             {// Our hook code is still there, we can restore the old instructions.
                 if (!MemoryManipulation::MemoryProtect(_OriginalFuncAddress, _SavedCode.size(), MemoryManipulation::memory_rights::mem_rwx))
                     return res;
