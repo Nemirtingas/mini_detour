@@ -57,9 +57,6 @@ namespace mini_detour
         class HookImpl* _Impl;
 
     public:
-        // Set this to true to restore the original function on hook destruction
-        bool restore_on_destroy;
-
         hook();
         hook(hook const&) = delete;
         hook(hook&&) noexcept;
@@ -68,7 +65,8 @@ namespace mini_detour
         hook& operator=(hook const&) = delete;
         hook& operator=(hook &&) noexcept;
 
-        void reset();
+        void RestoreOnDestroy(bool restore);
+
         bool can_hook(void* func);
         static bool replace_func(void* func, void* hook_func);
         void* hook_func(void* func, void* hook_func);

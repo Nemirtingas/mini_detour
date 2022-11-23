@@ -46,12 +46,12 @@ struct memory_t
 
 struct AbsJump
 {
-    static inline size_t WriteOpcodes(void* source, void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void* buffer, void* source, void* jump_destination, int source_mode, int dest_mode)
     {
         uint32_t addr = reinterpret_cast<uint32_t>(jump_destination) | (dest_mode ? 1 : 0);
         if (source_mode)
         {
-            uint16_t* opcode = reinterpret_cast<uint16_t*>(source);
+            uint16_t* opcode = reinterpret_cast<uint16_t*>(buffer);
 
             // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/MOV--immediate-?lang=en
             // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/MOVT?lang=en
@@ -83,7 +83,7 @@ struct AbsJump
         }
         else
         {
-            uint32_t* opcode = reinterpret_cast<uint32_t*>(source);
+            uint32_t* opcode = reinterpret_cast<uint32_t*>(buffer);
 
             opcode[0] = 0xe51ff004; // ldr pc, [pc, #-4]
             opcode[1] = reinterpret_cast<uint32_t>(jump_destination);
@@ -105,12 +105,12 @@ struct AbsJump
 
 struct RelJump
 {
-    static inline size_t WriteOpcodes(void* source, void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void* buffer, void* source, void* jump_destination, int source_mode, int dest_mode)
     {
         int32_t rel_addr = static_cast<int32_t>(reinterpret_cast<uintptr_t>(jump_destination) - reinterpret_cast<uintptr_t>(source));
         if (source_mode)
         {
-            uint16_t* opcode = reinterpret_cast<uint16_t*>(source);
+            uint16_t* opcode = reinterpret_cast<uint16_t*>(buffer);
 
             if (rel_addr >= -2044 && rel_addr <= 2050)
             {// 2 bytes opcode
@@ -170,7 +170,7 @@ struct RelJump
 
             v.rel_addr = (rel_addr / 4) - 2;
 
-            *reinterpret_cast<uint32_t*>(source) = 0xea000000 | v.addr;
+            *reinterpret_cast<uint32_t*>(buffer) = 0xea000000 | v.addr;
         }
 
         return 4;
