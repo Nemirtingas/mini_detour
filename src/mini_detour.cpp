@@ -383,7 +383,7 @@ public:
             }
             else
             {
-                SPDLOG_INFO("Relative jump from {} to {} is impossible", hint_addr, jump);
+                SPDLOG_INFO("Relative jump from {} to {} is impossible", hint_addr, jump_table);
 
                 MemoryManipulation::MemoryFree(jump_table, region_size());
                 jump_table = nullptr;
@@ -401,7 +401,7 @@ public:
             {
                 if (!region.bitmap[i] && addresses_are_relative_jumpable(address_hint, region.jump_table + i))
                 {
-                    SPDLOG_INFO("Using free jump {} in region {} for {}", region_base, jumps_region, address_hint);
+                    SPDLOG_INFO("Using free jump {} in region {} for {}", (void*)(region.jump_table + i), (void*)region.jump_table, address_hint);
                     region.bitmap[i] = true;
                     return region.jump_table + i;
                 }
@@ -783,7 +783,7 @@ namespace mini_detour
             // RWX on the orignal func
             if (!MemoryManipulation::MemoryProtect(func, _SavedCode.size(), MemoryManipulation::memory_rights::mem_rwx))
             {
-                SPDLOG_ERROR("Failed to protect function memory ({} : {}), current rights: {}.", func, _SavedCodeSize, MemoryManipulation::GetRegionInfos(func).rights);
+                SPDLOG_ERROR("Failed to protect function memory ({} : {}), current rights: {}.", func, _SavedCode.size(), MemoryManipulation::GetRegionInfos(func).rights);
                 goto error;
             }
 
