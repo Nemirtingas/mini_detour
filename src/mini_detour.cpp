@@ -97,6 +97,20 @@ struct fmt::formatter<MemoryManipulation::memory_rights> {
 //#include <keystone/keystone.h>
 #include <capstone/capstone.h>
 
+namespace detail
+{
+    template<typename It1, typename It2>
+    static bool equal(It1 first1, It1 last1, It2 first2, It2 last2)
+    {
+        while (first1 != last1 && first2 != last2)
+        {
+            if (*first1++ != *first2++)
+                return false;
+        }
+        return first1 == last1 && first2 == last2;
+    }
+}
+
 //class CodeAsm {
 //    ks_engine* _Engine;
 //    std::string _AssemblySource;
@@ -969,7 +983,7 @@ namespace mini_detour
 
             res = _OriginalFuncAddress;
 
-            if (std::equal(buffer.begin(), buffer.end(), _HookCode.begin(), _HookCode.end(), []( char l, char r ) { return l == r; }))
+            if (detail::equal(buffer.begin(), buffer.end(), _HookCode.begin(), _HookCode.end()))
             {// Our hook code is still there, we can restore the old instructions.
                 if (!MemoryManipulation::MemoryProtect(_OriginalFuncAddress, _SavedCode.size(), MemoryManipulation::memory_rights::mem_rwx))
                     return res;
