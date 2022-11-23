@@ -29,7 +29,7 @@ struct memory_t
 
 struct AbsJump
 {
-    static inline size_t WriteOpcodes(void* source, void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void* buffer, void* source, void* jump_destination, int source_mode, int dest_mode)
     {
         uint8_t _code[6]{
           0x68,                   // PUSH
@@ -38,7 +38,7 @@ struct AbsJump
         };
 
         *reinterpret_cast<void**>(&_code[1]) = jump_destination;
-        memcpy(source, _code, GetMaxOpcodeSize());
+        memcpy(buffer, _code, GetMaxOpcodeSize());
         return GetMaxOpcodeSize();
     }
 
@@ -61,7 +61,7 @@ struct AbsJump
 
 struct RelJump
 {
-    static inline size_t WriteOpcodes(void* source, void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void* buffer, void* source, void* jump_destination, int source_mode, int dest_mode)
     {
         uint8_t code[5] =
         {
@@ -70,7 +70,7 @@ struct RelJump
         };
         
         *reinterpret_cast<int32_t*>(&code[1]) = absolute_addr_to_relative(source, jump_destination);
-        memcpy(source, code, GetMaxOpcodeSize());
+        memcpy(buffer, code, GetMaxOpcodeSize());
 
         return GetMaxOpcodeSize();
     }

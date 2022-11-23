@@ -68,7 +68,7 @@ struct memory_t
 
 struct AbsJump
 {
-    static inline size_t WriteOpcodes(void* source, void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void* buffer, void* source, void* jump_destination, int source_mode, int dest_mode)
     {
         uint32_t movz;     // movz x17, 0
         uint32_t movk16;   // movk x17, 0, lsl 16
@@ -83,7 +83,7 @@ struct AbsJump
         movk48 = 0xf2e00011 | uint32_t((i_addr >> 48) & 0xffff) << 5;
         br = 0xd61f0220;
 
-        uint32_t* opcode = reinterpret_cast<uint32_t*>(source);
+        uint32_t* opcode = reinterpret_cast<uint32_t*>(buffer);
 
         switch (GetOpcodeSize(jump_destination, source_mode, dest_mode))
         {
@@ -150,7 +150,7 @@ struct AbsJump
 
 struct RelJump
 {
-    static inline size_t WriteOpcodes(void* source, void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void* buffer, void* source, void* jump_destination, int source_mode, int dest_mode)
     {
         union
         {
@@ -163,7 +163,7 @@ struct RelJump
 
         v.rel_addr = (reinterpret_cast<uintptr_t>(jump_destination) - reinterpret_cast<uintptr_t>(source)) / 4;
 
-        *reinterpret_cast<uint32_t*>(source) = 0x14000000 | v.addr;
+        *reinterpret_cast<uint32_t*>(buffer) = 0x14000000 | v.addr;
 
         return 4;
     }
