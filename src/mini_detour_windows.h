@@ -91,8 +91,7 @@ namespace MemoryManipulation {
                             if (wmodule_name_size > 0x100000)
                                 break;
 
-                            wmodule_name_size *= 2;
-                            wmodule_name.resize(wmodule_name_size);
+                            wmodule_name.resize(wmodule_name_size * 2);
                         }
                         else if (wmodule_name_size != 0)
                         {
@@ -104,7 +103,7 @@ namespace MemoryManipulation {
                                 WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wmodule_name.length(), &module_name[0], module_name.size(), nullptr, nullptr);
                             }
 
-                            module_name.resize(module_name.capacity());
+                            wmodule_name.resize(wmodule_name.capacity());
                             break;
                         }
                     }
