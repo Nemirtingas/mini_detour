@@ -308,6 +308,27 @@ namespace MemoryManipulation {
         return reinterpret_cast<void*>(address);
     }
 
+    bool SafeMemoryRead(void* address, uint8_t* buffer, size_t size)
+    {
+        mach_port_t task = mach_task_self();
+        mach_vm_size_t read_count = 0;
+
+        if (mach_vm_read_overwrite(task, (mach_vm_address_t)address, (mach_vm_size_t)size, (mach_vm_address_t)buffer, &read_count) != KERN_SUCCESS || read_count != size)
+            return false;
+
+        return true;
+    }
+
+    bool SafeMemoryWrite(void* address, const uint8_t* buffer, size_t size)
+    {
+        mach_port_t task = mach_task_self();
+
+        if (mach_vm_write(task, (mach_vm_address_t)address, (vm_offset_t)buffer, (mach_msg_type_number_t)size) != KERN_SUCCESS)
+            return false;
+
+        return true;
+    }
+
     int FlushInstructionCache(void* address, size_t size)
     {
         return 1;

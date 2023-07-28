@@ -5,10 +5,6 @@
 #include <spdlog/spdlog-inl.h>
 #include <iostream>
 
-static void* mem;
-
-const int alloc_size = 50;
-
 #if defined(WIN64) || defined(_WIN64) || defined(__MINGW64__) ||\
     defined(WIN32) || defined(_WIN32) || defined(__MINGW32__)
 #define TESTS_OS_WINDOWS
@@ -58,12 +54,19 @@ int main(int argc, char* argv[]) {
 }
 
 TEST_CASE("Memory allocation", "[mem alloc]") {
-    mem = MemoryManipulation::MemoryAlloc((void*)&main, alloc_size, MemoryManipulation::memory_rights::mem_none);
+    const int alloc_size = 50;
+    void* mem = MemoryManipulation::MemoryAlloc(nullptr, alloc_size, MemoryManipulation::memory_rights::mem_rw);
+
     CHECK(mem != nullptr);
+
+    MemoryManipulation::MemoryFree(mem, alloc_size);
 }
 
 TEST_CASE("Memory protect", "[memprotect]") {
     MemoryManipulation::memory_rights old_rights;
+
+    const int alloc_size = 50;
+    void* mem = MemoryManipulation::MemoryAlloc(nullptr, alloc_size, MemoryManipulation::memory_rights::mem_none);
 
     CHECK(mem != nullptr);
 
@@ -136,9 +139,28 @@ TEST_CASE("Memory protect", "[memprotect]") {
     CHECK(infos.start != 0);
     CHECK(infos.end != 0);
     CHECK(infos.rights == MemoryManipulation::memory_rights::mem_rwx);
+
+    MemoryManipulation::MemoryFree(mem, alloc_size);
 }
 
-TEST_CASE("Memory free", "[memfree]") {
+TEST_CASE("Memory read/write", "[memread/memwrite]")
+{
+    const int alloc_size = 50;
+    void* mem = MemoryManipulation::MemoryAlloc(nullptr, alloc_size, MemoryManipulation::memory_rights::mem_r);
+    uint8_t buffer[30];
+
+    CHECK(mem != nullptr);
+
+    CHECK(MemoryManipulation::SafeMemoryWrite(mem, (const uint8_t*)"0123456789ABCDEFabcdef", 22) == false);
+
+    MemoryManipulation::MemoryProtect(mem, alloc_size, MemoryManipulation::memory_rights::mem_rw);
+    CHECK(MemoryManipulation::SafeMemoryWrite(mem, (const uint8_t*)"0123456789ABCDEFabcdef", 22) == true);
+
+    MemoryManipulation::MemoryProtect(mem, alloc_size, MemoryManipulation::memory_rights::mem_r);
+    CHECK(MemoryManipulation::SafeMemoryRead(mem, buffer, 22) == true);
+
+    CHECK(memcmp(buffer, "0123456789ABCDEFabcdef", 22) == 0);
+
     MemoryManipulation::MemoryFree(mem, alloc_size);
 }
 
