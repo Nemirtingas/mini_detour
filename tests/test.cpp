@@ -162,6 +162,10 @@ TEST_CASE("Memory read/write", "[memread/memwrite]")
     CHECK(memcmp(buffer, "0123456789ABCDEFabcdef", 22) == 0);
 
     MemoryManipulation::MemoryFree(mem, alloc_size);
+
+    memset(buffer, 0, 30);
+    CHECK(MemoryManipulation::SafeMemoryRead(mem, buffer, 30) == false);
+    CHECK(memcmp(buffer, "\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0", 30) == 0);
 }
 
 TEST_CASE("Memory mappings", "[vmmap]") {
