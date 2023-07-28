@@ -188,6 +188,28 @@ namespace MemoryManipulation {
 
         return nullptr;
     }
+    
+    bool SafeMemoryRead(void* address, uint8_t* buffer, size_t size)
+    {
+        auto hProcess = GetCurrentProcess();
+        size_t readSize = 0;
+
+        if (ReadProcessMemory(hProcess, address, buffer, size, &readSize) == FALSE || readSize != size)
+            return false;
+
+        return true;
+    }
+
+    bool SafeMemoryWrite(void* address, const uint8_t* buffer, size_t size)
+    {
+        auto hProcess = GetCurrentProcess();
+        size_t writeSize = 0;
+
+        if (WriteProcessMemory(hProcess, address, buffer, size, &writeSize) == FALSE || writeSize != size)
+            return false;
+
+        return true;
+    }
 
     int FlushInstructionCache(void* pBase, size_t size)
     {

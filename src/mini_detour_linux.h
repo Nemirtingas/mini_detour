@@ -2,6 +2,7 @@
 #define MINI_DETOUR_LINUX_H
 
 #include <sys/mman.h>
+#include <sys/uio.h>
 #include <unistd.h>
 #include <errno.h>
 
@@ -238,6 +239,38 @@ namespace MemoryManipulation {
         }
 
         return mmap(address_hint, size, memory_protect_rights_to_native(rights), MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    }
+
+    bool SafeMemoryRead(void* address, uint8_t* buffer, size_t size)
+    {
+        struct iovec local;
+        struct iovec remote;
+
+        local.iov_base = buffer;
+        local.iov_len = size;
+        remote.iov_base = (void*)address;
+        remote.iov_len = size;
+
+        if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != size)
+            return false;
+
+        return true;
+    }
+
+    bool SafeMemoryWrite(void* address, const uint8_t* buffer, size_t size)
+    {
+        struct iovec local;
+        struct iovec remote;
+
+        local.iov_base = (void*)buffer;
+        local.iov_len = size;
+        remote.iov_base = (void*)address;
+        remote.iov_len = size;
+
+        if (process_vm_writev(getpid(), &local, 1, &remote, 1, 0) != size)
+            return false;
+
+        return true;
     }
 
     int FlushInstructionCache(void* address, size_t size)

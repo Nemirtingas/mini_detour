@@ -47,6 +47,8 @@ namespace MemoryManipulation
     bool MemoryProtect(void* address, size_t size, memory_rights rights, memory_rights* old_rights = nullptr);
     void MemoryFree(void* address, size_t size);
     void* MemoryAlloc(void* address_hint, size_t size, memory_rights rights);
+    bool SafeMemoryRead(void* address, uint8_t* buffer, size_t size);
+    bool SafeMemoryWrite(void* address, const uint8_t* buffer, size_t size);
     int FlushInstructionCache(void* address, size_t size);
 }
     
