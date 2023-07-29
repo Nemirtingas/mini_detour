@@ -192,7 +192,7 @@ namespace MemoryManipulation {
     bool SafeMemoryRead(void* address, uint8_t* buffer, size_t size)
     {
         auto hProcess = GetCurrentProcess();
-        size_t readSize = 0;
+        SIZE_T readSize = 0;
 
         if (ReadProcessMemory(hProcess, address, buffer, size, &readSize) == FALSE || readSize != size)
             return false;
@@ -203,7 +203,7 @@ namespace MemoryManipulation {
     bool SafeMemoryWrite(void* address, const uint8_t* buffer, size_t size)
     {
         auto hProcess = GetCurrentProcess();
-        size_t writeSize = 0;
+        SIZE_T writeSize = 0;
 
         if (WriteProcessMemory(hProcess, address, buffer, size, &writeSize) == FALSE || writeSize != size)
             return false;
