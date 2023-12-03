@@ -240,6 +240,15 @@ public:
         _CloseHandle();
 
         cs_err err;
+        cs_opt_mem mem = {
+            (cs_malloc_t)std::malloc,
+            (cs_calloc_t)std::calloc,
+            (cs_realloc_t)std::realloc,
+            (cs_free_t)std::free,
+            (cs_vsnprintf_t)std::vsnprintf
+        };
+
+        cs_option(NULL, CS_OPT_MEM, (size_t) &mem);
         if ((err = cs_open(arch, mode, &_DisasmHandle)) != cs_err::CS_ERR_OK)
             return err;
 
