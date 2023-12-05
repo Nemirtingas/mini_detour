@@ -248,7 +248,7 @@ public:
             (cs_vsnprintf_t)std::vsnprintf
         };
 
-        cs_option(NULL, CS_OPT_MEM, (size_t) &mem);
+        cs_option(NULL, cs_opt_type::CS_OPT_MEM, (size_t) &mem);
         if ((err = cs_open(arch, mode, &_DisasmHandle)) != cs_err::CS_ERR_OK)
             return err;
 
