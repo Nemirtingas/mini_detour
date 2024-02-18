@@ -268,7 +268,7 @@ if(BUILD_MINIDETOUR_TESTS)
 
 endif()
 
-add_library(MiniDetour::MiniDetour ALIAS mini_detour)
+add_library(Nemirtingas::MiniDetour ALIAS mini_detour)
 set_target_properties(mini_detour PROPERTIES EXPORT_NAME MiniDetour)
 
 ##################
@@ -287,6 +287,6 @@ install(FILES ${MINIDETOUR_HEADERS}
 install(
   EXPORT MiniDetourTargets
   FILE MiniDetourConfig.cmake
-  NAMESPACE MiniDetour::
+  NAMESPACE Nemirtingas::
   DESTINATION lib/cmake/MiniDetour
 )
