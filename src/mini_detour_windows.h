@@ -7,6 +7,12 @@
 #include <Windows.h>
 
 namespace MemoryManipulation {
+#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
+    const void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
+#elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
+    const void* max_user_address = reinterpret_cast<void*>(0x70000000);
+#endif
+
     DWORD memory_protect_rights_to_native(memory_rights rights)
     {
         switch (rights)
@@ -172,6 +178,9 @@ namespace MemoryManipulation {
 
     void* MemoryAlloc(void* _addressHint, size_t size, memory_rights rights)
     {
+        if (_addressHint > max_user_address)
+            _addressHint = (void*)max_user_address;
+
         auto freeRegions = GetFreeRegions();
 
         auto pageSize = PageSize();
@@ -197,6 +206,9 @@ namespace MemoryManipulation {
         {
             for (auto allocAddress = ((region.start + mmGranularityMinusOne) & ~mmGranularityMinusOne); (allocAddress + size) < region.end; allocAddress += allocationAlignement)
             {
+                if (allocAddress > (uintptr_t)max_user_address)
+                    break;
+
                 auto pbAlloc = (void*)VirtualAllocEx(hProcess, (PVOID)allocAddress, size, MEM_RESERVE | MEM_COMMIT, nativeRights);
 
                 if (pbAlloc != nullptr)

@@ -7,6 +7,12 @@
 #include <errno.h>
 
 namespace MemoryManipulation {
+#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
+    const void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
+#elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
+    const void* max_user_address = reinterpret_cast<void*>(0x70000000);
+#endif
+
     int memory_protect_rights_to_native(memory_rights rights)
     {
         switch (rights)
@@ -238,6 +244,9 @@ namespace MemoryManipulation {
         {
             for (auto allocAddress = region.start; (allocAddress + size) < region.end; allocAddress += pageSize)
             {
+                if (allocAddress > (uintptr_t)max_user_address)
+                    break;
+
                 void* r = mmap((void*)allocAddress, size, nativeRights, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
                 if (r != nullptr)
@@ -251,6 +260,9 @@ namespace MemoryManipulation {
 
     void* MemoryAlloc(void* _addressHint, size_t size, memory_rights rights)
     {
+        if (_addressHint > max_user_address)
+            _addressHint = (void*)max_user_address;
+
         auto pageSize = PageSize();
         auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
         size = page_addr_size((void*)addressHint, size, pageSize);
