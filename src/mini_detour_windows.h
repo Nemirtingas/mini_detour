@@ -110,12 +110,43 @@ namespace MemoryManipulation {
                 }
             }
 
-            mappings.emplace_back(region_infos_t{
+            mappings.emplace_back(
                 rights,
                 reinterpret_cast<uintptr_t>(mem_infos.BaseAddress),
                 reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize,
-                std::move(module_name),
-            });
+                std::move(module_name)
+            );
+            search_addr = reinterpret_cast<LPVOID>(reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize);
+        }
+
+        return mappings;
+    }
+
+    std::vector<region_infos_t> GetFreeRegions()
+    {
+        HANDLE process_handle = GetCurrentProcess();
+        LPVOID search_addr = nullptr;
+        MEMORY_BASIC_INFORMATION mem_infos{};
+        std::string module_name;
+        std::wstring wmodule_name(1024, L'\0');
+        DWORD wmodule_name_size = 1024;
+        HMODULE module_handle;
+
+        std::vector<region_infos_t> mappings;
+
+        mappings.reserve(256);
+        while (VirtualQueryEx(process_handle, search_addr, &mem_infos, sizeof(mem_infos)) != 0)
+        {
+            if (mem_infos.State == MEM_FREE)
+            {
+                mappings.emplace_back(
+                    memory_rights::mem_unset,
+                    reinterpret_cast<uintptr_t>(mem_infos.BaseAddress),
+                    reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize,
+                    std::move(module_name)
+                );
+            }
+
             search_addr = reinterpret_cast<LPVOID>(reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize);
         }
 

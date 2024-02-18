@@ -116,12 +116,12 @@ namespace MemoryManipulation {
                 {
                     if (old_end != start)
                     {
-                        mappings.emplace_back(region_infos_t{
+                        mappings.emplace_back(
                             memory_rights::mem_unset,
                             old_end,
                             start,
-                            std::string(),
-                        });
+                            std::string()
+                        );
                     }
 
                     old_end = end;
@@ -150,12 +150,53 @@ namespace MemoryManipulation {
                         }
                     }
 
-                    mappings.emplace_back(region_infos_t{
+                    mappings.emplace_back(
                         (memory_rights)rights,
                         start,
                         end,
-                        str_it,
-                    });
+                        str_it
+                    );
+                }
+            }
+        }
+
+        return mappings;
+    }
+
+    std::vector<region_infos_t> GetFreeRegions()
+    {
+        std::vector<region_infos_t> mappings;
+
+        char* str_it;
+        const char* str_end;
+        uintptr_t start;
+        uintptr_t end;
+        uintptr_t old_end(0);
+
+        std::ifstream f("/proc/self/maps");
+        std::string s;
+
+        while (std::getline(f, s))
+        {
+            if (!s.empty())
+            {
+                str_it = &s[0];
+                str_end = s.data() + s.length();
+                start = (uintptr_t)strtoul(str_it, &str_it, 16);
+                end = (uintptr_t)strtoul(str_it + 1, &str_it, 16);
+                if (start != 0 && end != 0)
+                {
+                    if (old_end != start)
+                    {
+                        mappings.emplace_back(
+                            memory_rights::mem_unset,
+                            old_end,
+                            start,
+                            std::string()
+                        );
+                    }
+
+                    old_end = end;
                 }
             }
         }

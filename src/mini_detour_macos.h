@@ -155,12 +155,12 @@ namespace MemoryManipulation {
         {
             if (old_end != vm_address)
             {
-                mappings.emplace_back(region_infos_t{
+                mappings.emplace_back(
                     memory_rights::mem_unset,
                     (uintptr_t)old_end,
                     (uintptr_t)vm_address,
-                    std::string(),
-                });
+                    std::string()
+                );
             }
 
             rights = memory_rights::mem_none;
@@ -178,8 +178,40 @@ namespace MemoryManipulation {
                 (memory_rights)rights,
                 static_cast<uintptr_t>(vm_address),
                 static_cast<uintptr_t>(vm_address + size),
-                std::move(module_name),
+                std::move(module_name)
             });
+
+            vm_address += size;
+            old_end = vm_address;
+        }
+
+        return mappings;
+    }
+
+    std::vector<region_infos_t> GetFreeRegions()
+    {
+        std::vector<region_infos_t> mappings;
+
+        mach_port_t self_task = mach_task_self();
+        mach_vm_address_t old_end = 0;
+
+        mach_vm_address_t vm_address = 0;
+        mach_vm_size_t size;
+        vm_region_basic_info_data_64_t infos;
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object_name = MACH_PORT_NULL;
+
+        while (mach_vm_region(self_task, &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name) == KERN_SUCCESS)
+        {
+            if (old_end != vm_address)
+            {
+                mappings.emplace_back(
+                    memory_rights::mem_unset,
+                    (uintptr_t)old_end,
+                    (uintptr_t)vm_address,
+                    std::string()
+                );
+            }
 
             vm_address += size;
             old_end = vm_address;

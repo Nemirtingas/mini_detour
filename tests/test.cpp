@@ -169,6 +169,7 @@ TEST_CASE("Memory read/write", "[memread/memwrite]")
 }
 
 TEST_CASE("Memory mappings", "[vmmap]") {
+    SPDLOG_INFO("Memory mappings");
     auto maps = MemoryManipulation::GetAllRegions();
 
     char rights_str[5] = { '-', '-', '-', '-', '\0' };
@@ -201,6 +202,25 @@ TEST_CASE("Memory mappings", "[vmmap]") {
             rights_str[2] = 'e';
             rights_str[3] = 'e';
         }
+
+        SPDLOG_INFO("[{:016X}-{:016X}]: [{}] {}", map.start, map.end, rights_str, map.module_name);
+    }
+}
+
+TEST_CASE("Free memory mappings", "[vmmap]") {
+    SPDLOG_INFO("Free memory mappings");
+    auto maps = MemoryManipulation::GetFreeRegions();
+
+    char rights_str[5] = { '-', '-', '-', '-', '\0' };
+
+    for (auto const& map : maps)
+    {
+        CHECK(map.rights == MemoryManipulation::memory_rights::mem_unset);
+
+        rights_str[0] = 'f';
+        rights_str[1] = 'r';
+        rights_str[2] = 'e';
+        rights_str[3] = 'e';
 
         SPDLOG_INFO("[{:016X}-{:016X}]: [{}] {}", map.start, map.end, rights_str, map.module_name);
     }
