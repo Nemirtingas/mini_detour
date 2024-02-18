@@ -7,6 +7,12 @@
 #include <Windows.h>
 
 namespace MemoryManipulation {
+#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
+    const void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
+#elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
+    const void* max_user_address = reinterpret_cast<void*>(0x70000000);
+#endif
+
     DWORD memory_protect_rights_to_native(memory_rights rights)
     {
         switch (rights)
@@ -110,12 +116,43 @@ namespace MemoryManipulation {
                 }
             }
 
-            mappings.emplace_back(region_infos_t{
+            mappings.emplace_back(
                 rights,
                 reinterpret_cast<uintptr_t>(mem_infos.BaseAddress),
                 reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize,
-                std::move(module_name),
-            });
+                std::move(module_name)
+            );
+            search_addr = reinterpret_cast<LPVOID>(reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize);
+        }
+
+        return mappings;
+    }
+
+    std::vector<region_infos_t> GetFreeRegions()
+    {
+        HANDLE process_handle = GetCurrentProcess();
+        LPVOID search_addr = nullptr;
+        MEMORY_BASIC_INFORMATION mem_infos{};
+        std::string module_name;
+        std::wstring wmodule_name(1024, L'\0');
+        DWORD wmodule_name_size = 1024;
+        HMODULE module_handle;
+
+        std::vector<region_infos_t> mappings;
+
+        mappings.reserve(256);
+        while (VirtualQueryEx(process_handle, search_addr, &mem_infos, sizeof(mem_infos)) != 0)
+        {
+            if (mem_infos.State == MEM_FREE)
+            {
+                mappings.emplace_back(
+                    memory_rights::mem_unset,
+                    reinterpret_cast<uintptr_t>(mem_infos.BaseAddress),
+                    reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize,
+                    std::move(module_name)
+                );
+            }
+
             search_addr = reinterpret_cast<LPVOID>(reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize);
         }
 
@@ -139,50 +176,43 @@ namespace MemoryManipulation {
             VirtualFree(address, 0, MEM_RELEASE);
     }
 
-    void* MemoryAlloc(void* address_hint, size_t size, memory_rights rights)
+    void* MemoryAlloc(void* _addressHint, size_t size, memory_rights rights)
     {
-        MEMORY_BASIC_INFORMATION mbi;
+        if (_addressHint > max_user_address)
+            _addressHint = (void*)max_user_address;
+
+        auto freeRegions = GetFreeRegions();
+
+        auto pageSize = PageSize();
+        auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
+        size = page_addr_size((void*)addressHint, size, pageSize);
+        const auto nativeRights = memory_protect_rights_to_native(rights);
+
+        if (_addressHint != nullptr)
+        {
+            std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](MemoryManipulation::region_infos_t const& l, MemoryManipulation::region_infos_t const& r)
+            {
+                return std::max(addressHint, l.start) - std::min(addressHint, l.start) <
+                    std::max(addressHint, r.start) - std::min(addressHint, r.start);
+            });
+        }
 
         HANDLE hProcess = GetCurrentProcess();
 
-        PBYTE pbBase = (PBYTE)address_hint;
-        PBYTE pbLast = pbBase;
-        for (;; pbLast = (PBYTE)mbi.BaseAddress + mbi.RegionSize)
+        constexpr size_t allocationAlignement = 0x10000;
+        constexpr size_t mmGranularityMinusOne = allocationAlignement - 1;
+
+        for (auto const& region : freeRegions)
         {
-
-            ZeroMemory(&mbi, sizeof(mbi));
-            if (VirtualQueryEx(hProcess, (PVOID)pbLast, &mbi, sizeof(mbi)) == 0)
-                continue;
-
-            // Usermode address space has such an unaligned region size always at the
-            // end and only at the end.
-            //
-            if ((mbi.RegionSize & 0xfff) == 0xfff)
+            for (auto allocAddress = ((region.start + mmGranularityMinusOne) & ~mmGranularityMinusOne); (allocAddress + size) < region.end; allocAddress += allocationAlignement)
             {
-                break;
-            }
+                if (allocAddress > (uintptr_t)max_user_address)
+                    break;
 
-            // Skip anything other than a pure free region.
-            //
-            if (mbi.State != MEM_FREE)
-                continue;
+                auto pbAlloc = (void*)VirtualAllocEx(hProcess, (PVOID)allocAddress, size, MEM_RESERVE | MEM_COMMIT, nativeRights);
 
-            // Use the max of mbi.BaseAddress and pbBase, in case mbi.BaseAddress < pbBase.
-            PBYTE pbAddress = (PBYTE)mbi.BaseAddress > pbBase ? (PBYTE)mbi.BaseAddress : pbBase;
-
-            // Round pbAddress up to the nearest MM allocation boundary.
-            const DWORD_PTR mmGranularityMinusOne = (DWORD_PTR)(0x10000 - 1);
-            pbAddress = (PBYTE)(((DWORD_PTR)pbAddress + mmGranularityMinusOne) & ~mmGranularityMinusOne);
-
-            for (; pbAddress < (PBYTE)mbi.BaseAddress + mbi.RegionSize; pbAddress += 0x10000)
-            {
-                PBYTE pbAlloc = (PBYTE)VirtualAllocEx(hProcess, pbAddress, size,
-                    MEM_RESERVE | MEM_COMMIT, memory_protect_rights_to_native(rights));
-
-                if (pbAlloc == nullptr)
-                    continue;
-
-                return pbAlloc;
+                if (pbAlloc != nullptr)
+                    return pbAlloc;
             }
         }
 

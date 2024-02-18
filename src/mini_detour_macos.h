@@ -78,6 +78,12 @@ std::string kern_return_t_2_str(kern_return_t v)
 #endif
 
 namespace MemoryManipulation {
+#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
+    const void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
+#elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
+    const void* max_user_address = reinterpret_cast<void*>(0x70000000);
+#endif
+
     size_t memory_protect_rights_to_native(memory_rights rights)
     {
         switch (rights)
@@ -92,6 +98,11 @@ namespace MemoryManipulation {
 
             default: return VM_PROT_NONE;
         }
+    }
+
+    size_t PageSize()
+    {
+        return sysconf(_SC_PAGESIZE);
     }
 
     region_infos_t GetRegionInfos(void* address)
@@ -155,12 +166,12 @@ namespace MemoryManipulation {
         {
             if (old_end != vm_address)
             {
-                mappings.emplace_back(region_infos_t{
+                mappings.emplace_back(
                     memory_rights::mem_unset,
                     (uintptr_t)old_end,
                     (uintptr_t)vm_address,
-                    std::string(),
-                });
+                    std::string()
+                );
             }
 
             rights = memory_rights::mem_none;
@@ -178,7 +189,7 @@ namespace MemoryManipulation {
                 (memory_rights)rights,
                 static_cast<uintptr_t>(vm_address),
                 static_cast<uintptr_t>(vm_address + size),
-                std::move(module_name),
+                std::move(module_name)
             });
 
             vm_address += size;
@@ -188,9 +199,36 @@ namespace MemoryManipulation {
         return mappings;
     }
 
-    size_t PageSize()
+    std::vector<region_infos_t> GetFreeRegions()
     {
-        return sysconf(_SC_PAGESIZE);
+        std::vector<region_infos_t> mappings;
+
+        mach_port_t self_task = mach_task_self();
+        mach_vm_address_t old_end = 0;
+
+        mach_vm_address_t vm_address = 0;
+        mach_vm_size_t size;
+        vm_region_basic_info_data_64_t infos;
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object_name = MACH_PORT_NULL;
+
+        while (mach_vm_region(self_task, &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name) == KERN_SUCCESS)
+        {
+            if (old_end != vm_address)
+            {
+                mappings.emplace_back(
+                    memory_rights::mem_unset,
+                    (uintptr_t)old_end,
+                    (uintptr_t)vm_address,
+                    std::string()
+                );
+            }
+
+            vm_address += size;
+            old_end = vm_address;
+        }
+
+        return mappings;
     }
 
     bool MemoryProtect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
@@ -217,95 +255,80 @@ namespace MemoryManipulation {
             mach_vm_deallocate(mach_task_self(), (mach_vm_address_t)address, size);
     }
 
-    void* MemoryAlloc(void* address_hint, size_t size, memory_rights rights)
+    static inline kern_return_t MemoryAllocWithProtection(mach_port_t task, mach_vm_address_t* address, mach_vm_size_t size, memory_rights rights, int flags)
     {
+        kern_return_t kret = mach_vm_allocate(task, address, (mach_vm_size_t)size, flags);
+        if (kret != KERN_SUCCESS)
+        {
+            *address = (mach_vm_address_t)0;
+            SPDLOG_ERROR("mach_vm_allocate failed with code: {}", kern_return_t_2_str(kret));
+        }
+        else
+        {
+            if (!MemoryProtect(reinterpret_cast<void*>(*address), size, rights))
+            {
+                MemoryFree((void*)*address, (size_t)size);
+                *address = (mach_vm_address_t)0;
+            }
+        }
+
+        return kret;
+    }
+
+    static inline void* MemoryAllocNear(uintptr_t addressHint, size_t size, memory_rights rights, size_t pageSize, mach_port_t task)
+    {
+        kern_return_t kret;
+        mach_vm_address_t address;
+
+        auto freeRegions = GetFreeRegions();
+
+        std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](MemoryManipulation::region_infos_t const& l, MemoryManipulation::region_infos_t const& r)
+        {
+            return std::max(addressHint, l.start) - std::min(addressHint, l.start) <
+                std::max(addressHint, r.start) - std::min(addressHint, r.start);
+        });
+
+        for (auto const& region : freeRegions)
+        {
+            for (auto allocAddress = region.start; (allocAddress + size) < region.end; allocAddress += pageSize)
+            {
+                if (allocAddress > (uintptr_t)max_user_address)
+                    break;
+
+                address = (mach_vm_address_t)allocAddress;
+                MemoryAllocWithProtection(task, &address, (mach_vm_size_t)size, rights, VM_FLAGS_FIXED);
+                if (reinterpret_cast<void*>(address) != nullptr)
+                    return reinterpret_cast<void*>(address);
+            }
+        }
+
+        // Fallback to anywhere alloc
+        kret = MemoryAllocWithProtection(task, &address, (mach_vm_size_t)size, rights, VM_FLAGS_ANYWHERE);
+
+        return reinterpret_cast<void*>(address);
+    }
+
+    void* MemoryAlloc(void* _addressHint, size_t size, memory_rights rights)
+    {
+        if (_addressHint > max_user_address)
+            _addressHint = (void*)max_user_address;
+
+        auto pageSize = PageSize();
+        auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
+        size = page_addr_size((void*)addressHint, size, pageSize);
+
         kern_return_t kret;
         mach_vm_address_t address;
         mach_port_t task = mach_task_self();
 
-#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
-        void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
-#elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
-        void* max_user_address = reinterpret_cast<void*>(0x70000000);
-#endif
-
-        if (address_hint > max_user_address)
-            address_hint = max_user_address;
-
-        if (address_hint != nullptr)
+        if (_addressHint == nullptr)
         {
-            region_infos_t infos;
-            address = reinterpret_cast<mach_vm_address_t>(PageRound(address_hint, PageSize())) - PageSize();
-
-            size = page_addr_size((void*)address, size, PageSize());
-            int pages = size / PageSize();
-
-            for (int i = 0; i < 100000; ++i, address -= PageSize())
-            {
-                bool found = true;
-                for (int j = 0; j < pages; ++j)
-                {
-                    infos = GetRegionInfos((void*)address);
-                    if (infos.start == (uintptr_t)address)
-                    {
-                        found = false;
-                        break;
-                    }
-                }
-
-                if (found)
-                {
-                    kret = mach_vm_allocate(task, &address, (mach_vm_size_t)size, VM_FLAGS_FIXED);
-                    if (kret == KERN_SUCCESS)
-                    {
-                        SPDLOG_INFO("Allocated {} for hint {}", (void*)address, address_hint);
-                        MemoryProtect(reinterpret_cast<void*>(address), size, rights);
-                        return reinterpret_cast<void*>(address);
-                    }
-                }
-            }
-
-            address = reinterpret_cast<mach_vm_address_t>(PageRound(address_hint, PageSize())) + PageSize();
-            for (int i = 0; i < 100000 && (void*)address < max_user_address; ++i, address += PageSize())
-            {
-                bool found = true;
-                for (int j = 0; j < pages; ++j)
-                {
-                    infos = GetRegionInfos((void*)address);
-                    if (infos.start == (uintptr_t)address)
-                    {
-                        found = false;
-                        break;
-                    }
-                }
-
-                if (found)
-                {
-                    kret = mach_vm_allocate(task, &address, (mach_vm_size_t)size, VM_FLAGS_FIXED);
-                    if (kret == KERN_SUCCESS)
-                    {
-                        SPDLOG_INFO("Allocated {} for hint {}", (void*)address, address_hint);
-                        MemoryProtect(reinterpret_cast<void*>(address), size, rights);
-                        return reinterpret_cast<void*>(address);
-                    }
-                }
-            }
-
-            // Fallback to hint alloc
+            address = 0;
+            MemoryAllocWithProtection(task, &address, (mach_vm_size_t)size, rights, VM_FLAGS_ANYWHERE);
+            return reinterpret_cast<void*>(address);
         }
 
-        address = (mach_vm_address_t)0;
-        kret = mach_vm_allocate(task, &address, (mach_vm_size_t)size, VM_FLAGS_ANYWHERE);
-        if (kret != KERN_SUCCESS)
-        {
-            address = (mach_vm_address_t)0;
-        }
-        else
-        {
-            MemoryProtect(reinterpret_cast<void*>(address), size, rights);
-        }
-
-        return reinterpret_cast<void*>(address);
+        return MemoryAllocNear(addressHint, size, rights, pageSize, task);
     }
 
     bool SafeMemoryRead(void* address, uint8_t* buffer, size_t size)

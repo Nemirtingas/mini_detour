@@ -27,6 +27,16 @@ namespace MemoryManipulation
         uintptr_t start;
         uintptr_t end;
         std::string module_name;
+
+        region_infos_t():
+            rights(memory_rights::mem_none), start(0), end(0)
+        {}
+
+        region_infos_t(memory_rights rights, uintptr_t start, uintptr_t end, std::string && module_name):
+            rights(rights), start(start), end(end), module_name(std::move(module_name))
+        {}
+
+        inline size_t RegionSize() const { return end - start; }
     };
 
     inline void* PageRoundUp(void* _addr, size_t page_size)
@@ -44,6 +54,7 @@ namespace MemoryManipulation
     size_t PageSize();
     region_infos_t GetRegionInfos(void* address);
     std::vector<region_infos_t> GetAllRegions();
+    std::vector<region_infos_t> GetFreeRegions();
     bool MemoryProtect(void* address, size_t size, memory_rights rights, memory_rights* old_rights = nullptr);
     void MemoryFree(void* address, size_t size);
     void* MemoryAlloc(void* address_hint, size_t size, memory_rights rights);

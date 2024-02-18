@@ -7,6 +7,12 @@
 #include <errno.h>
 
 namespace MemoryManipulation {
+#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
+    const void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
+#elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
+    const void* max_user_address = reinterpret_cast<void*>(0x70000000);
+#endif
+
     int memory_protect_rights_to_native(memory_rights rights)
     {
         switch (rights)
@@ -116,12 +122,12 @@ namespace MemoryManipulation {
                 {
                     if (old_end != start)
                     {
-                        mappings.emplace_back(region_infos_t{
+                        mappings.emplace_back(
                             memory_rights::mem_unset,
                             old_end,
                             start,
-                            std::string(),
-                        });
+                            std::string()
+                        );
                     }
 
                     old_end = end;
@@ -150,12 +156,53 @@ namespace MemoryManipulation {
                         }
                     }
 
-                    mappings.emplace_back(region_infos_t{
+                    mappings.emplace_back(
                         (memory_rights)rights,
                         start,
                         end,
-                        str_it,
-                    });
+                        str_it
+                    );
+                }
+            }
+        }
+
+        return mappings;
+    }
+
+    std::vector<region_infos_t> GetFreeRegions()
+    {
+        std::vector<region_infos_t> mappings;
+
+        char* str_it;
+        const char* str_end;
+        uintptr_t start;
+        uintptr_t end;
+        uintptr_t old_end(0);
+
+        std::ifstream f("/proc/self/maps");
+        std::string s;
+
+        while (std::getline(f, s))
+        {
+            if (!s.empty())
+            {
+                str_it = &s[0];
+                str_end = s.data() + s.length();
+                start = (uintptr_t)strtoul(str_it, &str_it, 16);
+                end = (uintptr_t)strtoul(str_it + 1, &str_it, 16);
+                if (start != 0 && end != 0)
+                {
+                    if (old_end != start)
+                    {
+                        mappings.emplace_back(
+                            memory_rights::mem_unset,
+                            old_end,
+                            start,
+                            std::string()
+                        );
+                    }
+
+                    old_end = end;
                 }
             }
         }
@@ -166,7 +213,7 @@ namespace MemoryManipulation {
     bool MemoryProtect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
     {
         region_infos_t infos;
-        if(old_rights != nullptr)
+        if (old_rights != nullptr)
             infos = GetRegionInfos(address);
 
         bool res = mprotect(PageRound(address, PageSize()), page_addr_size(address, size, PageSize()), memory_protect_rights_to_native(rights)) == 0;
@@ -183,62 +230,48 @@ namespace MemoryManipulation {
             munmap(address, size);
     }
 
-    void* MemoryAlloc(void* address_hint, size_t size, memory_rights rights)
+    static inline void* MemoryAllocNear(uintptr_t addressHint, size_t size, int nativeRights, size_t pageSize)
     {
-        if (address_hint != nullptr)
+        auto freeRegions = GetFreeRegions();
+
+        std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](MemoryManipulation::region_infos_t const& l, MemoryManipulation::region_infos_t const& r)
         {
-            uintptr_t address = reinterpret_cast<uintptr_t>(PageRound(address_hint, PageSize())) + PageSize();
-            region_infos_t infos;
-            size = page_addr_size((void*)address, size, PageSize());
-            int pages = size / PageSize();
+            return std::max(addressHint, l.start) - std::min(addressHint, l.start) <
+                std::max(addressHint, r.start) - std::min(addressHint, r.start);
+        });
 
-            for (int i = 0; i < 100000; ++i, address += PageSize())
+        for (auto const& region : freeRegions)
+        {
+            for (auto allocAddress = region.start; (allocAddress + size) < region.end; allocAddress += pageSize)
             {
-                bool found = true;
-                for (int j = 0; j < pages; ++j)
-                {
-                    infos = GetRegionInfos((void*)address);
-                    if (infos.start != 0)
-                    {
-                        found = false;
-                        break;
-                    }
-                }
+                if (allocAddress > (uintptr_t)max_user_address)
+                    break;
 
-                if (found)
-                {
-                    void* r = mmap((void*)address, size, memory_protect_rights_to_native(rights), MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-                    if (r != nullptr)
-                        return r;
-                }
+                void* r = mmap((void*)allocAddress, size, nativeRights, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+                if (r != nullptr)
+                    return r;
             }
-
-            address = reinterpret_cast<uintptr_t>(PageRound(address_hint, PageSize())) - PageSize();
-            for (int i = 0; i < 100000; ++i, address -= PageSize())
-            {
-                bool found = true;
-                for (int j = 0; j < pages; ++j)
-                {
-                    infos = GetRegionInfos((void*)address);
-                    if (infos.start != 0)
-                    {
-                        found = false;
-                        break;
-                    }
-                }
-
-                if (found)
-                {
-                    void* r = mmap((void*)address, size, memory_protect_rights_to_native(rights), MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-                    if (r != nullptr)
-                        return r;
-                }
-            }
-
-            // Fallback to hint alloc
         }
 
-        return mmap(address_hint, size, memory_protect_rights_to_native(rights), MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        // Fallback to hint alloc
+        return mmap((void*)addressHint, size, nativeRights, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    }
+
+    void* MemoryAlloc(void* _addressHint, size_t size, memory_rights rights)
+    {
+        if (_addressHint > max_user_address)
+            _addressHint = (void*)max_user_address;
+
+        auto pageSize = PageSize();
+        auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
+        size = page_addr_size((void*)addressHint, size, pageSize);
+        const auto nativeRights = memory_protect_rights_to_native(rights);
+
+        if (_addressHint == nullptr)
+            return mmap(nullptr, size, nativeRights, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+        return MemoryAllocNear(addressHint, size, nativeRights, pageSize);
     }
 
     bool SafeMemoryRead(void* address, uint8_t* buffer, size_t size)
