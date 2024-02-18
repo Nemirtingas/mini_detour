@@ -35,6 +35,8 @@ namespace MemoryManipulation
         region_infos_t(memory_rights rights, uintptr_t start, uintptr_t end, std::string && module_name):
             rights(rights), start(start), end(end), module_name(std::move(module_name))
         {}
+
+        inline size_t RegionSize() const { return end - start; }
     };
 
     inline void* PageRoundUp(void* _addr, size_t page_size)
