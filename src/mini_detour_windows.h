@@ -8,9 +8,9 @@
 
 namespace MemoryManipulation {
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
-    const void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
+    const void* max_user_address = reinterpret_cast<void*>(0x7ffffffff000);
 #elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
-    const void* max_user_address = reinterpret_cast<void*>(0x70000000);
+    const void* max_user_address = reinterpret_cast<void*>(0x7ffff000);
 #endif
 
     DWORD memory_protect_rights_to_native(memory_rights rights)
