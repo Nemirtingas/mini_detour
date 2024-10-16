@@ -979,6 +979,12 @@ namespace mini_detour
             SPDLOG_INFO("Restoring hook");
 
             buffer.resize(_HookCode.size());
+
+            auto originalMemoryInfos = MemoryManipulation::GetRegionInfos(_OriginalFuncAddress);
+            // Memory has been freed, don't try to restore it.
+            if (originalMemoryInfos.rights == MemoryManipulation::memory_rights::mem_unset || originalMemoryInfos.rights == MemoryManipulation::memory_rights::mem_none)
+                return nullptr;
+
             memcpy(buffer.data(), _OriginalFuncAddress, buffer.size());
 
             res = _OriginalFuncAddress;
