@@ -26,7 +26,7 @@ jobs:
           cmakeGenerator: Ninja
           cmakeBuildType: 'Debug'
           cmakeListsOrSettingsJson: CMakeListsTxtAdvanced
-          cmakeAppendedArgs: ' -DCMAKE_BUILD_TYPE=Debug -DBUILD_MINIDETOUR_TESTS=ON"'
+          cmakeAppendedArgs: ' -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON"'
           buildWithCMake: true
           buildWithCMakeArgs: '--config Debug --parallel'
       
@@ -47,7 +47,7 @@ jobs:
           cmakeGenerator: Ninja
           cmakeBuildType: 'Debug'
           cmakeListsOrSettingsJson: CMakeListsTxtAdvanced
-          cmakeAppendedArgs: ' -DCMAKE_BUILD_TYPE=Debug -DBUILD_MINIDETOUR_TESTS=ON"'
+          cmakeAppendedArgs: ' -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON"'
           buildWithCMake: true
           buildWithCMakeArgs: '--config Debug --parallel'
       
@@ -69,7 +69,7 @@ jobs:
           cmakeGenerator: Ninja
           cmakeBuildType: 'Debug'
           cmakeListsOrSettingsJson: CMakeListsTxtAdvanced
-          cmakeAppendedArgs: ' -DCMAKE_PREFIX_PATH=${{env.MINGW_BASE_DIR}} -DCMAKE_BUILD_TYPE=Debug -DBUILD_MINIDETOUR_TESTS=ON"'
+          cmakeAppendedArgs: ' -DCMAKE_PREFIX_PATH=${{env.MINGW_BASE_DIR}} -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON"'
           buildWithCMake: true
           buildWithCMakeArgs: '--config Debug --parallel'
           
