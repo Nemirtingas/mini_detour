@@ -1,7 +1,6 @@
-
 cmake_policy(SET CMP0091 NEW)
-project(mini_detour)
 cmake_minimum_required(VERSION 3.15)
+project(mini_detour)
 
 if(APPLE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
@@ -14,7 +13,8 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(BUILD_MINIDETOUR_TESTS "Build tests" OFF)
+option(MINIDETOUR_DYNAMIC_RUNTIME "Link against dynamic runtime (Windows)" ON)
+option(MINIDETOUR_BUILD_TESTS "Build tests" OFF)
 
 set(MINIDETOUR_HEADERS
   ${CMAKE_CURRENT_SOURCE_DIR}/include/mini_detour/mini_detour.h
@@ -124,7 +124,7 @@ add_library(
 )
 
 set_target_properties(mini_detour PROPERTIES
-  MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+  MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:MINIDETOUR_DYNAMIC_RUNTIME>:DLL>"
   POSITION_INDEPENDENT_CODE ON
   C_VISIBILITY_PRESET hidden
   CXX_VISIBILITY_PRESET hidden
@@ -176,7 +176,7 @@ if(APPLE)
   )
 endif()
 
-if(BUILD_MINIDETOUR_TESTS)
+if(MINIDETOUR_BUILD_TESTS)
   add_library(
     mini_detour_test
     src/mini_detour.cpp
@@ -194,7 +194,7 @@ if(BUILD_MINIDETOUR_TESTS)
   )
   
   set_target_properties(mini_detour_test PROPERTIES
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:MINIDETOUR_DYNAMIC_RUNTIME>:DLL>"
     POSITION_INDEPENDENT_CODE ON
     C_VISIBILITY_PRESET hidden
     CXX_VISIBILITY_PRESET hidden
@@ -246,7 +246,7 @@ if(BUILD_MINIDETOUR_TESTS)
   )
   
   set_target_properties(tests PROPERTIES
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:MINIDETOUR_DYNAMIC_RUNTIME>:DLL>"
     C_VISIBILITY_PRESET hidden
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
