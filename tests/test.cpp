@@ -46,15 +46,69 @@ static void _EnterRecursiveThunk(void*& _pCode)
 int main(int argc, char* argv[]) {
     // global setup...
 
-#ifdef TESTS_OS_APPLE
-    return 0;
-#endif
-
     int result = Catch::Session().run(argc, argv);
 
     // global clean-up...
 
     return result;
+}
+
+TEST_CASE("Memory mappings", "[vmmap]") {
+    SPDLOG_INFO("Memory mappings");
+    auto maps = MemoryManipulation::GetAllRegions();
+
+    char rights_str[5] = { '-', '-', '-', '-', '\0' };
+
+    for (auto const& map : maps)
+    {
+        if (map.rights != MemoryManipulation::memory_rights::mem_unset)
+        {
+            if (map.rights & MemoryManipulation::memory_rights::mem_r)
+                rights_str[0] = 'r';
+            else
+                rights_str[0] = '-';
+
+            if (map.rights & MemoryManipulation::memory_rights::mem_w)
+                rights_str[1] = 'w';
+            else
+                rights_str[1] = '-';
+
+            if (map.rights & MemoryManipulation::memory_rights::mem_x)
+                rights_str[2] = 'x';
+            else
+                rights_str[2] = '-';
+
+            rights_str[3] = '-';
+        }
+        else
+        {
+            rights_str[0] = 'f';
+            rights_str[1] = 'r';
+            rights_str[2] = 'e';
+            rights_str[3] = 'e';
+        }
+
+        SPDLOG_INFO("[{:016X}-{:016X}]: [{}] {}", map.start, map.end, rights_str, map.module_name);
+    }
+}
+
+TEST_CASE("Free memory mappings", "[vmmap]") {
+    SPDLOG_INFO("Free memory mappings");
+    auto maps = MemoryManipulation::GetFreeRegions();
+
+    char rights_str[5] = { '-', '-', '-', '-', '\0' };
+
+    for (auto const& map : maps)
+    {
+        CHECK(map.rights == MemoryManipulation::memory_rights::mem_unset);
+
+        rights_str[0] = 'f';
+        rights_str[1] = 'r';
+        rights_str[2] = 'e';
+        rights_str[3] = 'e';
+
+        SPDLOG_INFO("[{:016X}-{:016X}]: [{}] {}", map.start, map.end, rights_str, map.module_name);
+    }
 }
 
 TEST_CASE("Memory allocation", "[mem alloc]") {
@@ -65,6 +119,8 @@ TEST_CASE("Memory allocation", "[mem alloc]") {
 
     MemoryManipulation::MemoryFree(mem, alloc_size);
 }
+
+#ifndef TESTS_OS_APPLE
 
 TEST_CASE("Memory protect", "[memprotect]") {
     MemoryManipulation::memory_rights old_rights;
@@ -170,64 +226,6 @@ TEST_CASE("Memory read/write", "[memread/memwrite]")
     memset(buffer, 0, 30);
     CHECK(MemoryManipulation::SafeMemoryRead(mem, buffer, 30) == false);
     CHECK(memcmp(buffer, "\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0", 30) == 0);
-}
-
-TEST_CASE("Memory mappings", "[vmmap]") {
-    SPDLOG_INFO("Memory mappings");
-    auto maps = MemoryManipulation::GetAllRegions();
-
-    char rights_str[5] = { '-', '-', '-', '-', '\0' };
-
-    for (auto const& map : maps)
-    {
-        if (map.rights != MemoryManipulation::memory_rights::mem_unset)
-        {
-            if (map.rights & MemoryManipulation::memory_rights::mem_r)
-                rights_str[0] = 'r';
-            else
-                rights_str[0] = '-';
-
-            if (map.rights & MemoryManipulation::memory_rights::mem_w)
-                rights_str[1] = 'w';
-            else
-                rights_str[1] = '-';
-
-            if (map.rights & MemoryManipulation::memory_rights::mem_x)
-                rights_str[2] = 'x';
-            else
-                rights_str[2] = '-';
-
-            rights_str[3] = '-';
-        }
-        else
-        {
-            rights_str[0] = 'f';
-            rights_str[1] = 'r';
-            rights_str[2] = 'e';
-            rights_str[3] = 'e';
-        }
-
-        SPDLOG_INFO("[{:016X}-{:016X}]: [{}] {}", map.start, map.end, rights_str, map.module_name);
-    }
-}
-
-TEST_CASE("Free memory mappings", "[vmmap]") {
-    SPDLOG_INFO("Free memory mappings");
-    auto maps = MemoryManipulation::GetFreeRegions();
-
-    char rights_str[5] = { '-', '-', '-', '-', '\0' };
-
-    for (auto const& map : maps)
-    {
-        CHECK(map.rights == MemoryManipulation::memory_rights::mem_unset);
-
-        rights_str[0] = 'f';
-        rights_str[1] = 'r';
-        rights_str[2] = 'e';
-        rights_str[3] = 'e';
-
-        SPDLOG_INFO("[{:016X}-{:016X}]: [{}] {}", map.start, map.end, rights_str, map.module_name);
-    }
 }
 
 
@@ -378,3 +376,5 @@ TEST_CASE("Hook small function with call", "[Hook function]") {
     test_func();
 
 }
+
+#endif//TESTS_OS_APPLE
