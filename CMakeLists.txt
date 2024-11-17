@@ -218,6 +218,8 @@ if(MINIDETOUR_BUILD_TESTS)
     -DCAPSTONE_HAS_X86
 	-DCAPSTONE_HAS_ARM64
 	-DCAPSTONE_HAS_ARM
+	USE_SPDLOG
+	$<$<BOOL:${WIN32}>:_SILENCE_ALL_MS_EXT_DEPRECATION_WARNINGS>
   )
   
   target_compile_options(
@@ -232,14 +234,6 @@ if(MINIDETOUR_BUILD_TESTS)
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/capstone/include>
     $<INSTALL_INTERFACE:include>
-  )
-  
-  target_compile_definitions(
-    mini_detour_test
-    PRIVATE
-    USE_SPDLOG
-	$<$<BOOL:${WIN32}>:_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING>
-	$<$<BOOL:${WIN32}>:_SILENCE_ALL_MS_EXT_DEPRECATION_WARNINGS>
   )
 
   add_executable(
@@ -266,6 +260,12 @@ if(MINIDETOUR_BUILD_TESTS)
     PRIVATE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
+  )
+  
+  target_compile_definitions(
+    tests
+    PRIVATE
+	$<$<BOOL:${WIN32}>:_SILENCE_ALL_MS_EXT_DEPRECATION_WARNINGS>
   )
 
 endif()
