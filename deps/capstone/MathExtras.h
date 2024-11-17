@@ -17,11 +17,12 @@
 #ifndef CS_LLVM_SUPPORT_MATHEXTRAS_H
 #define CS_LLVM_SUPPORT_MATHEXTRAS_H
 
-#if defined(_WIN32_WCE) && (_WIN32_WCE < 0x800)
-#include "windowsce/intrin.h"
-#elif defined(_MSC_VER)
-#include <intrin.h>
-#endif
+// FIXME: MSVC doing shit with its own intrinsics.
+//#if defined(_WIN32_WCE) && (_WIN32_WCE < 0x800)
+//#include "windowsce/intrin.h"
+//#elif defined(_MSC_VER)
+//#include <intrin.h>
+//#endif
 
 #ifndef __cplusplus
 #if defined (WIN32) || defined (WIN64) || defined (_WIN32) || defined (_WIN64)
