@@ -39,27 +39,88 @@ namespace MemoryManipulation
         inline size_t RegionSize() const { return end - start; }
     };
 
+    /// <summary>
+    /// Round the address to the upper value aligned with page_size.
+    /// If page_size = 0x1000:
+    ///   _addr = 0x17ff -> 0x2000
+    /// </summary>
+    /// <param name="_addr"></param>
+    /// <param name="page_size"></param>
+    /// <returns></returns>
     inline void* PageRoundUp(void* _addr, size_t page_size)
     {
         size_t addr = (size_t)_addr;
         return (void*)((addr + (page_size - 1)) & (((size_t)-1) ^ (page_size - 1)));
     }
 
+    /// <summary>
+    /// Round the address to the upper value aligned with page_size.
+    /// If page_size = 0x1000:
+    ///   _addr = 0x17ff -> 0x1000
+    /// </summary>
+    /// <param name="_addr"></param>
+    /// <param name="page_size"></param>
+    /// <returns></returns>
     inline void* PageRound(void* _addr, size_t page_size)
     {
         size_t addr = (size_t)_addr;
         return (void*)(addr & (((size_t)-1) ^ (page_size - 1)));
     }
 
+    /// <summary>
+    /// Return the page size of the current system.
+    /// </summary>
+    /// <returns></returns>
     size_t PageSize();
+
     region_infos_t GetRegionInfos(void* address);
     std::vector<region_infos_t> GetAllRegions();
     std::vector<region_infos_t> GetFreeRegions();
+
+    /// <summary>
+    /// Changes memory protection. (On Linux and MacOS, address and rights will be aligned to page size, it is required or it will fail)
+    /// </summary>
+    /// <param name="address"></param>
+    /// <param name="size"></param>
+    /// <param name="rights"></param>
+    /// <param name="old_rights"></param>
+    /// <returns></returns>
     bool MemoryProtect(void* address, size_t size, memory_rights rights, memory_rights* old_rights = nullptr);
     void MemoryFree(void* address, size_t size);
     void* MemoryAlloc(void* address_hint, size_t size, memory_rights rights);
+
+    /// <summary>
+    /// Safely read memory, it doesn't mean it will always succeed, only that on memory not readable or no allocated, it will not crash your application.
+    /// </summary>
+    /// <param name="address"></param>
+    /// <param name="buffer"></param>
+    /// <param name="size"></param>
+    /// <returns></returns>
     bool SafeMemoryRead(void* address, uint8_t* buffer, size_t size);
+
+    /// <summary>
+    /// Safely write memory, it doesn't mean it will always succeed, only that on memory not writable or no allocated, it will not crash your application.
+    /// </summary>
+    /// <param name="address"></param>
+    /// <param name="buffer"></param>
+    /// <param name="size"></param>
+    /// <returns></returns>
     bool SafeMemoryWrite(void* address, const uint8_t* buffer, size_t size);
+
+    /// <summary>
+    /// Convenient function to write an absolute jump at an address. Pass NULL in address to get the required size of the absolute jump in bytes.
+    /// </summary>
+    /// <param name="address">Where to write the jump</param>
+    /// <param name="destination">Where should to jump to</param>
+    /// <returns></returns>
+    int WriteAbsoluteJump(void* address, void* destination);
+
+    /// <summary>
+    /// Flushed instruction cache. (only implemented on Windows)
+    /// </summary>
+    /// <param name="address"></param>
+    /// <param name="size"></param>
+    /// <returns></returns>
     int FlushInstructionCache(void* address, size_t size);
 }
     

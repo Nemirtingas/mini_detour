@@ -29,7 +29,7 @@ struct memory_t
 
 struct AbsJump
 {
-    static inline size_t WriteOpcodes(void* buffer, void* source, void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void* buffer, void* jump_destination, int source_mode, int dest_mode)
     {
         uint8_t _code[6]{
           0x68,                   // PUSH

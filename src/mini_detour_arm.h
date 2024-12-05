@@ -46,50 +46,55 @@ struct memory_t
 
 struct AbsJump
 {
-    static inline size_t WriteOpcodes(void* buffer, void* source, void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteThumbOpcodes(void* buffer, uint32_t addr)
+    {
+        uint16_t* opcode = reinterpret_cast<uint16_t*>(buffer);
+
+        // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/MOV--immediate-?lang=en
+        // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/MOVT?lang=en
+
+        uint16_t addr16 = uint16_t(addr);
+
+        opcode[0] = 0xf84d;
+        opcode[1] = 0x0c08; // str r0, [sp, #-8]
+
+        opcode[2] = 0xf240 | ((addr16 & 0x800) >> 1) | ((addr16 & 0xf000) >> 12); // movw r0, imm16
+        opcode[3] = (addr16 & 0xff) | ((addr16 & 0x700) << 4); // movw r0, imm16
+
+        addr16 = uint16_t(addr >> 16);
+        opcode[4] = 0xf2C0 | ((addr16 & 0x800) >> 1) | ((addr16 & 0xf000) >> 12); // movt r0, addr & 0xffff0000
+        opcode[5] = (addr16 & 0xff) | ((addr16 & 0x700) << 4); // movt r0, addr & 0xffff0000
+
+        opcode[6] = 0xb401; // push {r0}
+
+        opcode[7] = 0xf85d;
+        opcode[8] = 0x0c04; // ldr r0, [sp, #-4]
+
+        opcode[9] = 0xbd00; // pop {pc}
+
+        //opcode[0] = 0xf8df; // ldr pc, [pc, #2]
+        //opcode[1] = 0xf002; // ldr pc, [pc, #2]
+        //*reinterpret_cast<uint32_t*>(&opcode[2]) = addr;
+
+        return 20;
+    }
+
+    static inline size_t WriteARMOpcodes(void* buffer, uint32_t jump_destination)
+    {
+        uint32_t* opcode = reinterpret_cast<uint32_t*>(addr);
+
+        opcode[0] = 0xe51ff004; // ldr pc, [pc, #-4]
+        opcode[1] = addr;
+
+        return 8;
+    }
+
+    static inline size_t WriteOpcodes(void* buffer, void* jump_destination, int source_mode, int dest_mode)
     {
         uint32_t addr = reinterpret_cast<uint32_t>(jump_destination) | (dest_mode ? 1 : 0);
-        if (source_mode)
-        {
-            uint16_t* opcode = reinterpret_cast<uint16_t*>(buffer);
-
-            // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/MOV--immediate-?lang=en
-            // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/MOVT?lang=en
-
-            uint16_t addr16 = uint16_t(addr);
-
-            opcode[0] = 0xf84d;
-            opcode[1] = 0x0c08; // str r0, [sp, #-8]
-            
-            opcode[2] = 0xf240 | ((addr16 & 0x800) >> 1) | ((addr16 & 0xf000) >> 12); // movw r0, imm16
-            opcode[3] = (addr16 & 0xff) | ((addr16 & 0x700) << 4); // movw r0, imm16
-
-            addr16 = uint16_t(addr >> 16);
-            opcode[4] = 0xf2C0 | ((addr16 & 0x800) >> 1) | ((addr16 & 0xf000) >> 12); // movt r0, addr & 0xffff0000
-            opcode[5] = (addr16 & 0xff) | ((addr16 & 0x700) << 4); // movt r0, addr & 0xffff0000
-
-            opcode[6] = 0xb401; // push {r0}
-
-            opcode[7] = 0xf85d;
-            opcode[8] = 0x0c04; // ldr r0, [sp, #-4]
-
-            opcode[9] = 0xbd00; // pop {pc}
-
-            //opcode[0] = 0xf8df; // ldr pc, [pc, #2]
-            //opcode[1] = 0xf002; // ldr pc, [pc, #2]
-            //*reinterpret_cast<uint32_t*>(&opcode[2]) = addr;
-
-            return 20;
-        }
-        else
-        {
-            uint32_t* opcode = reinterpret_cast<uint32_t*>(buffer);
-
-            opcode[0] = 0xe51ff004; // ldr pc, [pc, #-4]
-            opcode[1] = reinterpret_cast<uint32_t>(jump_destination);
-
-            return 8;
-        }
+        return source_mode 
+            ? WriteThumbOpcodes(buffer, addr)
+            : WriteARMOpcodes(buffer, addr);
     }
 
     static constexpr size_t GetOpcodeSize(void* jump_destination, int source_mode, int dest_mode)

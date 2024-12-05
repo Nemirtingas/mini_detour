@@ -326,6 +326,26 @@ enum class JumpType_e
 
 #endif
 
+namespace MemoryManipulation {
+
+int WriteAbsoluteJump(void* address, void* destination)
+{
+#if defined(MINIDETOUR_ARCH_ARM)
+    int source_mode = reinterpret_cast<uintptr_t>(address) & 1;
+    int destination_mode = reinterpret_cast<uintptr_t>(destination) & 1;
+#else
+    int source_mode = 0;
+    int destination_mode = 0;
+#endif
+
+    if (address == nullptr)
+        return AbsJump::GetOpcodeSize(destination, source_mode, destination_mode);
+
+    return AbsJump::WriteOpcodes(address, destination, source_mode, destination_mode);
+}
+
+}
+
 inline size_t region_size()
 {
     return MemoryManipulation::PageSize();
@@ -691,7 +711,7 @@ namespace mini_detour
             
             if (relocatable_size >= absolute_jump_size)
             {
-                AbsJump::WriteOpcodes(func, func, hook_func, func_mode, hook_mode);
+                AbsJump::WriteOpcodes(func, hook_func, func_mode, hook_mode);
             }
             else
             {
@@ -706,7 +726,7 @@ namespace mini_detour
                     return false;
                 }
             
-                AbsJump::WriteOpcodes(jump_mem, jump_mem, hook_func, func_mode, hook_mode);
+                AbsJump::WriteOpcodes(jump_mem, hook_func, func_mode, hook_mode);
             
                 MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::memory_rights::mem_rx);
                 MemoryManipulation::FlushInstructionCache(jump_mem, AbsJump::GetMaxOpcodeSize());
@@ -809,7 +829,6 @@ namespace mini_detour
             {
                 AbsJump::WriteOpcodes(
                     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + _SavedCode.size()),
-                    reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + _SavedCode.size()),
                     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(func) + _SavedCode.size()),
                     func_mode,  // Write the trampoline in the same
                     func_mode); // mode as the original function mode
@@ -817,7 +836,6 @@ namespace mini_detour
             else if(jump_type == JumpType_e::Jump)
             {
                 AbsJump::WriteOpcodes(
-                    reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + _SavedCode.size() - jump_destination_size),
                     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + _SavedCode.size() - jump_destination_size),
                     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(jump_destination)),
                     func_mode,  // Write the trampoline in the same
@@ -840,7 +858,6 @@ namespace mini_detour
                 );
 
                 AbsJump::WriteOpcodes(
-                    reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + push_size + _SavedCode.size() - jump_destination_size),
                     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + push_size + _SavedCode.size() - jump_destination_size),
                     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(jump_destination)),
                     func_mode,  // Write the trampoline in the same
@@ -899,7 +916,7 @@ namespace mini_detour
                 }
 
                 SPDLOG_INFO("Trampoline located at: {}", jump_mem);
-                AbsJump::WriteOpcodes(jump_mem, jump_mem, hook_func, func_mode, hook_mode);
+                AbsJump::WriteOpcodes(jump_mem, hook_func, func_mode, hook_mode);
 
                 MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::memory_rights::mem_rx);
                 MemoryManipulation::FlushInstructionCache(jump_mem, AbsJump::GetMaxOpcodeSize());
@@ -1015,7 +1032,7 @@ namespace mini_detour
                     hook_mode = reinterpret_cast<uintptr_t>(_DetourCallFunc) & 1;
                 #endif
 
-                AbsJump::WriteOpcodes(_TrampolineAddress, _TrampolineAddress, _DetourCallFunc, func_mode, hook_mode);
+                AbsJump::WriteOpcodes(_TrampolineAddress, _DetourCallFunc, func_mode, hook_mode);
 
                 MemoryManipulation::MemoryProtect(_TrampolineAddress, _SavedCode.size(), MemoryManipulation::memory_rights::mem_rx);
                 MemoryManipulation::FlushInstructionCache(_TrampolineAddress, _SavedCode.size());

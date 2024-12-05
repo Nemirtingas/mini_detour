@@ -53,6 +53,28 @@ int main(int argc, char* argv[]) {
     return result;
 }
 
+int AbsoluteJumpWriteTest(int x)
+{
+    return x * 5;
+}
+
+TEST_CASE("Test absolute jump write", "[absolute_jump_write]") {
+    SPDLOG_INFO("Test absolute jump write");
+    auto allocSize = MemoryManipulation::WriteAbsoluteJump(nullptr, nullptr);
+    auto jumpAddress = (int(*)(int))MemoryManipulation::MemoryAlloc(nullptr, allocSize, MemoryManipulation::mem_rw);
+    CHECK(jumpAddress != nullptr);
+    if (jumpAddress != nullptr)
+    {
+        if (MemoryManipulation::WriteAbsoluteJump(jumpAddress, &AbsoluteJumpWriteTest) &&
+            MemoryManipulation::MemoryProtect(jumpAddress, allocSize, MemoryManipulation::mem_rx))
+        {
+            CHECK(jumpAddress(2) == 10);
+        }
+
+        MemoryManipulation::MemoryFree(jumpAddress, allocSize);
+    }
+}
+
 TEST_CASE("Memory mappings", "[vmmap]") {
     SPDLOG_INFO("Memory mappings");
     auto maps = MemoryManipulation::GetAllRegions();
