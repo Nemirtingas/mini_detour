@@ -361,21 +361,13 @@ namespace MemoryManipulation {
     {
         return 1;
     }
+
+    bool ReplaceModuleExport(void* moduleHandle, const char* exportName, void** exportCallAddress, void* newExportAddress)
+    {
+        // TODO: Read MachO and modify export address
+        return false;
+    }
 }//namespace MemoryManipulation
 }//namespace MiniDetour
-
-#if defined(MINIDETOUR_ARCH_X64)
-#include "mini_detour_x64.h"
-
-#elif defined(MINIDETOUR_ARCH_X86)
-#include "mini_detour_x86.h"
-
-#elif defined(MINIDETOUR_ARCH_ARM64)
-#include "mini_detour_arm64.h"
-
-#elif defined(MINIDETOUR_ARCH_ARM)
-#include "mini_detour_arm.h"
-
-#endif
 
 #endif//MINI_DETOUR_MACOS_H

@@ -178,6 +178,19 @@ endif()
 
 if(MINIDETOUR_BUILD_TESTS)
   add_library(
+    export_hook_test_library SHARED
+    tests/dll_test.c
+  )
+
+  set_target_properties(export_hook_test_library PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:${MINIDETOUR_DYNAMIC_RUNTIME}>:DLL>"
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+  )
+
+  add_library(
     mini_detour_test
     src/mini_detour.cpp
     src/mini_detour_arm.h
@@ -253,6 +266,8 @@ if(MINIDETOUR_BUILD_TESTS)
     tests
     PRIVATE
     mini_detour_test
+    # For library UNIX loading
+    $<$<NOT:$<BOOL:${WIN32}>>:dl>
   )
 
   target_include_directories(

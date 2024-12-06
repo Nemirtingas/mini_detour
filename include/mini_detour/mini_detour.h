@@ -112,8 +112,28 @@ namespace MemoryManipulation {
     /// </summary>
     /// <param name="address">Where to write the jump</param>
     /// <param name="destination">Where should to jump to</param>
+    /// <returns>The needed size</returns>
+    size_t WriteAbsoluteJump(void* address, void* destination);
+
+    /// <summary>
+    /// Convenient function that will try to replace the export symbol of a module without writing code into the function.
+    /// GetProcAddress and dlsym will return a pointer to your function instead.
+    /// </summary>
+    /// <param name="moduleHandle"></param>
+    /// <param name="exportName"></param>
+    /// <param name="exportCallAddress"></param>
+    /// <param name="newExportAddress"></param>
     /// <returns></returns>
-    int WriteAbsoluteJump(void* address, void* destination);
+    bool ReplaceModuleExport(void* moduleHandle, const char* exportName, void** exportCallAddress, void* newExportAddress);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="moduleHandle"></param>
+    /// <param name="exportName"></param>
+    /// <param name="newExportAddress"></param>
+    /// <returns></returns>
+    bool RestoreModuleExport(void* moduleHandle, const char* exportName, void* newExportAddress);
 
     /// <summary>
     /// Flushed instruction cache. (only implemented on Windows)

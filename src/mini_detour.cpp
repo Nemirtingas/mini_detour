@@ -305,26 +305,29 @@ public:
     }
 };
 
-inline size_t _RegionSize();
-inline size_t _JumpsInRegion();
-inline size_t _PageAddrSize(void* addr, size_t len, size_t page_size);
-
 enum class JumpType_e
 {
     Jump,
     Call,
 };
 
-#if defined(MINIDETOUR_OS_WINDOWS)
-#include "mini_detour_windows.h"
+#if defined(MINIDETOUR_ARCH_X64)
+#include "mini_detour_x64.h"
 
-#elif defined(MINIDETOUR_OS_LINUX)
-#include "mini_detour_linux.h"
+#elif defined(MINIDETOUR_ARCH_X86)
+#include "mini_detour_x86.h"
 
-#elif defined(MINIDETOUR_OS_APPLE)
-#include "mini_detour_macos.h"
+#elif defined(MINIDETOUR_ARCH_ARM64)
+#include "mini_detour_arm64.h"
+
+#elif defined(MINIDETOUR_ARCH_ARM)
+#include "mini_detour_arm.h"
 
 #endif
+
+inline size_t _RegionSize();
+inline size_t _JumpsInRegion();
+inline size_t _PageAddrSize(void* addr, size_t len, size_t page_size);
 
 inline size_t _RegionSize()
 {
@@ -343,27 +346,6 @@ inline size_t _PageAddrSize(void* addr, size_t len, size_t page_size)
     return end_addr - start_addr;
 }
 
-namespace MiniDetour {
-namespace MemoryManipulation {
-
-int WriteAbsoluteJump(void* address, void* destination)
-{
-#if defined(MINIDETOUR_ARCH_ARM)
-    int source_mode = reinterpret_cast<uintptr_t>(address) & 1;
-    int destination_mode = reinterpret_cast<uintptr_t>(destination) & 1;
-#else
-    int source_mode = 0;
-    int destination_mode = 0;
-#endif
-
-    if (address == nullptr)
-        return AbsJump::GetOpcodeSize(destination, source_mode, destination_mode);
-
-    return AbsJump::WriteOpcodes(address, destination, source_mode, destination_mode);
-}
-
-}
-
 class MemoryManager
 {
     struct JumpRegion_t
@@ -373,7 +355,7 @@ class MemoryManager
         {
             uint8_t code[AbsJump::GetMaxOpcodeSize()];
         };
-        jump_t *jump_table;
+        jump_t* jump_table;
     };
 
     std::vector<JumpRegion_t> jumps_regions; // Jumps next to functions addresses
@@ -392,12 +374,12 @@ public:
         //    MemoryManipulation::MemoryFree(v, _RegionSize());
     }
 
-
     void* AllocJumpsRegion(void* hint_addr)
     {
         void* jump_table = nullptr;
 
-        jump_table = MemoryManipulation::MemoryAlloc(hint_addr, _RegionSize(), MemoryManipulation::MemoryRights::mem_rwx);
+        jump_table = MiniDetour::MemoryManipulation::MemoryAlloc(hint_addr, _RegionSize(), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
+        SPDLOG_INFO("Jumps region allocated can hold {} jumps", _JumpsInRegion());
 
         if (jump_table != nullptr)
         {
@@ -408,11 +390,11 @@ public:
                 memset(jump_table, 0xCC, _RegionSize());
 
                 // Protect trampoline region memory
-                MemoryManipulation::MemoryProtect(jump_table, _RegionSize(), MemoryManipulation::MemoryRights::mem_rx);
+                MiniDetour::MemoryManipulation::MemoryProtect(jump_table, _RegionSize(), MiniDetour::MemoryManipulation::MemoryRights::mem_rx);
 
                 jumps_regions.emplace_back();
                 auto& region = *jumps_regions.rbegin();
-                region.bitmap.resize(_RegionSize()/sizeof(JumpRegion_t::jump_t), false);
+                region.bitmap.resize(_JumpsInRegion(), false);
                 region.bitmap[0] = true;
                 region.jump_table = (JumpRegion_t::jump_t*)jump_table;
             }
@@ -420,7 +402,7 @@ public:
             {
                 SPDLOG_INFO("Relative jump from {} to {} is impossible", hint_addr, jump_table);
 
-                MemoryManipulation::MemoryFree(jump_table, _RegionSize());
+                MiniDetour::MemoryManipulation::MemoryFree(jump_table, _RegionSize());
                 jump_table = nullptr;
             }
         }
@@ -466,13 +448,14 @@ public:
             if (region.jump_table <= jump_addr && jump_addr < (region.jump_table + region.bitmap.size()))
             {
                 region.bitmap[jump_addr - region.jump_table] = false;
+                break;
             }
         }
     }
 
     memory_t* AllocTrampolineRegion()
     {
-        memory_t* mem = (memory_t*)MemoryManipulation::MemoryAlloc(nullptr, _RegionSize(), MemoryManipulation::MemoryRights::mem_rwx);
+        memory_t* mem = (memory_t*)MiniDetour::MemoryManipulation::MemoryAlloc(nullptr, _RegionSize(), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
         if (mem == nullptr)
             return nullptr;
 
@@ -495,11 +478,11 @@ public:
                 if (!memory->used)
                 {
                     SPDLOG_DEBUG("Using free memory at {}", (void*)memory);
-                    if (!MemoryManipulation::MemoryProtect(memory, sizeof(memory_t), MemoryManipulation::MemoryRights::mem_rwx))
+                    if (!MiniDetour::MemoryManipulation::MemoryProtect(memory, sizeof(memory_t), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx))
                         return nullptr;
 
                     memory->used = 1;
-                    MemoryManipulation::MemoryProtect(memory, sizeof(memory_t), MemoryManipulation::MemoryRights::mem_rx);
+                    MiniDetour::MemoryManipulation::MemoryProtect(memory, sizeof(memory_t), MiniDetour::MemoryManipulation::MemoryRights::mem_rx);
                     return memory->data;
                 }
             }
@@ -520,15 +503,47 @@ public:
         SPDLOG_DEBUG("Freeing trampoline {}", trampoline);
         memory_t* mem = reinterpret_cast<memory_t*>(reinterpret_cast<uint8_t*>(trampoline) - offsetof(memory_t, data));
 
-        if (!MemoryManipulation::MemoryProtect(mem, sizeof(memory_t), MemoryManipulation::MemoryRights::mem_rwx))
+        if (!MiniDetour::MemoryManipulation::MemoryProtect(mem, sizeof(memory_t), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx))
             return;
         mem->used = 0;
 
-        MemoryManipulation::MemoryProtect(mem, sizeof(memory_t), MemoryManipulation::MemoryRights::mem_rx);
+        MiniDetour::MemoryManipulation::MemoryProtect(mem, sizeof(memory_t), MiniDetour::MemoryManipulation::MemoryRights::mem_rx);
     }
 };
 
 static MemoryManager mm;
+
+#if defined(MINIDETOUR_OS_WINDOWS)
+#include "mini_detour_windows.h"
+
+#elif defined(MINIDETOUR_OS_LINUX)
+#include "mini_detour_linux.h"
+
+#elif defined(MINIDETOUR_OS_APPLE)
+#include "mini_detour_macos.h"
+
+#endif
+
+namespace MiniDetour {
+namespace MemoryManipulation {
+
+size_t WriteAbsoluteJump(void* address, void* destination)
+{
+#if defined(MINIDETOUR_ARCH_ARM)
+    int source_mode = reinterpret_cast<uintptr_t>(address) & 1;
+    int destination_mode = reinterpret_cast<uintptr_t>(destination) & 1;
+#else
+    int source_mode = 0;
+    int destination_mode = 0;
+#endif
+
+    if (address == nullptr)
+        return AbsJump::GetOpcodeSize(destination, source_mode, destination_mode);
+
+    return AbsJump::WriteOpcodes(address, destination, source_mode, destination_mode);
+}
+
+}
 
 class HookImpl
 {

@@ -8,10 +8,29 @@
 #if defined(WIN64) || defined(_WIN64) || defined(__MINGW64__) ||\
     defined(WIN32) || defined(_WIN32) || defined(__MINGW32__)
 #define TESTS_OS_WINDOWS
+
+#define LOAD_LIBRARY(filePath) LoadLibraryA(filePath)
+#define GET_LIBRAR_PROC(handle, name) GetProcAddress(handle, name)
+#define FREE_LIBRARY(handle) FreeLibrary(handle)
+
 #elif defined(__linux__) || defined(linux)
+#include <dl.h>
+
 #define TESTS_OS_LINUX
+
+#define LOAD_LIBRARY(filePath) dlopen(filePath, RTLD_LAZY)
+#define GET_LIBRAR_PROC(handle, name) dlsym(handle, name)
+#define FREE_LIBRARY(handle) dlclose(handle)
+
 #elif defined(__APPLE__)
+#include <dl.h>
+
 #define TESTS_OS_APPLE
+
+#define LOAD_LIBRARY(filePath) dlopen(filePath, RTLD_LAZY)
+#define GET_LIBRAR_PROC(handle, name) dlsym(handle, name)
+#define FREE_LIBRARY(handle) dlclose(handle)
+
 #endif
 
 #if defined(TESTS_OS_WINDOWS)
@@ -89,6 +108,43 @@ int main(int argc, char* argv[]) {
     // global clean-up...
 
     return result;
+}
+
+int MyAdd(int a, int b)
+{
+    return a - b;
+}
+
+TEST_CASE("", "[module_export_hook]") {
+    SPDLOG_INFO("Test module export hook");
+#if defined(TESTS_OS_WINDOWS)
+    auto h = LOAD_LIBRARY("./export_hook_test_library.dll");
+    if (h != nullptr && h != INVALID_HANDLE_VALUE)
+    {
+        int(*libraryAdd)(int a, int b) = nullptr;
+        CHECK(MiniDetour::MemoryManipulation::ReplaceModuleExport(h, "add", (void**)&libraryAdd, &MyAdd) == true);
+        if (libraryAdd != nullptr)
+        {
+            auto myAdd = ((decltype(libraryAdd))GetProcAddress(h, "add"));
+
+            CHECK(libraryAdd(5, 3) == 8);
+            CHECK(myAdd(5, 3) == 2);
+
+            // Test restore
+            CHECK(MiniDetour::MemoryManipulation::RestoreModuleExport(h, "add", libraryAdd) == true);
+
+            myAdd = ((decltype(libraryAdd))GetProcAddress(h, "add"));
+
+            CHECK(libraryAdd(5, 3) == 8);
+            CHECK(myAdd(5, 3) == 8);
+        }
+
+        FREE_LIBRARY(h);
+    }
+#else
+// Linux (ELF) and MacOS (MachO) not implemented.
+    SPDLOG_INFO("Not implemented");
+#endif
 }
 
 int AbsoluteJumpWriteTest(int x)

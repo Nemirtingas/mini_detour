@@ -266,21 +266,146 @@ namespace MemoryManipulation {
     {
         return ::FlushInstructionCache(GetCurrentProcess(), pBase, size);
     }
+
+    static bool LoadModuleExportDetails(void* moduleHandle, PIMAGE_EXPORT_DIRECTORY* exportDirectory, PDWORD* address, PDWORD* name, PWORD* ordinal)
+    {
+        PIMAGE_DOS_HEADER pImgDOSHead = (PIMAGE_DOS_HEADER)moduleHandle;
+
+        if (pImgDOSHead->e_magic != IMAGE_DOS_SIGNATURE)
+            return false;
+
+        PIMAGE_NT_HEADERS pImgNTHead = (PIMAGE_NT_HEADERS)((DWORD_PTR)moduleHandle + pImgDOSHead->e_lfanew);
+
+        if (pImgNTHead->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC)
+            return false;
+
+        *exportDirectory = (PIMAGE_EXPORT_DIRECTORY)((LPBYTE)moduleHandle + pImgNTHead->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
+
+        if (*exportDirectory == nullptr)
+            return false;
+
+        *address = (PDWORD)((LPBYTE)moduleHandle + (*exportDirectory)->AddressOfFunctions);
+        *name = (PDWORD)((LPBYTE)moduleHandle + (*exportDirectory)->AddressOfNames);
+        *ordinal = (PWORD)((LPBYTE)moduleHandle + (*exportDirectory)->AddressOfNameOrdinals);
+
+        return true;
+    }
+
+    bool ReplaceModuleExport(void* moduleHandle, const char* exportName, void** exportCallAddress, void* newExportAddress)
+    {
+        PIMAGE_EXPORT_DIRECTORY pImgExpDir;
+        PDWORD Address;
+        PDWORD Name;
+        PWORD Ordinal;
+
+        if (!LoadModuleExportDetails(moduleHandle, &pImgExpDir, &Address, &Name, &Ordinal))
+            return false;
+
+        if (pImgExpDir->NumberOfNames > 0 && pImgExpDir->AddressOfNames != 0 && pImgExpDir->AddressOfNameOrdinals != 0)
+        {
+            for (DWORD i = 0; i < pImgExpDir->NumberOfNames; ++i)
+            {
+                if (strcmp((const char*)moduleHandle + Name[i], exportName) != 0)
+                    continue;
+
+                uint16_t nameOrdinal = pImgExpDir->Base + Ordinal[i];
+                PDWORD exportAddress = Address + nameOrdinal - pImgExpDir->Base;
+
+                if (*exportAddress == 0)
+                    return false;
+
+                MemoryManipulation::MemoryRights oldRights;
+
+                if (addresses_are_relative_jumpable(moduleHandle, newExportAddress))
+                {
+                    if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+                        return false;
+
+                    if (exportCallAddress != nullptr)
+                        *exportCallAddress = (void*)((LPBYTE)moduleHandle + *exportAddress);
+
+                    *exportAddress = (uintptr_t)newExportAddress - (uintptr_t)moduleHandle;
+
+                    MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
+                }
+                else
+                {
+                    auto exportJump = mm.GetFreeJump(moduleHandle);
+                    if (exportJump == nullptr)
+                        return false;
+
+                    if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+                    {
+                        mm.FreeJump(exportJump);
+                        return false;
+                    }
+
+                    if (!MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::mem_rwx, nullptr))
+                    {
+                        mm.FreeJump(exportJump);
+                        return false;
+                    }
+
+                    MemoryManipulation::WriteAbsoluteJump(exportJump, newExportAddress);
+
+                    if (exportCallAddress != nullptr)
+                        *exportCallAddress = (void*)((LPBYTE)moduleHandle + *exportAddress);
+
+                    *exportAddress = (uintptr_t)exportJump - (uintptr_t)moduleHandle;
+
+                    MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::mem_rx, nullptr);
+                    MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
+                }
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    bool RestoreModuleExport(void* moduleHandle, const char* exportName, void* newExportAddress)
+    {
+        PIMAGE_EXPORT_DIRECTORY pImgExpDir;
+        PDWORD Address;
+        PDWORD Name;
+        PWORD Ordinal;
+
+        if (!LoadModuleExportDetails(moduleHandle, &pImgExpDir, &Address, &Name, &Ordinal))
+            return false;
+
+        if (pImgExpDir->NumberOfNames > 0 && pImgExpDir->AddressOfNames != 0 && pImgExpDir->AddressOfNameOrdinals != 0)
+        {
+            for (DWORD i = 0; i < pImgExpDir->NumberOfNames; ++i)
+            {
+                if (strcmp((const char*)moduleHandle + Name[i], exportName) != 0)
+                    continue;
+
+                uint16_t nameOrdinal = pImgExpDir->Base + Ordinal[i];
+                PDWORD exportAddress = Address + nameOrdinal - pImgExpDir->Base;
+
+                if (*exportAddress == 0)
+                    return false;
+
+                MemoryManipulation::MemoryRights oldRights;
+
+                if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+                    return false;
+
+                auto oldJumpAddress = (void*)((uintptr_t)moduleHandle + *exportAddress);
+                *exportAddress = (uintptr_t)newExportAddress - (uintptr_t)moduleHandle;
+
+                MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
+
+                mm.FreeJump(oldJumpAddress);
+
+                return true;
+            }
+        }
+
+        return false;
+    }
 }//namespace MemoryManipulation
 }//namespace MiniDetour
-
-#if defined(MINIDETOUR_ARCH_X64)
-#include "mini_detour_x64.h"
-
-#elif defined(MINIDETOUR_ARCH_X86)
-#include "mini_detour_x86.h"
-
-#elif defined(MINIDETOUR_ARCH_ARM64)
-#include "mini_detour_arm64.h"
-
-#elif defined(MINIDETOUR_ARCH_ARM)
-#include "mini_detour_arm.h"
-
-#endif
 
 #endif//MINI_DETOUR_WINDOWS_H
