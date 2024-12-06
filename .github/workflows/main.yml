@@ -3,79 +3,85 @@ name: CI
 on: [push]
 jobs:
   job:
-    name: ${{ matrix.os }}-cmake-build
+    name: ${{ matrix.os }}-${{ matrix.platform }}-cmake-build
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        platform: [x32, x64]
+        exclude:
+        - os: macos-latest
+          platform: x32
             
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 0
-      
-      - name: Linux cmake
-        if: matrix.os == 'ubuntu-latest'
-        uses: lukka/run-cmake@v3.4
-        with:
-          cmakeListsTxtPath: '${{ github.workspace }}/CMakeLists.txt'
-          useVcpkgToolchainFile: false
-          buildDirectory: '${{ runner.workspace }}/b/ninja/'
-          cmakeGenerator: Ninja
-          cmakeBuildType: 'Debug'
-          cmakeListsOrSettingsJson: CMakeListsTxtAdvanced
-          cmakeAppendedArgs: ' -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON"'
-          buildWithCMake: true
-          buildWithCMakeArgs: '--config Debug --parallel'
-      
-      - name: Linux tests
-        if: matrix.os == 'ubuntu-latest'
+
+      - uses: lukka/get-cmake@latest
+
+      - name: Linux tests gcc (x32)
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.platform == 'x32' }}
         shell: bash
         run: |
-          #find ${{ runner.workspace }}/b;
-          ${{ runner.workspace }}/b/ninja/tests
-        
-      - name: MacOS cmake
-        if: matrix.os == 'macos-latest'
-        uses: lukka/run-cmake@v3.4
-        with:
-          cmakeListsTxtPath: '${{ github.workspace }}/CMakeLists.txt'
-          useVcpkgToolchainFile: false
-          buildDirectory: '${{ runner.workspace }}/b/ninja/'
-          cmakeGenerator: Ninja
-          cmakeBuildType: 'Debug'
-          cmakeListsOrSettingsJson: CMakeListsTxtAdvanced
-          cmakeAppendedArgs: ' -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON"'
-          buildWithCMake: true
-          buildWithCMakeArgs: '--config Debug --parallel'
-      
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt install -y gcc-multilib g++-multilib # needed for 32-bit builds
+          
+          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_i386.toolchain" -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON -S . -B build
+          cmake --build build
+          #find build
+          build/tests
+
+      - name: Linux tests gcc (x64)
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.platform == 'x64' }}
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt install -y gcc-arm-linux-gnueabi g++-arm-linux-gnueabi gcc-aarch64-linux-gnu g++-aarch64-linux-gnu qemu-user
+          
+          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_arm.toolchain" -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON -S . -B build/linux_arm
+          cmake --build build/linux_arm
+          
+          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_aarch64.toolchain" -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON -S . -B build/linux_aarch64
+          cmake --build build/linux_aarch64
+          
+          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON -S . -B build/linux_x64
+          cmake --build build/linux_x64
+          
+          echo "### Running ARM tests ###"
+          qemu-arm -L /usr/arm-linux-gnueabi build/linux_arm/tests || echo "Failed"
+          echo "### Running AARCH64 tests ###"
+          qemu-aarch64 -L /usr/aarch64-linux-gnu build/linux_aarch64/tests || echo "Failed"
+          echo "### Running X64 tests ###"
+          build/linux_x64/tests
+
       - name: MacOS tests
         if: matrix.os == 'macos-latest'
         shell: bash
         run: |
-          #find ${{ runner.workspace }}/b;
-          ${{ runner.workspace }}/b/ninja/macos_permission_fix ${{ runner.workspace }}/b/ninja/tests
-          ${{ runner.workspace }}/b/ninja/tests
-        
-      - name: Windows cmake
-        if: matrix.os == 'windows-latest'
-        uses: lukka/run-cmake@v3.4
-        with:
-          cmakeListsTxtPath: '${{ github.workspace }}/CMakeLists.txt'
-          useVcpkgToolchainFile: false
-          buildDirectory: '${{ runner.workspace }}/b/ninja/'
-          cmakeGenerator: Ninja
-          cmakeBuildType: 'Debug'
-          cmakeListsOrSettingsJson: CMakeListsTxtAdvanced
-          cmakeAppendedArgs: ' -DCMAKE_PREFIX_PATH=${{env.MINGW_BASE_DIR}} -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON"'
-          buildWithCMake: true
-          buildWithCMakeArgs: '--config Debug --parallel'
-          
-      - name: Windows tests
-        if: matrix.os == 'windows-latest'
+          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON -S . -B build
+          cmake --build build
+          #find build
+          build/macos_permission_fix builds/tests
+          build/tests
+
+      - name: Windows tests (x32)
+        if: ${{ matrix.os == 'windows-latest' && matrix.platform == 'x32' }}
         shell: powershell
         run: |
-          #Get-ChildItem -Recurse -Filter '*' ${{ runner.workspace }}\b;
-          ${{ runner.workspace }}\b\ninja\Debug\tests.exe
+          cmake ${{ github.workspace }}\CMakeLists.txt -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON -S . -B build -A Win32
+          cmake --build build
+          #Get-ChildItem -Recurse build
+          build\Debug\tests.exe
+
+      - name: Windows tests (x64)
+        if: ${{ matrix.os == 'windows-latest' && matrix.platform == 'x64' }}
+        shell: powershell
+        run: |
+          cmake ${{ github.workspace }}\CMakeLists.txt -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON -S . -B build -A x64
+          cmake --build build
+          #Get-ChildItem -Recurse build
+          build\Debug\tests.exe
