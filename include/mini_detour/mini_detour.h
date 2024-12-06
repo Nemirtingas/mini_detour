@@ -6,9 +6,12 @@
 #include <vector>
 #include <string>
 
+namespace MiniDetour
+{
+
 namespace MemoryManipulation
 {
-    enum memory_rights
+    enum MemoryRights
     {
         mem_none = 0,
         mem_r    = 1,
@@ -21,18 +24,18 @@ namespace MemoryManipulation
         mem_unset = 8,
     };
 
-    struct region_infos_t
+    struct RegionInfos_t
     {
-        memory_rights rights;
+        MemoryRights rights;
         uintptr_t start;
         uintptr_t end;
         std::string module_name;
 
-        region_infos_t():
-            rights(memory_rights::mem_none), start(0), end(0)
+        RegionInfos_t():
+            rights(MemoryRights::mem_none), start(0), end(0)
         {}
 
-        region_infos_t(memory_rights rights, uintptr_t start, uintptr_t end, std::string && module_name):
+        RegionInfos_t(MemoryRights rights, uintptr_t start, uintptr_t end, std::string && module_name):
             rights(rights), start(start), end(end), module_name(std::move(module_name))
         {}
 
@@ -73,9 +76,9 @@ namespace MemoryManipulation
     /// <returns></returns>
     size_t PageSize();
 
-    region_infos_t GetRegionInfos(void* address);
-    std::vector<region_infos_t> GetAllRegions();
-    std::vector<region_infos_t> GetFreeRegions();
+    RegionInfos_t GetRegionInfos(void* address);
+    std::vector<RegionInfos_t> GetAllRegions();
+    std::vector<RegionInfos_t> GetFreeRegions();
 
     /// <summary>
     /// Changes memory protection. (On Linux and MacOS, address and rights will be aligned to page size, it is required or it will fail)
@@ -85,9 +88,9 @@ namespace MemoryManipulation
     /// <param name="rights"></param>
     /// <param name="old_rights"></param>
     /// <returns></returns>
-    bool MemoryProtect(void* address, size_t size, memory_rights rights, memory_rights* old_rights = nullptr);
+    bool MemoryProtect(void* address, size_t size, MemoryRights rights, MemoryRights* old_rights = nullptr);
     void MemoryFree(void* address, size_t size);
-    void* MemoryAlloc(void* address_hint, size_t size, memory_rights rights);
+    void* MemoryAlloc(void* address_hint, size_t size, MemoryRights rights);
 
     /// <summary>
     /// Safely read memory, it doesn't mean it will always succeed, only that on memory not readable or no allocated, it will not crash your application.
@@ -122,47 +125,46 @@ namespace MemoryManipulation
     /// <param name="size"></param>
     /// <returns></returns>
     int FlushInstructionCache(void* address, size_t size);
-}
+}//namespace MemoryManipulation
     
-namespace mini_detour
+class Hook_t
 {
-    class hook
+    class HookImpl* _Impl;
+
+public:
+    Hook_t();
+    Hook_t(Hook_t const&) = delete;
+    Hook_t(Hook_t&&) noexcept;
+    ~Hook_t();
+
+    Hook_t& operator=(Hook_t const&) = delete;
+    Hook_t& operator=(Hook_t&&) noexcept;
+
+    void RestoreOnDestroy(bool restore);
+
+    bool CanHook(void* func);
+    static bool ReplaceFunction(void* functionToReplace, void* newFunction);
+    void* HookFunction(void* functionToHook, void* newFunction);
+    void* RestoreFunction();
+    void* GetHookFunction();
+    void* GetOriginalFunction();
+
+    // Call the hook func
+    template<typename T>
+    inline T GetHookFunction()
     {
-        class HookImpl* _Impl;
+        return reinterpret_cast<T>(GetHookFunction());
+    }
 
-    public:
-        hook();
-        hook(hook const&) = delete;
-        hook(hook&&) noexcept;
-        ~hook();
+    // Call the original func
+    template<typename T>
+    inline T GetOriginalFunction()
+    {
+        return reinterpret_cast<T>(GetOriginalFunction());
+    }
+};
 
-        hook& operator=(hook const&) = delete;
-        hook& operator=(hook &&) noexcept;
-
-        void RestoreOnDestroy(bool restore);
-
-        bool can_hook(void* func);
-        static bool replace_func(void* func, void* hook_func);
-        void* hook_func(void* func, void* hook_func);
-        void* restore_func();
-        void* get_hook_func();
-        void* get_original_func();
-
-        // Call the hook func
-        template<typename T>
-        inline T get_hook_func()
-        {
-            return reinterpret_cast<T>(get_hook_func());
-        }
-
-        // Call the original func
-        template<typename T>
-        inline T get_original_func()
-        {
-            return reinterpret_cast<T>(get_original_func());
-        }
-    };
-}
+}//namespace MiniDetour
 
 #endif // MINI_DETOUR_H
 

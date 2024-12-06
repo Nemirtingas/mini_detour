@@ -77,6 +77,7 @@ std::string kern_return_t_2_str(kern_return_t v)
 
 #endif
 
+namespace MiniDetour {
 namespace MemoryManipulation {
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
     const void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
@@ -84,7 +85,7 @@ namespace MemoryManipulation {
     const void* max_user_address = reinterpret_cast<void*>(0x7ffff000);
 #endif
 
-    size_t memory_protect_rights_to_native(memory_rights rights)
+    size_t _MemoryProtectRightsToNative(MemoryRights rights)
     {
         switch (rights)
         {
@@ -105,9 +106,9 @@ namespace MemoryManipulation {
         return sysconf(_SC_PAGESIZE);
     }
 
-    region_infos_t GetRegionInfos(void* address)
+    RegionInfos_t GetRegionInfos(void* address)
     {
-        region_infos_t res{};
+        RegionInfos_t res{};
 
         mach_vm_address_t vm_address = (mach_vm_address_t)address;
         kern_return_t ret;
@@ -141,14 +142,14 @@ namespace MemoryManipulation {
             }
         }
 
-        res.rights = (memory_rights)rights;
+        res.rights = (MemoryRights)rights;
 
         return res;
     }
 
-    std::vector<region_infos_t> GetAllRegions()
+    std::vector<RegionInfos_t> GetAllRegions()
     {
-        std::vector<region_infos_t> mappings;
+        std::vector<RegionInfos_t> mappings;
 
         mach_port_t self_task = mach_task_self();
         mach_vm_address_t old_end = 0;
@@ -167,14 +168,14 @@ namespace MemoryManipulation {
             if (old_end != vm_address)
             {
                 mappings.emplace_back(
-                    memory_rights::mem_unset,
+                    MemoryRights::mem_unset,
                     (uintptr_t)old_end,
                     (uintptr_t)vm_address,
                     std::string()
                 );
             }
 
-            rights = memory_rights::mem_none;
+            rights = MemoryRights::mem_none;
 
             if (infos.protection & VM_PROT_READ)
                 rights |= mem_r;
@@ -185,8 +186,8 @@ namespace MemoryManipulation {
             if (infos.protection & VM_PROT_EXECUTE)
                 rights |= mem_x;
 
-            mappings.emplace_back(region_infos_t{
-                (memory_rights)rights,
+            mappings.emplace_back(RegionInfos_t{
+                (MemoryRights)rights,
                 static_cast<uintptr_t>(vm_address),
                 static_cast<uintptr_t>(vm_address + size),
                 std::move(module_name)
@@ -199,9 +200,9 @@ namespace MemoryManipulation {
         return mappings;
     }
 
-    std::vector<region_infos_t> GetFreeRegions()
+    std::vector<RegionInfos_t> GetFreeRegions()
     {
-        std::vector<region_infos_t> mappings;
+        std::vector<RegionInfos_t> mappings;
 
         mach_port_t self_task = mach_task_self();
         mach_vm_address_t old_end = 0;
@@ -217,7 +218,7 @@ namespace MemoryManipulation {
             if (old_end != vm_address)
             {
                 mappings.emplace_back(
-                    memory_rights::mem_unset,
+                    MemoryRights::mem_unset,
                     (uintptr_t)old_end,
                     (uintptr_t)vm_address,
                     std::string()
@@ -231,14 +232,14 @@ namespace MemoryManipulation {
         return mappings;
     }
 
-    bool MemoryProtect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
+    bool MemoryProtect(void* address, size_t size, MemoryRights rights, MemoryRights* old_rights)
     {
         kern_return_t kret;
-        region_infos_t infos;
+        RegionInfos_t infos;
         if (old_rights != nullptr)
             infos = GetRegionInfos(address);
 
-        kret = mach_vm_protect(mach_task_self(), (mach_vm_address_t)address, size, FALSE, memory_protect_rights_to_native(rights));
+        kret = mach_vm_protect(mach_task_self(), (mach_vm_address_t)address, (mach_vm_size_t)size, FALSE, _MemoryProtectRightsToNative(rights));
 
         if (old_rights != nullptr)
             *old_rights = infos.rights;
@@ -255,34 +256,36 @@ namespace MemoryManipulation {
             mach_vm_deallocate(mach_task_self(), (mach_vm_address_t)address, size);
     }
 
-    static inline kern_return_t MemoryAllocWithProtection(mach_port_t task, mach_vm_address_t* address, mach_vm_size_t size, memory_rights rights, int flags)
+    static inline kern_return_t MemoryAllocWithProtection(mach_port_t task, void** address, size_t size, MemoryRights rights, int flags)
     {
-        kern_return_t kret = mach_vm_allocate(task, address, (mach_vm_size_t)size, flags);
+        mach_vm_address_t mach_address = (mach_vm_address_t)*address;
+        mach_vm_size_t mach_size = (mach_vm_size_t)size;
+        kern_return_t kret = mach_vm_allocate(task, &mach_address, mach_size, flags);
         if (kret != KERN_SUCCESS)
         {
-            *address = (mach_vm_address_t)0;
+            *address = nullptr;
             SPDLOG_ERROR("mach_vm_allocate failed with code: {}", kern_return_t_2_str(kret));
         }
         else
         {
-            if (!MemoryProtect(reinterpret_cast<void*>(*address), size, rights))
+            *address = (void*)mach_address;
+            if (!MemoryProtect(*address, mach_size, rights))
             {
-                MemoryFree((void*)*address, (size_t)size);
-                *address = (mach_vm_address_t)0;
+                MemoryFree(*address, size);
+                *address = nullptr;
             }
         }
 
         return kret;
     }
 
-    static inline void* MemoryAllocNear(uintptr_t addressHint, size_t size, memory_rights rights, size_t pageSize, mach_port_t task)
+    static inline void* MemoryAllocNear(mach_port_t task, uintptr_t addressHint, size_t size, MemoryRights rights, size_t pageSize)
     {
-        kern_return_t kret;
-        mach_vm_address_t address;
+        void* address;
 
         auto freeRegions = GetFreeRegions();
 
-        std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](MemoryManipulation::region_infos_t const& l, MemoryManipulation::region_infos_t const& r)
+        std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](MemoryManipulation::RegionInfos_t const& l, MemoryManipulation::RegionInfos_t const& r)
         {
             return std::max(addressHint, l.start) - std::min(addressHint, l.start) <
                 std::max(addressHint, r.start) - std::min(addressHint, r.start);
@@ -290,45 +293,47 @@ namespace MemoryManipulation {
 
         for (auto const& region : freeRegions)
         {
-            for (auto allocAddress = region.start; (allocAddress + size) < region.end; allocAddress += pageSize)
+            auto start = region.start > addressHint ? region.start : (region.end - pageSize);
+            auto increment = static_cast<int32_t>(region.start > addressHint ? pageSize : -pageSize);
+
+            for (auto allocAddress = start; allocAddress >= region.start && (allocAddress + size) < region.end; allocAddress += increment)
             {
                 if (allocAddress > (uintptr_t)max_user_address)
                     break;
 
-                address = (mach_vm_address_t)allocAddress;
+                address = (void*)allocAddress;
                 MemoryAllocWithProtection(task, &address, (mach_vm_size_t)size, rights, VM_FLAGS_FIXED);
-                if (reinterpret_cast<void*>(address) != nullptr)
-                    return reinterpret_cast<void*>(address);
+                if (address != nullptr)
+                    return address;
             }
         }
 
         // Fallback to anywhere alloc
-        kret = MemoryAllocWithProtection(task, &address, (mach_vm_size_t)size, rights, VM_FLAGS_ANYWHERE);
+        address = nullptr;
+        MemoryAllocWithProtection(task, &address, size, rights, VM_FLAGS_ANYWHERE);
 
-        return reinterpret_cast<void*>(address);
+        return address;
     }
 
-    void* MemoryAlloc(void* _addressHint, size_t size, memory_rights rights)
+    void* MemoryAlloc(void* _addressHint, size_t size, MemoryRights rights)
     {
         if (_addressHint > max_user_address)
             _addressHint = (void*)max_user_address;
 
         auto pageSize = PageSize();
         auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
-        size = page_addr_size((void*)addressHint, size, pageSize);
+        size = _PageAddrSize((void*)addressHint, size, pageSize);
 
-        kern_return_t kret;
-        mach_vm_address_t address;
         mach_port_t task = mach_task_self();
 
         if (_addressHint == nullptr)
         {
-            address = 0;
-            MemoryAllocWithProtection(task, &address, (mach_vm_size_t)size, rights, VM_FLAGS_ANYWHERE);
-            return reinterpret_cast<void*>(address);
+            void* address = nullptr;
+            MemoryAllocWithProtection(task, &address, size, rights, VM_FLAGS_ANYWHERE);
+            return address;
         }
 
-        return MemoryAllocNear(addressHint, size, rights, pageSize, task);
+        return MemoryAllocNear(task, addressHint, size, rights, pageSize);
     }
 
     bool SafeMemoryRead(void* address, uint8_t* buffer, size_t size)
@@ -356,7 +361,8 @@ namespace MemoryManipulation {
     {
         return 1;
     }
-}
+}//namespace MemoryManipulation
+}//namespace MiniDetour
 
 #if defined(MINIDETOUR_ARCH_X64)
 #include "mini_detour_x64.h"

@@ -6,6 +6,7 @@
 #define NOMINMAX
 #include <Windows.h>
 
+namespace MiniDetour {
 namespace MemoryManipulation {
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
     const void* max_user_address = reinterpret_cast<void*>(0x7ffffffff000);
@@ -13,7 +14,7 @@ namespace MemoryManipulation {
     const void* max_user_address = reinterpret_cast<void*>(0x7ffff000);
 #endif
 
-    DWORD memory_protect_rights_to_native(memory_rights rights)
+    DWORD _MemoryProtectRightsToNative(MemoryRights rights)
     {
         switch (rights)
         {
@@ -29,7 +30,7 @@ namespace MemoryManipulation {
         }
     }
 
-    memory_rights memory_native_to_protect_rights(DWORD rights)
+    MemoryRights _MemoryNativeToProtectRights(DWORD rights)
     {
         switch (rights)
         {
@@ -49,43 +50,43 @@ namespace MemoryManipulation {
         return sysInfo.dwPageSize;
     }
 
-    region_infos_t GetRegionInfos(void* address)
+    RegionInfos_t GetRegionInfos(void* address)
     {
         MEMORY_BASIC_INFORMATION infos;
-        region_infos_t res{};
+        RegionInfos_t res{};
 
         res.rights = mem_unset;
         if (VirtualQuery(address, &infos, sizeof(infos)) != 0)
         {
             res.start = reinterpret_cast<uintptr_t>(infos.BaseAddress);
             res.end = res.start + infos.RegionSize;
-            res.rights = memory_native_to_protect_rights(infos.Protect & 0xFF);
+            res.rights = _MemoryNativeToProtectRights(infos.Protect & 0xFF);
         }
 
         return res;
     }
 
-    std::vector<region_infos_t> GetAllRegions()
+    std::vector<RegionInfos_t> GetAllRegions()
     {
         HANDLE process_handle = GetCurrentProcess();
         LPVOID search_addr = nullptr;
         MEMORY_BASIC_INFORMATION mem_infos{};
-        memory_rights rights;
+        MemoryRights rights;
         std::string module_name;
         std::wstring wmodule_name(1024, L'\0');
         DWORD wmodule_name_size = 1024;
         HMODULE module_handle;
 
-        std::vector<region_infos_t> mappings;
+        std::vector<RegionInfos_t> mappings;
 
         mappings.reserve(256);
         while (VirtualQueryEx(process_handle, search_addr, &mem_infos, sizeof(mem_infos)) != 0)
         {
-            rights = memory_rights::mem_unset;
+            rights = MemoryRights::mem_unset;
 
             if (mem_infos.State != MEM_FREE)
             {
-                rights = MemoryManipulation::memory_native_to_protect_rights(mem_infos.Protect);
+                rights = _MemoryNativeToProtectRights(mem_infos.Protect);
 
                 if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT|GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)mem_infos.BaseAddress, &module_handle) != FALSE && module_handle != nullptr)
                 {
@@ -128,7 +129,7 @@ namespace MemoryManipulation {
         return mappings;
     }
 
-    std::vector<region_infos_t> GetFreeRegions()
+    std::vector<RegionInfos_t> GetFreeRegions()
     {
         HANDLE process_handle = GetCurrentProcess();
         LPVOID search_addr = nullptr;
@@ -138,7 +139,7 @@ namespace MemoryManipulation {
         DWORD wmodule_name_size = 1024;
         HMODULE module_handle;
 
-        std::vector<region_infos_t> mappings;
+        std::vector<RegionInfos_t> mappings;
 
         mappings.reserve(256);
         while (VirtualQueryEx(process_handle, search_addr, &mem_infos, sizeof(mem_infos)) != 0)
@@ -146,7 +147,7 @@ namespace MemoryManipulation {
             if (mem_infos.State == MEM_FREE)
             {
                 mappings.emplace_back(
-                    memory_rights::mem_unset,
+                    MemoryRights::mem_unset,
                     reinterpret_cast<uintptr_t>(mem_infos.BaseAddress),
                     reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize,
                     std::move(module_name)
@@ -159,13 +160,13 @@ namespace MemoryManipulation {
         return mappings;
     }
 
-    bool MemoryProtect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
+    bool MemoryProtect(void* address, size_t size, MemoryRights rights, MemoryRights* old_rights)
     {
         DWORD oldProtect;
-        bool res = VirtualProtect(address, size, memory_protect_rights_to_native(rights), &oldProtect) != FALSE;
+        bool res = VirtualProtect(address, size, _MemoryProtectRightsToNative(rights), &oldProtect) != FALSE;
 
         if (old_rights != nullptr)
-            *old_rights = memory_native_to_protect_rights(oldProtect & 0xFF);
+            *old_rights = _MemoryNativeToProtectRights(oldProtect & 0xFF);
 
         return res;
     }
@@ -176,47 +177,67 @@ namespace MemoryManipulation {
             VirtualFree(address, 0, MEM_RELEASE);
     }
 
-    void* MemoryAlloc(void* _addressHint, size_t size, memory_rights rights)
+    static inline BOOL MemoryAllocWithProtection(HANDLE hProcess, LPVOID* address, SIZE_T size, MemoryRights rights)
     {
-        if (_addressHint > max_user_address)
-            _addressHint = (void*)max_user_address;
+        *address = VirtualAllocEx(hProcess, *address, size, MEM_RESERVE | MEM_COMMIT, _MemoryProtectRightsToNative(rights));
+        return *address != nullptr;
+    }
+
+    static inline void* MemoryAllocNear(HANDLE hProcess, uintptr_t addressHint, size_t size, MemoryRights rights, size_t pageSize)
+    {
+        void* address;
 
         auto freeRegions = GetFreeRegions();
 
-        auto pageSize = PageSize();
-        auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
-        size = page_addr_size((void*)addressHint, size, pageSize);
-        const auto nativeRights = memory_protect_rights_to_native(rights);
-
-        if (_addressHint != nullptr)
+        std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](MemoryManipulation::RegionInfos_t const& l, MemoryManipulation::RegionInfos_t const& r)
         {
-            std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](MemoryManipulation::region_infos_t const& l, MemoryManipulation::region_infos_t const& r)
-            {
-                return std::max(addressHint, l.start) - std::min(addressHint, l.start) <
-                    std::max(addressHint, r.start) - std::min(addressHint, r.start);
-            });
-        }
-
-        HANDLE hProcess = GetCurrentProcess();
-
-        constexpr size_t allocationAlignement = 0x10000;
-        constexpr size_t mmGranularityMinusOne = allocationAlignement - 1;
+            return std::max(addressHint, l.start) - std::min(addressHint, l.start) <
+                std::max(addressHint, r.start) - std::min(addressHint, r.start);
+        });
 
         for (auto const& region : freeRegions)
         {
-            for (auto allocAddress = ((region.start + mmGranularityMinusOne) & ~mmGranularityMinusOne); (allocAddress + size) < region.end; allocAddress += allocationAlignement)
+            auto start = region.start > addressHint ? region.start : (region.end - pageSize);
+            auto increment = static_cast<int32_t>(region.start > addressHint ? pageSize : -pageSize);
+
+            for (auto allocAddress = start; allocAddress >= region.start && (allocAddress + size) < region.end; allocAddress += increment)
             {
                 if (allocAddress > (uintptr_t)max_user_address)
                     break;
 
-                auto pbAlloc = (void*)VirtualAllocEx(hProcess, (PVOID)allocAddress, size, MEM_RESERVE | MEM_COMMIT, nativeRights);
-
-                if (pbAlloc != nullptr)
-                    return pbAlloc;
+                address = (void*)allocAddress;
+                MemoryAllocWithProtection(hProcess, &address, size, rights);
+                if (address != nullptr)
+                    return address;
             }
         }
 
-        return nullptr;
+        // Fallback to anywhere alloc
+        address = nullptr;
+        MemoryAllocWithProtection(hProcess, &address, size, rights);
+
+        return address;
+    }
+
+    void* MemoryAlloc(void* _addressHint, size_t size, MemoryRights rights)
+    {
+        if (_addressHint > max_user_address)
+            _addressHint = (void*)max_user_address;
+
+        auto pageSize = PageSize();
+        auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
+        size = _PageAddrSize((void*)addressHint, size, pageSize);
+
+        HANDLE hProcess = GetCurrentProcess();
+
+        if (_addressHint == nullptr)
+        {
+            LPVOID address = nullptr;
+            MemoryAllocWithProtection(hProcess, &address, size, rights);
+            return (void*)address;
+        }
+
+        return MemoryAllocNear(hProcess, addressHint, size, rights, pageSize);
     }
     
     bool SafeMemoryRead(void* address, uint8_t* buffer, size_t size)
@@ -245,7 +266,8 @@ namespace MemoryManipulation {
     {
         return ::FlushInstructionCache(GetCurrentProcess(), pBase, size);
     }
-}
+}//namespace MemoryManipulation
+}//namespace MiniDetour
 
 #if defined(MINIDETOUR_ARCH_X64)
 #include "mini_detour_x64.h"

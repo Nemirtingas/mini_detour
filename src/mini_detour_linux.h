@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <errno.h>
 
+namespace MiniDetour {
 namespace MemoryManipulation {
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
     const void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
@@ -13,7 +14,7 @@ namespace MemoryManipulation {
     const void* max_user_address = reinterpret_cast<void*>(0x7ffff000);
 #endif
 
-    int memory_protect_rights_to_native(memory_rights rights)
+    int _MemoryProtectRightsToNative(MemoryRights rights)
     {
         switch (rights)
         {
@@ -34,9 +35,9 @@ namespace MemoryManipulation {
         return sysconf(_SC_PAGESIZE);
     }
 
-    region_infos_t GetRegionInfos(void* address)
+    RegionInfos_t GetRegionInfos(void* address)
     {
-        region_infos_t res{};
+        RegionInfos_t res{};
 
         char* str_it;
         const char* str_end;
@@ -92,13 +93,13 @@ namespace MemoryManipulation {
             }
         }
 
-        res.rights = (memory_rights)rights;
+        res.rights = (MemoryRights)rights;
         return res;
     }
 
-    std::vector<region_infos_t> GetAllRegions()
+    std::vector<RegionInfos_t> GetAllRegions()
     {
-        std::vector<region_infos_t> mappings;
+        std::vector<RegionInfos_t> mappings;
 
         char* str_it;
         const char* str_end;
@@ -123,7 +124,7 @@ namespace MemoryManipulation {
                     if (old_end != start)
                     {
                         mappings.emplace_back(
-                            memory_rights::mem_unset,
+                            MemoryRights::mem_unset,
                             old_end,
                             start,
                             std::string()
@@ -132,7 +133,7 @@ namespace MemoryManipulation {
 
                     old_end = end;
 
-                    rights = memory_rights::mem_none;
+                    rights = MemoryRights::mem_none;
 
                     ++str_it;
                     if (str_it[0] == 'r')
@@ -157,7 +158,7 @@ namespace MemoryManipulation {
                     }
 
                     mappings.emplace_back(
-                        (memory_rights)rights,
+                        (MemoryRights)rights,
                         start,
                         end,
                         str_it
@@ -169,9 +170,9 @@ namespace MemoryManipulation {
         return mappings;
     }
 
-    std::vector<region_infos_t> GetFreeRegions()
+    std::vector<RegionInfos_t> GetFreeRegions()
     {
-        std::vector<region_infos_t> mappings;
+        std::vector<RegionInfos_t> mappings;
 
         char* str_it;
         const char* str_end;
@@ -195,7 +196,7 @@ namespace MemoryManipulation {
                     if (old_end != start)
                     {
                         mappings.emplace_back(
-                            memory_rights::mem_unset,
+                            MemoryRights::mem_unset,
                             old_end,
                             start,
                             std::string()
@@ -210,13 +211,13 @@ namespace MemoryManipulation {
         return mappings;
     }
 
-    bool MemoryProtect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
+    bool MemoryProtect(void* address, size_t size, MemoryRights rights, MemoryRights* old_rights)
     {
-        region_infos_t infos;
+        RegionInfos_t infos;
         if (old_rights != nullptr)
             infos = GetRegionInfos(address);
 
-        bool res = mprotect(PageRound(address, PageSize()), page_addr_size(address, size, PageSize()), memory_protect_rights_to_native(rights)) == 0;
+        bool res = mprotect(PageRound(address, PageSize()), _PageAddrSize(address, size, PageSize()), _MemoryProtectRightsToNative(rights)) == 0;
 
         if (old_rights != nullptr)
             *old_rights = infos.rights;
@@ -230,11 +231,19 @@ namespace MemoryManipulation {
             munmap(address, size);
     }
 
-    static inline void* MemoryAllocNear(uintptr_t addressHint, size_t size, int nativeRights, size_t pageSize)
+    static inline bool MemoryAllocWithProtection(void** address, size_t size, MemoryRights rights, int flags)
     {
+        *address = mmap(*address, size, _MemoryProtectRightsToNative(rights), flags, -1, 0);
+        return *address != nullptr;
+    }
+
+    static inline void* MemoryAllocNear(uintptr_t addressHint, size_t size, MemoryRights rights, size_t pageSize)
+    {
+        void* address;
+
         auto freeRegions = GetFreeRegions();
 
-        std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](MemoryManipulation::region_infos_t const& l, MemoryManipulation::region_infos_t const& r)
+        std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](MemoryManipulation::RegionInfos_t const& l, MemoryManipulation::RegionInfos_t const& r)
         {
             return std::max(addressHint, l.start) - std::min(addressHint, l.start) <
                 std::max(addressHint, r.start) - std::min(addressHint, r.start);
@@ -242,36 +251,45 @@ namespace MemoryManipulation {
 
         for (auto const& region : freeRegions)
         {
-            for (auto allocAddress = region.start; (allocAddress + size) < region.end; allocAddress += pageSize)
+            auto start = region.start > addressHint ? region.start : (region.end - pageSize);
+            auto increment = static_cast<int32_t>(region.start > addressHint ? pageSize : -pageSize);
+
+            for (auto allocAddress = start; allocAddress >= region.start && (allocAddress + size) < region.end; allocAddress += increment)
             {
                 if (allocAddress > (uintptr_t)max_user_address)
                     break;
 
-                void* r = mmap((void*)allocAddress, size, nativeRights, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-
-                if (r != nullptr)
-                    return r;
+                address = (void*)allocAddress;
+                MemoryAllocWithProtection(&address, size, rights, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS);
+                if (address != nullptr)
+                    return address;
             }
         }
 
-        // Fallback to hint alloc
-        return mmap((void*)addressHint, size, nativeRights, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        // Fallback to anywhere alloc
+        address = nullptr;
+        MemoryAllocWithProtection(&address, size, rights, MAP_PRIVATE | MAP_ANONYMOUS);
+
+        return address;
     }
 
-    void* MemoryAlloc(void* _addressHint, size_t size, memory_rights rights)
+    void* MemoryAlloc(void* _addressHint, size_t size, MemoryRights rights)
     {
         if (_addressHint > max_user_address)
             _addressHint = (void*)max_user_address;
 
         auto pageSize = PageSize();
         auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
-        size = page_addr_size((void*)addressHint, size, pageSize);
-        const auto nativeRights = memory_protect_rights_to_native(rights);
+        size = _PageAddrSize((void*)addressHint, size, pageSize);
 
         if (_addressHint == nullptr)
-            return mmap(nullptr, size, nativeRights, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        {
+            void* address = nullptr;
+            MemoryAllocWithProtection(&address, size, rights, MAP_PRIVATE | MAP_ANONYMOUS);
+            return address;
+        }
 
-        return MemoryAllocNear(addressHint, size, nativeRights, pageSize);
+        return MemoryAllocNear(addressHint, size, rights, pageSize);
     }
 
     bool SafeMemoryRead(void* address, uint8_t* buffer, size_t size)
@@ -310,7 +328,8 @@ namespace MemoryManipulation {
     {
         return 1;
     }
-}
+}//namespace MemoryManipulation
+}//namespace MiniDetour
 
 #if defined(MINIDETOUR_ARCH_X64)
 #include "mini_detour_x64.h"
