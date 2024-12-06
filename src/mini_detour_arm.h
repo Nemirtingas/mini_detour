@@ -79,9 +79,9 @@ struct AbsJump
         return 20;
     }
 
-    static inline size_t WriteARMOpcodes(void* buffer, uint32_t jump_destination)
+    static inline size_t WriteARMOpcodes(void* buffer, uint32_t addr)
     {
-        uint32_t* opcode = reinterpret_cast<uint32_t*>(addr);
+        uint32_t* opcode = reinterpret_cast<uint32_t*>(buffer);
 
         opcode[0] = 0xe51ff004; // ldr pc, [pc, #-4]
         opcode[1] = addr;
@@ -223,6 +223,17 @@ void _EnterRecursiveThunk(void*& pCode)
     // TODO
 }
 
+static bool _UsesInstructionPointer(cs_insn const& instruction)
+{
+    for (size_t i = 0; i < instruction.detail->arm.op_count; i++)
+    {
+        cs_arm_op op = instruction.detail->arm.operands[i];
+        if (op.type == ARM_OP_REG && op.reg == ARM_REG_PC)
+            return true;
+    }
+    return false;
+}
+
 size_t _GetRelocatableSize(void* pCode, void*& jump_destination, size_t& jump_destination_size, JumpType_e& jump_type, bool ignore_relocation, CodeDisasm& disasm, size_t wanted_relocatable_size)
 {
     uint8_t code_buffer[80];
@@ -241,7 +252,7 @@ size_t _GetRelocatableSize(void* pCode, void*& jump_destination, size_t& jump_de
         if (!disasm.Disasm(&code_iterator, &code_size, &code_addr))
             break;
 
-        if (disasm.IsInstructionTerminating())
+        if (disasm.IsInstructionTerminating() || _UsesInstructionPointer(disasm.GetInstruction()))
         {
             if (ignore_relocation) // Last instruction, overwrite it if we're ignoring relocations
             {
