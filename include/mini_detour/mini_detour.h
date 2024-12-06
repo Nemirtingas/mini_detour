@@ -6,11 +6,8 @@
 #include <vector>
 #include <string>
 
-namespace MiniDetour
-{
-
-namespace MemoryManipulation
-{
+namespace MiniDetour {
+namespace MemoryManipulation {
     enum MemoryRights
     {
         mem_none = 0,
@@ -52,8 +49,8 @@ namespace MemoryManipulation
     /// <returns></returns>
     inline void* PageRoundUp(void* _addr, size_t page_size)
     {
-        size_t addr = (size_t)_addr;
-        return (void*)((addr + (page_size - 1)) & (((size_t)-1) ^ (page_size - 1)));
+        uintptr_t addr = (uintptr_t)_addr;
+        return (void*)((addr + (page_size - 1)) & (((uintptr_t)-1) ^ (page_size - 1)));
     }
 
     /// <summary>
@@ -66,8 +63,8 @@ namespace MemoryManipulation
     /// <returns></returns>
     inline void* PageRound(void* _addr, size_t page_size)
     {
-        size_t addr = (size_t)_addr;
-        return (void*)(addr & (((size_t)-1) ^ (page_size - 1)));
+        uintptr_t addr = (uintptr_t)_addr;
+        return (void*)(addr & (((uintptr_t)-1) ^ (page_size - 1)));
     }
 
     /// <summary>
