@@ -47,7 +47,9 @@ struct fmt::formatter<MiniDetour::MemoryManipulation::MemoryRights> {
 #else
 #define SPDLOG_DEBUG(...)
 #define SPDLOG_ERROR(...)
+#define SPDLOG_WARN(...)
 #define SPDLOG_INFO(...)
+#define SPDLOG_DEBUG(...)
 #endif
 
 #if defined(WIN64) || defined(_WIN64) || defined(__MINGW64__) || defined(WIN32) || defined(_WIN32) || defined(__MINGW32__)

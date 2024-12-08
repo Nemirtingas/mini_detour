@@ -9,26 +9,29 @@
     defined(WIN32) || defined(_WIN32) || defined(__MINGW32__)
 #define TESTS_OS_WINDOWS
 
+#define EXPORT_HOOK_TEST_LIBRARY "./export_hook_test_library.dll"
 #define LOAD_LIBRARY(filePath) LoadLibraryA(filePath)
-#define GET_LIBRAR_PROC(handle, name) GetProcAddress(handle, name)
+#define GET_LIBRARY_PROC(handle, name) GetProcAddress(handle, name)
 #define FREE_LIBRARY(handle) FreeLibrary(handle)
 
 #elif defined(__linux__) || defined(linux)
-#include <dl.h>
+#include <dlfcn.h>
 
 #define TESTS_OS_LINUX
 
+#define EXPORT_HOOK_TEST_LIBRARY "./export_hook_test_library.so"
 #define LOAD_LIBRARY(filePath) dlopen(filePath, RTLD_LAZY)
-#define GET_LIBRAR_PROC(handle, name) dlsym(handle, name)
+#define GET_LIBRARY_PROC(handle, name) dlsym(handle, name)
 #define FREE_LIBRARY(handle) dlclose(handle)
 
 #elif defined(__APPLE__)
-#include <dl.h>
+#include <dlfcn.h>
 
 #define TESTS_OS_APPLE
 
+#define EXPORT_HOOK_TEST_LIBRARY "./export_hook_test_library.dylib"
 #define LOAD_LIBRARY(filePath) dlopen(filePath, RTLD_LAZY)
-#define GET_LIBRAR_PROC(handle, name) dlsym(handle, name)
+#define GET_LIBRARY_PROC(handle, name) dlsym(handle, name)
 #define FREE_LIBRARY(handle) dlclose(handle)
 
 #endif
@@ -117,23 +120,23 @@ int MyAdd(int a, int b)
 
 TEST_CASE("", "[module_export_hook]") {
     SPDLOG_INFO("Test module export hook");
-#if defined(TESTS_OS_WINDOWS)
-    auto h = LOAD_LIBRARY("./export_hook_test_library.dll");
-    if (h != nullptr && h != INVALID_HANDLE_VALUE)
+#if defined(TESTS_OS_WINDOWS) || defined(TESTS_OS_LINUX)
+    auto h = LOAD_LIBRARY(EXPORT_HOOK_TEST_LIBRARY);
+    if (h != nullptr)
     {
         int(*libraryAdd)(int a, int b) = nullptr;
-        CHECK(MiniDetour::MemoryManipulation::ReplaceModuleExport(h, "add", (void**)&libraryAdd, &MyAdd) == true);
+        CHECK(MiniDetour::MemoryManipulation::ReplaceModuleExport(h, "add", (void**)&libraryAdd, (void*)&MyAdd) == true);
         if (libraryAdd != nullptr)
         {
-            auto myAdd = ((decltype(libraryAdd))GetProcAddress(h, "add"));
+            auto myAdd = ((decltype(libraryAdd))GET_LIBRARY_PROC(h, "add"));
 
             CHECK(libraryAdd(5, 3) == 8);
             CHECK(myAdd(5, 3) == 2);
 
             // Test restore
-            CHECK(MiniDetour::MemoryManipulation::RestoreModuleExport(h, "add", libraryAdd) == true);
+            CHECK(MiniDetour::MemoryManipulation::RestoreModuleExport(h, "add", (void*)libraryAdd) == true);
 
-            myAdd = ((decltype(libraryAdd))GetProcAddress(h, "add"));
+            myAdd = ((decltype(libraryAdd))GET_LIBRARY_PROC(h, "add"));
 
             CHECK(libraryAdd(5, 3) == 8);
             CHECK(myAdd(5, 3) == 8);
@@ -141,9 +144,8 @@ TEST_CASE("", "[module_export_hook]") {
 
         FREE_LIBRARY(h);
     }
-#else
-// Linux (ELF) and MacOS (MachO) not implemented.
-    SPDLOG_INFO("Not implemented");
+#elif defined(TESTS_OS_APPLE)
+    //MacOS (MachO) not implemented.
 #endif
 }
 

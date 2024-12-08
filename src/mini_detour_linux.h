@@ -5,6 +5,27 @@
 #include <sys/uio.h>
 #include <unistd.h>
 #include <errno.h>
+#include <elf.h>
+
+#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
+using ElfHeader_t = Elf64_Ehdr;
+using ElfSectionHeader_t = Elf64_Shdr;
+using ElfProgramHeader_t = Elf64_Phdr;
+using ElfSymbol_t = Elf64_Sym;
+using ElfAddr_t = Elf64_Addr;
+
+#define ELF_ST_BIND(val) ELF64_ST_BIND(val)
+#define ELF_ST_TYPE(val) ELF64_ST_TYPE(val)
+#elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
+using ElfHeader_t = Elf32_Ehdr;
+using ElfSectionHeader_t = Elf32_Shdr;
+using ElfProgramHeader_t = Elf32_Phdr;
+using ElfSymbol_t = Elf32_Sym;
+using ElfAddr_t = Elf32_Addr;
+
+#define ELF_ST_BIND(val) ELF32_ST_BIND(val)
+#define ELF_ST_TYPE(val) ELF32_ST_TYPE(val)
+#endif
 
 namespace MiniDetour {
 namespace MemoryManipulation {
@@ -329,11 +350,209 @@ namespace MemoryManipulation {
         return 1;
     }
 
+    static bool LoadModuleExportDetails(void* moduleHandle, void** moduleBase, ElfSymbol_t** dynamicSymbolsStart, ElfSymbol_t** dynamicSymbolsEnd, size_t* dynamicSymbolsSize, const char** dynamicSymbolsNames)
+    {
+        ElfHeader_t* elfHeader = *(ElfHeader_t**)moduleHandle;
+
+        ElfProgramHeader_t* programHeadersStart = (ElfProgramHeader_t*)((char*)elfHeader + elfHeader->e_phoff);
+        ElfProgramHeader_t* programHeadersEnd = (ElfProgramHeader_t*)((char*)programHeadersStart + elfHeader->e_phentsize * elfHeader->e_phnum);
+        ElfSectionHeader_t* sectionHeadersStart = nullptr;
+        ElfSectionHeader_t* sectionHeadersEnd = nullptr;
+        ElfSectionHeader_t* stringSectionHeader = nullptr;
+        const char* sectionNames = nullptr;
+        int64_t relocationOffset = 0;
+
+        *dynamicSymbolsStart = nullptr;
+        *dynamicSymbolsEnd = nullptr;
+        *dynamicSymbolsSize = 0;
+        *dynamicSymbolsNames = nullptr;
+
+        if (elfHeader->e_ident[EI_MAG0] != ELFMAG0 ||
+            elfHeader->e_ident[EI_MAG1] != ELFMAG1 ||
+            elfHeader->e_ident[EI_MAG2] != ELFMAG2 ||
+            elfHeader->e_ident[EI_MAG3] != ELFMAG3)
+        {
+            return false;
+        }
+
+        for (ElfProgramHeader_t* programHeader = programHeadersStart; programHeader < programHeadersEnd; programHeader = (ElfProgramHeader_t*)((char*)programHeader + elfHeader->e_phentsize))
+        {
+            // Not sure about this, but something is required to compute the new sections headers address.
+            // It doesn't work on libc
+            relocationOffset = programHeader->p_vaddr - programHeader->p_offset;
+            if (relocationOffset != 0)
+                break;
+
+            //SPDLOG_INFO("Program header offset: {}, Program header vaddr: {}, Program header paddr: {}, Program header filesz: {}, Program header memsz: {}, Program header align: {}",
+            //    programHeader->p_offset, programHeader->p_vaddr, programHeader->p_paddr, programHeader->p_filesz, programHeader->p_memsz, programHeader->p_align);
+        }
+
+
+        sectionHeadersStart = (ElfSectionHeader_t*)((char*)elfHeader + elfHeader->e_shoff + relocationOffset);
+        sectionHeadersEnd = (ElfSectionHeader_t*)((char*)sectionHeadersStart + elfHeader->e_phentsize * elfHeader->e_shnum);
+
+        stringSectionHeader = (ElfSectionHeader_t*)((char*)sectionHeadersStart + elfHeader->e_shstrndx * elfHeader->e_shentsize);
+        sectionNames = ((char*)elfHeader + stringSectionHeader->sh_offset + relocationOffset);
+
+        for (ElfSectionHeader_t* sectionHeader = sectionHeadersStart; sectionHeader < sectionHeadersEnd; sectionHeader = (ElfSectionHeader_t*)((char*)sectionHeader + elfHeader->e_shentsize))
+        {
+            const char* sectionName = sectionNames + sectionHeader->sh_name;
+            // Dynamic sections data don't seem to be relocated.
+            if (sectionHeader->sh_type == SHT_STRTAB && strcmp(sectionName, ".dynstr") == 0)
+            {
+                if (*dynamicSymbolsNames != nullptr)
+                {
+                    SPDLOG_WARN("Multiple SHT_DYNSTR.");
+                }
+                *dynamicSymbolsNames = (const char*)((char*)elfHeader + sectionHeader->sh_offset);
+            }
+            else if (sectionHeader->sh_type == SHT_DYNSYM)
+            {
+                if (*dynamicSymbolsStart != nullptr)
+                {
+                    SPDLOG_WARN("Multiple SHT_DYNSYM.");
+                }
+                *dynamicSymbolsStart = (ElfSymbol_t*)((char*)elfHeader + sectionHeader->sh_offset);
+                *dynamicSymbolsEnd = (ElfSymbol_t*)((char*)*dynamicSymbolsStart + sectionHeader->sh_size);
+                *dynamicSymbolsSize = sectionHeader->sh_entsize;
+            }
+        }
+
+        *moduleBase = (void*)elfHeader;
+
+        return *dynamicSymbolsNames != nullptr && *dynamicSymbolsStart != nullptr;
+    }
+
+    static bool ReplaceModuleExportInPlace(void* moduleBase, ElfAddr_t* exportAddress, void** exportCallAddress, void* newExportAddress)
+    {
+        MemoryManipulation::MemoryRights oldRights;
+
+        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+            return false;
+
+        if (exportCallAddress != nullptr)
+            *exportCallAddress = (void*)((char*)moduleBase + *exportAddress);
+
+        *exportAddress = (uintptr_t)newExportAddress - (uintptr_t)moduleBase;
+
+        MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
+
+        return true;
+    }
+
+    bool ReplaceModuleExportWithTrampoline(void* moduleBase, ElfAddr_t* exportAddress, void** exportCallAddress, void* newExportAddress)
+    {
+        MemoryManipulation::MemoryRights oldRights;
+
+        auto exportJump = mm.GetFreeJump(moduleBase);
+        if (exportJump == nullptr)
+            return false;
+
+        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+        {
+            mm.FreeJump(exportJump);
+            return false;
+        }
+
+        if (!MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::mem_rwx, nullptr))
+        {
+            mm.FreeJump(exportJump);
+            return false;
+        }
+
+        MemoryManipulation::WriteAbsoluteJump(exportJump, newExportAddress);
+
+        if (exportCallAddress != nullptr)
+            *exportCallAddress = (void*)((char*)moduleBase + *exportAddress);
+
+        *exportAddress = (uintptr_t)exportJump - (uintptr_t)moduleBase;
+
+        MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::mem_rx, nullptr);
+        MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
+
+        return true;
+    }
+
     bool ReplaceModuleExport(void* moduleHandle, const char* exportName, void** exportCallAddress, void* newExportAddress)
     {
-        // TODO: Read ELF and modify export address
+        void* moduleBase = nullptr;
+        int64_t relocationOffset = 0;
+        ElfSymbol_t* dynamicSymbolsStart = nullptr;
+        ElfSymbol_t* dynamicSymbolsEnd = nullptr;
+        size_t dynamicSymbolsSize = 0;
+        const char* dynamicSymbolsNames = nullptr;
+
+        if (!LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolsSize, &dynamicSymbolsNames))
+            return false;
+
+        SPDLOG_INFO("Program base address: {:016X}, Dynamic symbol start: {:016X}, Dynamic symbol stop: {:016X}", (uintptr_t)moduleBase, (uintptr_t)dynamicSymbolsStart, (uintptr_t)dynamicSymbolsEnd);
+
+#ifdef USE_SPDLOG
+        for (ElfSymbol_t* symbol = dynamicSymbolsStart; symbol < dynamicSymbolsEnd; symbol = (ElfSymbol_t*)((char*)symbol + dynamicSymbolsSize))
+        {
+            SPDLOG_INFO("  Dynamic symbol name: {}, Symbol value: {}, Symbol size: {}, Symbol bind: {}, Symbol type: {}", dynamicSymbolsNames + symbol->st_name, symbol->st_value, symbol->st_size, ELF_ST_BIND(symbol->st_info), ELF_ST_TYPE(symbol->st_info));
+        }
+#endif
+
+        for (ElfSymbol_t* symbol = dynamicSymbolsStart; symbol < dynamicSymbolsEnd; symbol = (ElfSymbol_t*)((char*)symbol + dynamicSymbolsSize))
+        {
+            auto symbolBind = ELF_ST_BIND(symbol->st_info);
+            auto symbolType = ELF_ST_TYPE(symbol->st_info);
+
+            if ((symbolBind == STB_GLOBAL || symbolBind == STB_WEAK) && (symbolType == STT_FUNC || symbolType == STT_OBJECT))
+            {
+                ElfAddr_t* exportAddress = &symbol->st_value;
+
+                if (addresses_are_relative_jumpable(moduleBase, newExportAddress))
+                    return ReplaceModuleExportInPlace(moduleBase, exportAddress, exportCallAddress, newExportAddress);
+
+                return ReplaceModuleExportWithTrampoline(moduleBase, exportAddress, exportCallAddress, newExportAddress);
+            }
+        }
+
         return false;
     }
+
+    bool RestoreModuleExport(void* moduleHandle, const char* exportName, void* newExportAddress)
+    {
+        void* moduleBase = nullptr;
+        int64_t relocationOffset = 0;
+        ElfSymbol_t* dynamicSymbolsStart = nullptr;
+        ElfSymbol_t* dynamicSymbolsEnd = nullptr;
+        size_t dynamicSymbolsSize = 0;
+        const char* dynamicSymbolsNames = nullptr;
+
+        if (!LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolsSize, &dynamicSymbolsNames))
+            return false;
+
+        for (ElfSymbol_t* symbol = dynamicSymbolsStart; symbol < dynamicSymbolsEnd; symbol = (ElfSymbol_t*)((char*)symbol + dynamicSymbolsSize))
+        {
+            auto symbolBind = ELF_ST_BIND(symbol->st_info);
+            auto symbolType = ELF_ST_TYPE(symbol->st_info);
+
+            if ((symbolBind == STB_GLOBAL || symbolBind == STB_WEAK) && (symbolType == STT_FUNC || symbolType == STT_OBJECT))
+            {
+                ElfAddr_t* exportAddress = &symbol->st_value;
+
+                MemoryManipulation::MemoryRights oldRights;
+
+                if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+                    return false;
+
+                auto oldJumpAddress = (void*)((uintptr_t)moduleBase + *exportAddress);
+                *exportAddress = (uintptr_t)newExportAddress - (uintptr_t)moduleBase;
+
+                MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
+
+                mm.FreeJump(oldJumpAddress);
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
 }//namespace MemoryManipulation
 }//namespace MiniDetour
 

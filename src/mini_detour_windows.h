@@ -267,7 +267,7 @@ namespace MemoryManipulation {
         return ::FlushInstructionCache(GetCurrentProcess(), pBase, size);
     }
 
-    static bool LoadModuleExportDetails(void* moduleHandle, PIMAGE_EXPORT_DIRECTORY* exportDirectory, PDWORD* address, PDWORD* name, PWORD* ordinal)
+    static bool LoadModuleExportDetails(void* moduleHandle, void** moduleBase, PIMAGE_EXPORT_DIRECTORY* exportDirectory, PDWORD* address, PDWORD* name, PWORD* ordinal)
     {
         PIMAGE_DOS_HEADER pImgDOSHead = (PIMAGE_DOS_HEADER)moduleHandle;
 
@@ -284,6 +284,7 @@ namespace MemoryManipulation {
         if (*exportDirectory == nullptr)
             return false;
 
+        *moduleBase = moduleHandle;
         *address = (PDWORD)((LPBYTE)moduleHandle + (*exportDirectory)->AddressOfFunctions);
         *name = (PDWORD)((LPBYTE)moduleHandle + (*exportDirectory)->AddressOfNames);
         *ordinal = (PWORD)((LPBYTE)moduleHandle + (*exportDirectory)->AddressOfNameOrdinals);
@@ -291,73 +292,92 @@ namespace MemoryManipulation {
         return true;
     }
 
+    static bool ReplaceModuleExportInPlace(void* moduleBase, PDWORD exportAddress, void** exportCallAddress, void* newExportAddress)
+    {
+        MemoryManipulation::MemoryRights oldRights;
+
+        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+            return false;
+
+        if (exportCallAddress != nullptr)
+            *exportCallAddress = (void*)((char*)moduleBase + *exportAddress);
+
+        *exportAddress = (uintptr_t)newExportAddress - (uintptr_t)moduleBase;
+
+        MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
+
+        return true;
+    }
+
+    bool ReplaceModuleExportWithTrampoline(void* moduleBase, PDWORD exportAddress, void** exportCallAddress, void* newExportAddress)
+    {
+        MemoryManipulation::MemoryRights oldRights;
+
+        auto exportJump = mm.GetFreeJump(moduleBase);
+        if (exportJump == nullptr)
+            return false;
+
+        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+        {
+            mm.FreeJump(exportJump);
+            return false;
+        }
+
+        if (!MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::mem_rwx, nullptr))
+        {
+            mm.FreeJump(exportJump);
+            return false;
+        }
+
+        MemoryManipulation::WriteAbsoluteJump(exportJump, newExportAddress);
+
+        if (exportCallAddress != nullptr)
+            *exportCallAddress = (void*)((char*)moduleBase + *exportAddress);
+
+        *exportAddress = (uintptr_t)exportJump - (uintptr_t)moduleBase;
+
+        MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::mem_rx, nullptr);
+        MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
+
+        return true;
+    }
+
     bool ReplaceModuleExport(void* moduleHandle, const char* exportName, void** exportCallAddress, void* newExportAddress)
     {
+        void* moduleBase = nullptr;
         PIMAGE_EXPORT_DIRECTORY pImgExpDir;
         PDWORD Address;
         PDWORD Name;
         PWORD Ordinal;
 
-        if (!LoadModuleExportDetails(moduleHandle, &pImgExpDir, &Address, &Name, &Ordinal))
+        if (!LoadModuleExportDetails(moduleHandle, &moduleBase, &pImgExpDir, &Address, &Name, &Ordinal))
             return false;
+
+        SPDLOG_INFO("Program base address: {:016X}, Dynamic symbol start: {:016X}", (uintptr_t)moduleBase, (uintptr_t)pImgExpDir);
 
         if (pImgExpDir->NumberOfNames > 0 && pImgExpDir->AddressOfNames != 0 && pImgExpDir->AddressOfNameOrdinals != 0)
         {
+#ifdef USE_SPDLOG
             for (DWORD i = 0; i < pImgExpDir->NumberOfNames; ++i)
             {
-                if (strcmp((const char*)moduleHandle + Name[i], exportName) != 0)
+                SPDLOG_INFO("  Dynamic symbol name: {}, Symbol value: {}", (const char*)moduleBase + Name[i], Address[Ordinal[i]]);
+            }
+#endif
+
+            for (DWORD i = 0; i < pImgExpDir->NumberOfNames; ++i)
+            {
+                if (strcmp((const char*)moduleBase + Name[i], exportName) != 0)
                     continue;
 
-                uint16_t nameOrdinal = pImgExpDir->Base + Ordinal[i];
-                PDWORD exportAddress = Address + nameOrdinal - pImgExpDir->Base;
+                PDWORD exportAddress = Address + Ordinal[i];
 
                 if (*exportAddress == 0)
                     return false;
 
-                MemoryManipulation::MemoryRights oldRights;
+                if (addresses_are_relative_jumpable(moduleBase, newExportAddress))
+                    return ReplaceModuleExportInPlace(moduleBase, exportAddress, exportCallAddress, newExportAddress);
 
-                if (addresses_are_relative_jumpable(moduleHandle, newExportAddress))
-                {
-                    if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
-                        return false;
-
-                    if (exportCallAddress != nullptr)
-                        *exportCallAddress = (void*)((LPBYTE)moduleHandle + *exportAddress);
-
-                    *exportAddress = (uintptr_t)newExportAddress - (uintptr_t)moduleHandle;
-
-                    MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
-                }
-                else
-                {
-                    auto exportJump = mm.GetFreeJump(moduleHandle);
-                    if (exportJump == nullptr)
-                        return false;
-
-                    if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
-                    {
-                        mm.FreeJump(exportJump);
-                        return false;
-                    }
-
-                    if (!MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::mem_rwx, nullptr))
-                    {
-                        mm.FreeJump(exportJump);
-                        return false;
-                    }
-
-                    MemoryManipulation::WriteAbsoluteJump(exportJump, newExportAddress);
-
-                    if (exportCallAddress != nullptr)
-                        *exportCallAddress = (void*)((LPBYTE)moduleHandle + *exportAddress);
-
-                    *exportAddress = (uintptr_t)exportJump - (uintptr_t)moduleHandle;
-
-                    MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::mem_rx, nullptr);
-                    MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
-                }
-
-                return true;
+                return ReplaceModuleExportWithTrampoline(moduleBase, exportAddress, exportCallAddress, newExportAddress);
             }
         }
 
@@ -366,19 +386,20 @@ namespace MemoryManipulation {
 
     bool RestoreModuleExport(void* moduleHandle, const char* exportName, void* newExportAddress)
     {
+        void* moduleBase = nullptr;
         PIMAGE_EXPORT_DIRECTORY pImgExpDir;
         PDWORD Address;
         PDWORD Name;
         PWORD Ordinal;
 
-        if (!LoadModuleExportDetails(moduleHandle, &pImgExpDir, &Address, &Name, &Ordinal))
+        if (!LoadModuleExportDetails(moduleHandle, &moduleBase, &pImgExpDir, &Address, &Name, &Ordinal))
             return false;
 
         if (pImgExpDir->NumberOfNames > 0 && pImgExpDir->AddressOfNames != 0 && pImgExpDir->AddressOfNameOrdinals != 0)
         {
             for (DWORD i = 0; i < pImgExpDir->NumberOfNames; ++i)
             {
-                if (strcmp((const char*)moduleHandle + Name[i], exportName) != 0)
+                if (strcmp((const char*)moduleBase + Name[i], exportName) != 0)
                     continue;
 
                 uint16_t nameOrdinal = pImgExpDir->Base + Ordinal[i];
@@ -392,8 +413,8 @@ namespace MemoryManipulation {
                 if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
                     return false;
 
-                auto oldJumpAddress = (void*)((uintptr_t)moduleHandle + *exportAddress);
-                *exportAddress = (uintptr_t)newExportAddress - (uintptr_t)moduleHandle;
+                auto oldJumpAddress = (void*)((uintptr_t)moduleBase + *exportAddress);
+                *exportAddress = (uintptr_t)newExportAddress - (uintptr_t)moduleBase;
 
                 MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
 

@@ -14,3 +14,5 @@ EXPORT_SYMBOL int add(int a, int b)
 {
     return a + b;
 }
+
+EXPORT_SYMBOL int some_integer = 0;
