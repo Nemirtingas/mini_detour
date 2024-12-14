@@ -349,13 +349,15 @@ namespace MemoryManipulation {
     {
         return 1;
     }
+}//namespace MemoryManipulation
 
-    static bool LoadModuleExportDetails(void* moduleHandle, void** moduleBase, ElfSymbol_t** dynamicSymbolsStart, ElfSymbol_t** dynamicSymbolsEnd, size_t* dynamicSymbolsSize, const char** dynamicSymbolsNames)
+namespace ModuleManipulation {
+    static bool _LoadModuleExportDetails(void* moduleHandle, void** moduleBase, ElfSymbol_t** dynamicSymbolsStart, ElfSymbol_t** dynamicSymbolsEnd, size_t* dynamicSymbolsSize, const char** dynamicSymbolsNames)
     {
         ElfHeader_t* elfHeader = *(ElfHeader_t**)moduleHandle;
 
-        ElfProgramHeader_t* programHeadersStart = (ElfProgramHeader_t*)((char*)elfHeader + elfHeader->e_phoff);
-        ElfProgramHeader_t* programHeadersEnd = (ElfProgramHeader_t*)((char*)programHeadersStart + elfHeader->e_phentsize * elfHeader->e_phnum);
+        ElfProgramHeader_t* programHeadersStart = (ElfProgramHeader_t*)((uintptr_t)elfHeader + elfHeader->e_phoff);
+        ElfProgramHeader_t* programHeadersEnd = (ElfProgramHeader_t*)((uintptr_t)programHeadersStart + elfHeader->e_phentsize * elfHeader->e_phnum);
         ElfSectionHeader_t* sectionHeadersStart = nullptr;
         ElfSectionHeader_t* sectionHeadersEnd = nullptr;
         ElfSectionHeader_t* stringSectionHeader = nullptr;
@@ -375,7 +377,7 @@ namespace MemoryManipulation {
             return false;
         }
 
-        for (ElfProgramHeader_t* programHeader = programHeadersStart; programHeader < programHeadersEnd; programHeader = (ElfProgramHeader_t*)((char*)programHeader + elfHeader->e_phentsize))
+        for (ElfProgramHeader_t* programHeader = programHeadersStart; programHeader < programHeadersEnd; programHeader = (ElfProgramHeader_t*)((uintptr_t)programHeader + elfHeader->e_phentsize))
         {
             // Not sure about this, but something is required to compute the new sections headers address.
             // It doesn't work on libc
@@ -394,7 +396,7 @@ namespace MemoryManipulation {
         stringSectionHeader = (ElfSectionHeader_t*)((char*)sectionHeadersStart + elfHeader->e_shstrndx * elfHeader->e_shentsize);
         sectionNames = ((char*)elfHeader + stringSectionHeader->sh_offset + relocationOffset);
 
-        for (ElfSectionHeader_t* sectionHeader = sectionHeadersStart; sectionHeader < sectionHeadersEnd; sectionHeader = (ElfSectionHeader_t*)((char*)sectionHeader + elfHeader->e_shentsize))
+        for (ElfSectionHeader_t* sectionHeader = sectionHeadersStart; sectionHeader < sectionHeadersEnd; sectionHeader = (ElfSectionHeader_t*)((uintptr_t)sectionHeader + elfHeader->e_shentsize))
         {
             const char* sectionName = sectionNames + sectionHeader->sh_name;
             // Dynamic sections data don't seem to be relocated.
@@ -404,7 +406,7 @@ namespace MemoryManipulation {
                 {
                     SPDLOG_WARN("Multiple SHT_DYNSTR.");
                 }
-                *dynamicSymbolsNames = (const char*)((char*)elfHeader + sectionHeader->sh_offset);
+                *dynamicSymbolsNames = (const char*)((uintptr_t)elfHeader + sectionHeader->sh_offset);
             }
             else if (sectionHeader->sh_type == SHT_DYNSYM)
             {
@@ -423,42 +425,38 @@ namespace MemoryManipulation {
         return *dynamicSymbolsNames != nullptr && *dynamicSymbolsStart != nullptr;
     }
 
-    static bool ReplaceModuleExportInPlace(void* moduleBase, ElfAddr_t* exportAddress, void** exportCallAddress, void* newExportAddress)
+    static bool _ReplaceModuleExportInPlace(void* moduleBase, ElfAddr_t* exportAddress, void** exportCallAddress, void* newExportAddress)
     {
         MemoryManipulation::MemoryRights oldRights;
 
         if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
-            return false;
+            goto Error;
 
-        if (exportCallAddress != nullptr)
-            *exportCallAddress = (void*)((char*)moduleBase + *exportAddress);
-
+        *exportCallAddress = (void*)((char*)moduleBase + *exportAddress);
         *exportAddress = (uintptr_t)newExportAddress - (uintptr_t)moduleBase;
 
         MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
 
         return true;
+
+    Error:
+        *exportCallAddress = nullptr;
+        return false;
     }
 
-    bool ReplaceModuleExportWithTrampoline(void* moduleBase, ElfAddr_t* exportAddress, void** exportCallAddress, void* newExportAddress)
+    static bool _ReplaceModuleExportWithTrampoline(void* moduleBase, ElfAddr_t* exportAddress, void** exportCallAddress, void* newExportAddress)
     {
         MemoryManipulation::MemoryRights oldRights;
 
         auto exportJump = mm.GetFreeJump(moduleBase);
         if (exportJump == nullptr)
-            return false;
+            goto Error;
 
         if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
-        {
-            mm.FreeJump(exportJump);
-            return false;
-        }
+            goto ErrorFree;
 
         if (!MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::mem_rwx, nullptr))
-        {
-            mm.FreeJump(exportJump);
-            return false;
-        }
+            goto ErrorFree;
 
         MemoryManipulation::WriteAbsoluteJump(exportJump, newExportAddress);
 
@@ -471,9 +469,37 @@ namespace MemoryManipulation {
         MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
 
         return true;
+
+    ErrorFree:
+        mm.FreeJump(exportJump);
+    Error:
+        *exportCallAddress = nullptr;
+        return false;
     }
 
-    bool ReplaceModuleExport(void* moduleHandle, const char* exportName, void** exportCallAddress, void* newExportAddress)
+    static inline ElfAddr_t* _GetExportAddress(ElfSymbol_t* dynamicSymbolsStart, ElfSymbol_t* dynamicSymbolsEnd, size_t dynamicSymbolsSize, const char* dynamicSymbolsNames, const char* symbolName)
+    {
+        for (ElfSymbol_t* symbol = dynamicSymbolsStart; symbol < dynamicSymbolsEnd; symbol = (ElfSymbol_t*)((uintptr_t)symbol + dynamicSymbolsSize))
+        {
+            auto symbolBind = ELF_ST_BIND(symbol->st_info);
+            auto symbolType = ELF_ST_TYPE(symbol->st_info);
+
+            if ((symbolBind != STB_GLOBAL && symbolBind != STB_WEAK) || (symbolType != STT_FUNC && symbolType != STT_OBJECT) || strcmp(dynamicSymbolsNames + symbol->st_name, symbolName) != 0)
+                continue;
+
+            return &symbol->st_value;
+        }
+
+        return nullptr;
+    }
+
+    static bool _LoadModuleIATDetails(void* moduleHandle, void** moduleBase)
+    {
+
+        return false;
+    }
+
+    size_t GetAllExportedSymbols(void* moduleHandle, ExportDetails_t* exportDetails, size_t exportDetailsCount)
     {
         void* moduleBase = nullptr;
         int64_t relocationOffset = 0;
@@ -481,39 +507,88 @@ namespace MemoryManipulation {
         ElfSymbol_t* dynamicSymbolsEnd = nullptr;
         size_t dynamicSymbolsSize = 0;
         const char* dynamicSymbolsNames = nullptr;
+        size_t result = 0;
 
-        if (!LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolsSize, &dynamicSymbolsNames))
-            return false;
+        if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolsSize, &dynamicSymbolsNames))
+            return result;
+
+        if (exportDetails == nullptr)
+        {
+            for (ElfSymbol_t* symbol = dynamicSymbolsStart; symbol < dynamicSymbolsEnd; symbol = (ElfSymbol_t*)((uintptr_t)symbol + dynamicSymbolsSize))
+            {
+                auto symbolBind = ELF_ST_BIND(symbol->st_info);
+                auto symbolType = ELF_ST_TYPE(symbol->st_info);
+
+                if ((symbolBind != STB_GLOBAL && symbolBind != STB_WEAK) || (symbolType != STT_FUNC && symbolType != STT_OBJECT))
+                    continue;
+
+                ++result;
+            }
+
+            return result;
+        }
+
+        for (ElfSymbol_t* symbol = dynamicSymbolsStart; symbol < dynamicSymbolsEnd && result < exportDetailsCount; symbol = (ElfSymbol_t*)((uintptr_t)symbol + dynamicSymbolsSize))
+        {
+            auto symbolBind = ELF_ST_BIND(symbol->st_info);
+            auto symbolType = ELF_ST_TYPE(symbol->st_info);
+
+            if ((symbolBind != STB_GLOBAL && symbolBind != STB_WEAK) || (symbolType != STT_FUNC && symbolType != STT_OBJECT) || symbol->st_value == 0)
+                continue;
+
+            exportDetails[result].ExportName = dynamicSymbolsNames + symbol->st_name;
+            exportDetails[result].ExportCallAddress = (void*)((uintptr_t)moduleBase + symbol->st_value);
+            exportDetails[result++].ExportOrdinal = symbol - dynamicSymbolsStart;
+        }
+
+        return result;
+    }
+
+    size_t GetAllIATSymbols(void* moduleHandle, IATDetails_t* exportDetails, size_t iatDetailsCount)
+    {
+        return 0;
+    }
+
+    size_t ReplaceModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
+    {
+        void* moduleBase = nullptr;
+        int64_t relocationOffset = 0;
+        ElfSymbol_t* dynamicSymbolsStart = nullptr;
+        ElfSymbol_t* dynamicSymbolsEnd = nullptr;
+        size_t dynamicSymbolsSize = 0;
+        const char* dynamicSymbolsNames = nullptr;
+        size_t result = 0;
+
+        for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
+            exportReplaceDetails[i].ExportCallAddress = nullptr;
+
+        if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolsSize, &dynamicSymbolsNames))
+            return result;
 
         SPDLOG_INFO("Program base address: {:016X}, Dynamic symbol start: {:016X}, Dynamic symbol stop: {:016X}", (uintptr_t)moduleBase, (uintptr_t)dynamicSymbolsStart, (uintptr_t)dynamicSymbolsEnd);
 
-#ifdef USE_SPDLOG
-        for (ElfSymbol_t* symbol = dynamicSymbolsStart; symbol < dynamicSymbolsEnd; symbol = (ElfSymbol_t*)((char*)symbol + dynamicSymbolsSize))
+        for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
         {
-            SPDLOG_INFO("  Dynamic symbol name: {}, Symbol value: {}, Symbol size: {}, Symbol bind: {}, Symbol type: {}", dynamicSymbolsNames + symbol->st_name, symbol->st_value, symbol->st_size, ELF_ST_BIND(symbol->st_info), ELF_ST_TYPE(symbol->st_info));
-        }
-#endif
+            ElfAddr_t* exportAddress = _GetExportAddress(dynamicSymbolsStart, dynamicSymbolsEnd, dynamicSymbolsSize, dynamicSymbolsNames, exportReplaceDetails[i].ExportName);
+            if (exportAddress == nullptr)
+                continue;
 
-        for (ElfSymbol_t* symbol = dynamicSymbolsStart; symbol < dynamicSymbolsEnd; symbol = (ElfSymbol_t*)((char*)symbol + dynamicSymbolsSize))
-        {
-            auto symbolBind = ELF_ST_BIND(symbol->st_info);
-            auto symbolType = ELF_ST_TYPE(symbol->st_info);
-
-            if ((symbolBind == STB_GLOBAL || symbolBind == STB_WEAK) && (symbolType == STT_FUNC || symbolType == STT_OBJECT))
+            if (_AddressesAreRelativeJumpable(moduleBase, exportReplaceDetails[i].NewExportAddress))
             {
-                ElfAddr_t* exportAddress = &symbol->st_value;
-
-                if (addresses_are_relative_jumpable(moduleBase, newExportAddress))
-                    return ReplaceModuleExportInPlace(moduleBase, exportAddress, exportCallAddress, newExportAddress);
-
-                return ReplaceModuleExportWithTrampoline(moduleBase, exportAddress, exportCallAddress, newExportAddress);
+                if (_ReplaceModuleExportInPlace(moduleBase, exportAddress, &exportReplaceDetails[i].ExportCallAddress, exportReplaceDetails[i].NewExportAddress))
+                    ++result;
+            }
+            else
+            {
+                if (_ReplaceModuleExportWithTrampoline(moduleBase, exportAddress, &exportReplaceDetails[i].ExportCallAddress, exportReplaceDetails[i].NewExportAddress))
+                    ++result;
             }
         }
 
-        return false;
+        return result;
     }
 
-    bool RestoreModuleExport(void* moduleHandle, const char* exportName, void* newExportAddress)
+    size_t RestoreModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
     {
         void* moduleBase = nullptr;
         int64_t relocationOffset = 0;
@@ -521,39 +596,48 @@ namespace MemoryManipulation {
         ElfSymbol_t* dynamicSymbolsEnd = nullptr;
         size_t dynamicSymbolsSize = 0;
         const char* dynamicSymbolsNames = nullptr;
+        size_t result = 0;
 
-        if (!LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolsSize, &dynamicSymbolsNames))
-            return false;
+        for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
+            exportReplaceDetails[i].NewExportAddress = nullptr;
 
-        for (ElfSymbol_t* symbol = dynamicSymbolsStart; symbol < dynamicSymbolsEnd; symbol = (ElfSymbol_t*)((char*)symbol + dynamicSymbolsSize))
+        if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolsSize, &dynamicSymbolsNames))
+            return result;
+
+        for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
         {
-            auto symbolBind = ELF_ST_BIND(symbol->st_info);
-            auto symbolType = ELF_ST_TYPE(symbol->st_info);
+            ElfAddr_t* exportAddress = _GetExportAddress(dynamicSymbolsStart, dynamicSymbolsEnd, dynamicSymbolsSize, dynamicSymbolsNames, exportReplaceDetails[i].ExportName);
+            if (exportAddress == nullptr)
+                continue;
 
-            if ((symbolBind == STB_GLOBAL || symbolBind == STB_WEAK) && (symbolType == STT_FUNC || symbolType == STT_OBJECT))
-            {
-                ElfAddr_t* exportAddress = &symbol->st_value;
+            MemoryManipulation::MemoryRights oldRights;
 
-                MemoryManipulation::MemoryRights oldRights;
+            if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+                continue;
 
-                if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
-                    return false;
+            exportReplaceDetails[i].NewExportAddress = (void*)((uintptr_t)*exportAddress + (uintptr_t)moduleBase);
+            auto oldJumpAddress = (void*)((uintptr_t)moduleBase + *exportAddress);
+            *exportAddress = (uintptr_t)exportReplaceDetails[i].ExportCallAddress - (uintptr_t)moduleBase;
 
-                auto oldJumpAddress = (void*)((uintptr_t)moduleBase + *exportAddress);
-                *exportAddress = (uintptr_t)newExportAddress - (uintptr_t)moduleBase;
+            MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
 
-                MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
+            mm.FreeJump(oldJumpAddress);
 
-                mm.FreeJump(oldJumpAddress);
-
-                return true;
-            }
+            ++result;
         }
 
-        return false;
+        return result;
     }
 
-}//namespace MemoryManipulation
+    size_t ReplaceModuleIATs(const char* moduleName, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
+    {
+        for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+            iatReplaceDetails[i].IATCallAddress = nullptr;
+
+        return 0;
+    }
+}//namespace ModuleManipulation
+
 }//namespace MiniDetour
 
 #endif//MINI_DETOUR_LINUX_H

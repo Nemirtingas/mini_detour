@@ -10,9 +10,9 @@
 #define TESTS_OS_WINDOWS
 
 #define EXPORT_HOOK_TEST_LIBRARY "./export_hook_test_library.dll"
-#define LOAD_LIBRARY(filePath) LoadLibraryA(filePath)
-#define GET_LIBRARY_PROC(handle, name) GetProcAddress(handle, name)
-#define FREE_LIBRARY(handle) FreeLibrary(handle)
+#define LOAD_LIBRARY(filePath) ((void*)LoadLibraryA(filePath))
+#define GET_LIBRARY_PROC(handle, name) ((void*)GetProcAddress((HMODULE)(handle), name))
+#define FREE_LIBRARY(handle) FreeLibrary((HMODULE)handle)
 
 #elif defined(__linux__) || defined(linux)
 #include <dlfcn.h>
@@ -20,9 +20,9 @@
 #define TESTS_OS_LINUX
 
 #define EXPORT_HOOK_TEST_LIBRARY "./export_hook_test_library.so"
-#define LOAD_LIBRARY(filePath) dlopen(filePath, RTLD_LAZY)
-#define GET_LIBRARY_PROC(handle, name) dlsym(handle, name)
-#define FREE_LIBRARY(handle) dlclose(handle)
+#define LOAD_LIBRARY(filePath) ((void*)dlopen(filePath, RTLD_LAZY))
+#define GET_LIBRARY_PROC(handle, name) ((void*)dlsym((void*)(handle), name))
+#define FREE_LIBRARY(handle) dlclose((void*)(handle))
 
 #elif defined(__APPLE__)
 #include <dlfcn.h>
@@ -31,7 +31,7 @@
 
 #define EXPORT_HOOK_TEST_LIBRARY "./export_hook_test_library.dylib"
 #define LOAD_LIBRARY(filePath) dlopen(filePath, RTLD_LAZY)
-#define GET_LIBRARY_PROC(handle, name) dlsym(handle, name)
+#define GET_LIBRARY_PROC(handle, name) ((void*)dlsym(handle, name))
 #define FREE_LIBRARY(handle) dlclose(handle)
 
 #endif
@@ -118,14 +118,77 @@ int MyAdd(int a, int b)
     return a - b;
 }
 
-TEST_CASE("", "[module_export_hook]") {
+TEST_CASE("List modules iat symbols", "[module_list_iat_symbols]") {
+    MiniDetour::ModuleManipulation::IATDetails_t* iatSymbols;
+    size_t iatSymbolsCount = 0;
+#if defined(TESTS_OS_WINDOWS)
+    auto h = LOAD_LIBRARY(EXPORT_HOOK_TEST_LIBRARY);
+    if (h != nullptr)
+    {
+        iatSymbolsCount = MiniDetour::ModuleManipulation::GetAllIATSymbols(h, nullptr, 0);
+
+
+        iatSymbols = (MiniDetour::ModuleManipulation::IATDetails_t*)malloc(sizeof(MiniDetour::ModuleManipulation::IATDetails_t) * iatSymbolsCount);
+        CHECK(MiniDetour::ModuleManipulation::GetAllIATSymbols(h, iatSymbols, iatSymbolsCount) == iatSymbolsCount);
+
+        SPDLOG_INFO("Module: {}", EXPORT_HOOK_TEST_LIBRARY);
+        for (size_t i = 0; i < iatSymbolsCount; ++i)
+        {
+            SPDLOG_INFO("  Import module: {}, Symbol: {}, [ordinal]{} at {}", iatSymbols[i].ImportModuleName, iatSymbols[i].ImportName == nullptr ? "" : iatSymbols[i].ImportName, iatSymbols[i].ImportOrdinal, iatSymbols[i].ImportCallAddress);
+        }
+
+        free(iatSymbols);
+    }
+#endif
+}
+
+TEST_CASE("List modules exported symbols", "[module_list_export_symbols]") {
+    MiniDetour::ModuleManipulation::ExportDetails_t* exportedSymbols;
+    size_t exportedSymbolsCount = 0;
+#if defined(TESTS_OS_WINDOWS) || defined(TESTS_OS_LINUX)
+    auto h = LOAD_LIBRARY(EXPORT_HOOK_TEST_LIBRARY);
+    if (h != nullptr)
+    {
+        exportedSymbolsCount = MiniDetour::ModuleManipulation::GetAllExportedSymbols(h, nullptr, 0);
+        CHECK(exportedSymbolsCount == 2);
+
+        exportedSymbols = (MiniDetour::ModuleManipulation::ExportDetails_t*)malloc(sizeof(MiniDetour::ModuleManipulation::ExportDetails_t) * exportedSymbolsCount);
+        CHECK(MiniDetour::ModuleManipulation::GetAllExportedSymbols(h, exportedSymbols, exportedSymbolsCount) == exportedSymbolsCount);
+
+        SPDLOG_INFO("Module: {}", EXPORT_HOOK_TEST_LIBRARY);
+        for (size_t i = 0; i < exportedSymbolsCount; ++i)
+        {
+            CHECK(GET_LIBRARY_PROC(h, exportedSymbols[i].ExportName) == exportedSymbols[i].ExportCallAddress);
+            SPDLOG_INFO("  Symbol export: {}, [ordinal]{} at {} - {}", exportedSymbols[i].ExportName == nullptr ? "" : exportedSymbols[i].ExportName, exportedSymbols[i].ExportOrdinal, exportedSymbols[i].ExportCallAddress, GET_LIBRARY_PROC(h, exportedSymbols[i].ExportName));
+        }
+
+        free(exportedSymbols);
+    }
+#endif
+}
+
+TEST_CASE("Module IAT hook", "[module_iat_hook]") {
+#if defined(TESTS_OS_WINDOWS)
+
+#endif
+}
+
+TEST_CASE("Module export hook", "[module_export_hook]") {
     SPDLOG_INFO("Test module export hook");
 #if defined(TESTS_OS_WINDOWS) || defined(TESTS_OS_LINUX)
     auto h = LOAD_LIBRARY(EXPORT_HOOK_TEST_LIBRARY);
     if (h != nullptr)
     {
         int(*libraryAdd)(int a, int b) = nullptr;
-        CHECK(MiniDetour::MemoryManipulation::ReplaceModuleExport(h, "add", (void**)&libraryAdd, (void*)&MyAdd) == true);
+
+        MiniDetour::ModuleManipulation::ExportReplaceParameter_t exportDetails {
+            "add",
+            (void*)&MyAdd,
+            nullptr
+        };
+
+        CHECK(MiniDetour::ModuleManipulation::ReplaceModuleExports(h, &exportDetails, 1) == 1);
+        libraryAdd = (decltype(libraryAdd))exportDetails.ExportCallAddress;
         if (libraryAdd != nullptr)
         {
             auto myAdd = ((decltype(libraryAdd))GET_LIBRARY_PROC(h, "add"));
@@ -134,7 +197,7 @@ TEST_CASE("", "[module_export_hook]") {
             CHECK(myAdd(5, 3) == 2);
 
             // Test restore
-            CHECK(MiniDetour::MemoryManipulation::RestoreModuleExport(h, "add", (void*)libraryAdd) == true);
+            CHECK(MiniDetour::ModuleManipulation::RestoreModuleExports(h, &exportDetails, 1) == 1);
 
             myAdd = ((decltype(libraryAdd))GET_LIBRARY_PROC(h, "add"));
 

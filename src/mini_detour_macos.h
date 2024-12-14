@@ -361,13 +361,48 @@ namespace MemoryManipulation {
     {
         return 1;
     }
+}//namespace MemoryManipulation
 
-    bool ReplaceModuleExport(void* moduleHandle, const char* exportName, void** exportCallAddress, void* newExportAddress)
+namespace ModuleManipulation {
+    size_t GetAllExportedSymbols(void* moduleHandle, ExportDetails_t* exportDetails, size_t exportDetailsCount)
+    {
+
+
+        return 0;
+    }
+
+    size_t GetAllIATSymbols(void* moduleHandle, IATDetails_t* exportDetails, size_t iatDetailsCount)
+    {
+        return 0;
+    }
+
+    size_t ReplaceModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
     {
         // TODO: Read MachO and modify export address
-        return false;
+        for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
+            exportReplaceDetails[i].ExportCallAddress = nullptr;
+
+        return 0;
     }
-}//namespace MemoryManipulation
+
+    size_t RestoreModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
+    {
+        // TODO: Read MachO and modify export address
+        for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
+            exportReplaceDetails[i].NewExportAddress = nullptr;
+
+        return 0;
+    }
+
+    size_t ReplaceModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
+    {
+        for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+            iatReplaceDetails[i].IATCallAddress = nullptr;
+
+        return 0;
+    }
+}//namespace ModuleManipulation
+
 }//namespace MiniDetour
 
 #endif//MINI_DETOUR_MACOS_H

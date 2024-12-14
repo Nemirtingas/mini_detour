@@ -385,7 +385,7 @@ public:
 
         if (jump_table != nullptr)
         {
-            if (addresses_are_relative_jumpable(hint_addr, jump_table))
+            if (_AddressesAreRelativeJumpable(hint_addr, jump_table))
             {
                 SPDLOG_INFO("Relative jump from {} to {} is possible", hint_addr, jump_table);
 
@@ -418,7 +418,7 @@ public:
         {
             for (int i = 0; i < region.bitmap.size(); ++i)
             {
-                if (!region.bitmap[i] && addresses_are_relative_jumpable(address_hint, region.jump_table + i))
+                if (!region.bitmap[i] && _AddressesAreRelativeJumpable(address_hint, region.jump_table + i))
                 {
                     SPDLOG_INFO("Using free jump {} in region {} for {}", (void*)(region.jump_table + i), (void*)region.jump_table, address_hint);
                     region.bitmap[i] = true;

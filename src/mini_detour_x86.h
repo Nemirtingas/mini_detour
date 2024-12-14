@@ -11,7 +11,7 @@ inline intptr_t absolute_addr_to_relative(void* opcode_addr, void* destination_a
     return reinterpret_cast<uint8_t*>(destination_addr) - reinterpret_cast<uint8_t*>(opcode_addr) - 5;
 }
 
-bool addresses_are_relative_jumpable(void* source, void* dest)
+bool _AddressesAreRelativeJumpable(void* source, void* dest)
 {
     uintptr_t min_addr = reinterpret_cast<uintptr_t>(std::min(source, dest));
     uintptr_t max_addr = reinterpret_cast<uintptr_t>(std::max(source, dest));

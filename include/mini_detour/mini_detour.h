@@ -116,26 +116,6 @@ namespace MemoryManipulation {
     size_t WriteAbsoluteJump(void* address, void* destination);
 
     /// <summary>
-    /// Convenient function that will try to replace the export symbol of a module without writing code into the function.
-    /// GetProcAddress and dlsym will return a pointer to your function instead.
-    /// </summary>
-    /// <param name="moduleHandle"></param>
-    /// <param name="exportName"></param>
-    /// <param name="exportCallAddress"></param>
-    /// <param name="newExportAddress"></param>
-    /// <returns></returns>
-    bool ReplaceModuleExport(void* moduleHandle, const char* exportName, void** exportCallAddress, void* newExportAddress);
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="moduleHandle"></param>
-    /// <param name="exportName"></param>
-    /// <param name="newExportAddress"></param>
-    /// <returns></returns>
-    bool RestoreModuleExport(void* moduleHandle, const char* exportName, void* newExportAddress);
-
-    /// <summary>
     /// Flushed instruction cache. (only implemented on Windows)
     /// </summary>
     /// <param name="address"></param>
@@ -144,6 +124,98 @@ namespace MemoryManipulation {
     int FlushInstructionCache(void* address, size_t size);
 }//namespace MemoryManipulation
     
+namespace ModuleManipulation {
+    struct ExportDetails_t
+    {
+        const char* ExportName;
+        uint32_t ExportOrdinal;
+        void* ExportCallAddress;
+    };
+
+    struct IATDetails_t
+    {
+        const char* ImportModuleName;
+        const char* ImportName;
+        uint32_t ImportOrdinal;
+        void* ImportCallAddress;
+    };
+
+    struct ExportReplaceParameter_t
+    {
+        /// <summary>
+        /// IN: The symbol name
+        /// </summary>
+        const char* ExportName;
+        /// <summary>
+        /// ReplaceModuleExports: IN: The new address to redirect to
+        /// RestoreModuleExports: OUT: The old symbol address (null if this entry failed)
+        /// </summary>
+        void* NewExportAddress;
+        /// <summary>
+        /// ReplaceModuleExports: OUT: The old symbol address (can be used to restore) (null if this entry failed)
+        /// RestoreModuleExports: IN: The symbol address to restore
+        /// Will be set to null if hook failed.
+        /// </summary>
+        void* ExportCallAddress;
+    };
+
+    struct IATReplaceParameter_t
+    {
+        /// <summary>
+        /// IN: The symbol name
+        /// </summary>
+        const char* IATName;
+        /// <summary>
+        /// IN: The symbol ordinal (on Windows only?)
+        /// </summary>
+        uint16_t IATOrdinal;
+        /// <summary>
+        /// ReplaceModuleIATs: IN: The new address to redirect to
+        /// RestoreModuleIATs: OUT: The old symbol address (null if this entry failed)
+        /// </summary>
+        void* NewIATAddress;
+        /// <summary>
+        /// ReplaceModuleIATs: OUT: The old symbol address (can be used to restore) (null if this entry failed)
+        /// RestoreModuleIATs: IN: The symbol address to restore
+        /// Will be set to null if hook failed.
+        /// </summary>
+        void* IATCallAddress;
+    };
+
+    size_t GetAllExportedSymbols(void* moduleHandle, ExportDetails_t* exportDetails, size_t exportDetailsCount);
+
+    size_t GetAllIATSymbols(void* moduleHandle, IATDetails_t* iatDetails, size_t iatDetailsCount);
+
+    /// <summary>
+    /// Convenient function that will try to replace the export symbol of a module without writing code into the function.
+    /// GetProcAddress and dlsym will return a pointer to your function instead.
+    /// </summary>
+    /// <param name="moduleHandle"></param>
+    /// <param name="exportReplaceDetails"></param>
+    /// <param name="exportReplaceDetailsCount"></param>
+    /// <returns>Export count replaced</returns>
+    size_t ReplaceModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="moduleHandle"></param>
+    /// <param name="exportReplaceDetails"></param>
+    /// <param name="exportReplaceDetailsCount"></param>
+    /// <returns>Export count restored</returns>
+    size_t RestoreModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount);
+
+    /// <summary>
+    /// Convenient function that will try to replace the export symbol of a module without writing code into the function.
+    /// GetProcAddress and dlsym will return a pointer to your function instead.
+    /// </summary>
+    /// <param name="moduleName"></param>
+    /// <param name="iatReplaceDetails"></param>
+    /// <param name="iatReplaceDetailsCount"></param>
+    /// <returns>IAT count replaced</returns>
+    size_t ReplaceModuleIATs(const char* moduleName, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount);
+}
+
 class Hook_t
 {
     class HookImpl* _Impl;
