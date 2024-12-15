@@ -5,9 +5,36 @@
 #include <mach/mach_vm.h>
 #include <mach/vm_prot.h>
 #include <mach/vm_map.h>
+#include <mach-o/loader.h>
+#include <mach-o/dyld.h>
+#include <mach-o/dyld_images.h>
+#include <mach-o/nlist.h>
+#include <dlfcn.h>
 
 #include <unistd.h>
 #include <errno.h>
+
+#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
+
+using MachHeader_t = mach_header_64;
+using LoadCommand_t = load_command;
+using Section_t = section_64;
+using SymTabCommand_t = symtab_command;
+using NList_t = nlist_64;
+
+#define MachHeaderMagic MH_MAGIC_64
+
+#elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
+
+using MachHeader_t = mach_header;
+using LoadCommand_t = load_command;
+using Section_t = section;
+using SymTabCommand_t = symtab_command;
+using NList_t = nlist;
+
+#define MachHeaderMagic MH_MAGIC
+
+#endif
 
 #ifdef USE_SPDLOG
 
@@ -364,11 +391,250 @@ namespace MemoryManipulation {
 }//namespace MemoryManipulation
 
 namespace ModuleManipulation {
+    /*
+    static void* _LoadModuleBaseFromHandleDYLDPre941(void* moduleHandle)
+    {
+        struct ImageLoader
+        {
+#if __x86_64__
+            const char*                 fAotPath;
+#endif
+            const char*					fPath;
+            const char*					fRealPath;
+            dev_t						fDevice;
+            ino_t						fInode;
+            time_t						fLastModified;
+            uint32_t					fPathHash;
+            uint32_t					fDlopenReferenceCount;	// count of how many dlopens have been done on this image
+            struct recursive_lock*		fInitializerRecursiveLock;
+
+            union {
+                struct {
+                    uint16_t					fLoadOrder;
+                    uint16_t					fDepth : 15,
+                    fObjCMappedNotified : 1;
+                    uint32_t					fState : 8,
+                    fLibraryCount : 9,
+                    fMadeReadOnly : 1,
+                    fAllLibraryChecksumsAndLoadAddressesMatch : 1,
+                    fLeaveMapped : 1,		// when unloaded, leave image mapped in cause some other code may have pointers into it
+                    fNeverUnload : 1,		// image was statically loaded by main executable
+                    fHideSymbols : 1,		// ignore this image's exported symbols when linking other images
+                    fMatchByInstallName : 1,// look at image's install-path not its load path
+                    fInterposed : 1,
+                    fRegisteredDOF : 1,
+                    fAllLazyPointersBound : 1,
+                    fMarkedInUse : 1,
+                    fBeingRemoved : 1,
+                    fAddFuncNotified : 1,
+                    fPathOwnedByImage : 1,
+                    fIsReferencedDownward : 1,
+                    fWeakSymbolsBound : 1;
+                };
+                uint64_t 						sizeOfData;
+            };
+        };
+
+        struct ImageLoaderMachO : public ImageLoader
+        {
+            uint64_t								fCoveredCodeLength;
+            const uint8_t*							fMachOData;
+            const uint8_t*							fLinkEditBase; // add any internal "offset" to this to get mapped address
+            uintptr_t								fSlide;
+        };
+
+        // 4 first bits are mode bits
+        // moduleHandle == ImageLoader* & (~0xf)
+        // return ((ImageLoaderMachO_x86*)((uintptr_t)moduleHandle & (~1)))->fMachOData;
+
+        // From cache, use ImageLoaderMegaDylib
+        return nullptr;
+    }
+
+    static void* _LoadModuleBaseFromHandlePre1066(void* moduleHandle)
+    {
+        struct Loader
+        {
+            struct LoaderRef {
+                uint16_t    index       : 15,   // index into PrebuiltLoaderSet
+                            app         :  1;   // app vs dyld cache PrebuiltLoaderSet
+            };
+
+            enum { kMagic = 'l4yd' };
+    
+            const uint32_t      magic;
+            const uint16_t      isPrebuilt         :  1,  // PrebuiltLoader vs JustInTimeLoader
+                                dylibInDyldCache   :  1,
+                                hasObjC            :  1,
+                                mayHavePlusLoad    :  1,
+                                hasReadOnlyData    :  1,  // __DATA_CONST.  Don't use directly.  Use hasConstantSegmentsToProtect()
+                                neverUnload        :  1,  // part of launch or has non-unloadable data (e.g. objc, tlv)
+                                leaveMapped        :  1,  // RTLD_NODELETE
+                                hasReadOnlyObjC    :  1,  // Has __DATA_CONST,__objc_selrefs section
+                                pre2022Binary      :  1,
+                                isPremapped        :  1,  // mapped by exclave core
+                                hasUUIDLoadCommand :  1,
+                                hasWeakDefs        :  1,
+                                hasTLVs            :  1,
+                                belowLibSystem     :  1,
+                                padding            :  2;
+            LoaderRef           ref;
+        };
+
+        struct JustInTimeLoader : public Loader
+        {
+            const mach_header*   mappedAddress;
+            mutable uint64_t     pathOffset         : 16,
+                                 dependentsSet      :  1,
+                                 fixUpsApplied      :  1,
+                                 inited             :  1,
+                                 hidden             :  1,
+                                 altInstallName     :  1,
+                                 lateLeaveMapped    :  1,
+                                 overridesCache     :  1,
+                                 allDepsAreNormal   :  1,
+                                 overrideIndex      : 15,
+                                 depCount           : 16,
+                                 padding            :  9;
+            uint64_t             sliceOffset;
+        };
+
+        Loader* loader = (Loader*)((uintptr_t)moduleHandle >> 1);
+        if (loader->magic == Loader::kMagic)
+        {
+            if (loader->isPrebuilt)// TODO PrebuiltLoader
+                return nullptr;
+        
+            return (void*)((JustInTimeLoader*)loader)->mappedAddress;
+        }
+        return nullptr;
+    }
+
+    static void* _LoadModuleBaseFromHandlePost1066(void* moduleHandle)
+    {
+        uintptr_t dyldStart = (uintptr_t)&__dso_handle;
+        Loader* loader = (Loader*)((((uintptr_t)h) & ~1) ^ dyldStart);
+        if (loader->magic == Loader::kMagic)
+        {
+            if (loader->isPrebuilt)// TODO PrebuiltLoader
+                return nullptr;
+        
+            return (void*)((JustInTimeLoader*)loader)->mappedAddress;
+        }
+        return nullptr;
+    }
+    */
+
+    static bool _LoadModuleExportDetails(void* moduleHandle, void** moduleBase, NList_t** dynamicSymbols, const char** dynamicSymbolsNames, uint32_t* dynamicSymbolsCount)
+    {
+        task_dyld_info dyld_info;
+        mach_msg_type_number_t count = TASK_DYLD_INFO_COUNT;
+        kern_return_t ret;
+        ret = task_info(mach_task_self_, TASK_DYLD_INFO, (task_info_t)&dyld_info, &count);
+        if (ret != KERN_SUCCESS)
+            return false;
+
+        // This is the most reliable and safest way to find the module base address. dyld seems to change its internal structure quite often.
+        dyld_all_image_infos *infos = (dyld_all_image_infos *)dyld_info.all_image_info_addr;
+        void* cacheBase = nullptr;
+        void* foundModuleBase = nullptr;
+
+        for (int i = 0; i < infos->infoArrayCount && (foundModuleBase == nullptr || cacheBase == nullptr); ++i)
+        {
+            if (foundModuleBase == nullptr)
+            {
+                void* loadedHandle = dlopen(infos->infoArray[i].imageFilePath, RTLD_NOW);
+                if (loadedHandle == moduleHandle)
+                    foundModuleBase = (void*)infos->infoArray[i].imageLoadAddress;
+                dlclose(loadedHandle);
+            }
+
+            if (cacheBase == nullptr)
+                cacheBase = (void*)infos->sharedCacheBaseAddress;
+
+        }
+
+        MachHeader_t* machHeader = (MachHeader_t*)foundModuleBase;
+
+        if (machHeader->magic != MachHeaderMagic)
+            return false;
+
+        // cache rx base: void* cache_rx_base
+        // syscall(294, &cache_rx_base);
+
+        bool fromSharedCache = machHeader->flags & MH_DYLIB_IN_CACHE;
+        if (fromSharedCache)// TODO: Handle shared cache
+            return false;
+
+        LoadCommand_t* loadCommandStart = (LoadCommand_t*)(((uintptr_t)foundModuleBase) + sizeof(*machHeader));
+        LoadCommand_t* loadCommandEnd = (LoadCommand_t*)(((uintptr_t)loadCommandStart) + machHeader->sizeofcmds);
+
+        SymTabCommand_t* symTabCommand = nullptr;       
+        uintptr_t linkEditBase = 0;
+
+        for (auto* loadCommand = loadCommandStart; loadCommand < loadCommandEnd && (symTabCommand == nullptr || linkEditBase == 0); loadCommand = (LoadCommand_t*)((uintptr_t)loadCommand + loadCommand->cmdsize))
+        {
+            if (loadCommand->cmd == LC_SYMTAB)
+            {
+                symTabCommand = (SymTabCommand_t*)loadCommand;
+            }
+            else if (loadCommand->cmd == LC_SEGMENT && strncmp(((segment_command*)loadCommand)->segname, SEG_LINKEDIT, sizeof(((segment_command*)loadCommand)->segname)) == 0)
+            {
+                linkEditBase = (uintptr_t)foundModuleBase + ((segment_command*)loadCommand)->vmaddr - ((segment_command*)loadCommand)->fileoff;
+            }
+            else if (loadCommand->cmd == LC_SEGMENT_64 && strncmp(((segment_command_64*)loadCommand)->segname, SEG_LINKEDIT, sizeof(((segment_command_64*)loadCommand)->segname)) == 0)
+            {
+                linkEditBase = (uintptr_t)foundModuleBase + ((segment_command_64*)loadCommand)->vmaddr - ((segment_command_64*)loadCommand)->fileoff;
+            }
+        }
+
+        if (symTabCommand == nullptr || linkEditBase == 0)
+            return false;
+
+        *moduleBase = foundModuleBase;
+        *dynamicSymbols = (NList_t*)(linkEditBase + symTabCommand->symoff);
+        *dynamicSymbolsNames = (const char*)(linkEditBase + symTabCommand->stroff);
+        *dynamicSymbolsCount = symTabCommand->nsyms;
+
+        return true;
+    }
+
     size_t GetAllExportedSymbols(void* moduleHandle, ExportDetails_t* exportDetails, size_t exportDetailsCount)
     {
+        void* moduleBase;
+        NList_t* dynamicSymbols;
+        uint32_t dynamicSymbolsCount;
+        const char* dynamicSymbolsNames;
+        size_t result = 0;
+        
+        if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbols, &dynamicSymbolsNames, &dynamicSymbolsCount))
+            return result;
 
+        if (exportDetails == nullptr)
+        {
+            for (uint32_t i = 0; i < dynamicSymbolsCount; ++i)
+                if (dynamicSymbols[i].n_type & N_EXT)
+                    ++result;
 
-        return 0;
+            return result;
+        }
+
+        SPDLOG_INFO("{} - {}", moduleHandle, moduleBase);
+        for (uint32_t i = 0; i < dynamicSymbolsCount && result < exportDetailsCount; ++i)
+        {
+            if (!(dynamicSymbols[i].n_type & N_EXT))
+                continue;
+
+            //uint8_t type = dynamicSymbols[i].n_type & N_TYPE;
+            // If type == N_INDR, might need to do some extra work to figure its address.
+            SPDLOG_INFO("{} - ext: {}, type: {}", dynamicSymbolsNames + dynamicSymbols[i].n_un.n_strx, dynamicSymbols[i].n_type & N_EXT, dynamicSymbols[i].n_type & N_TYPE);
+
+            exportDetails[result].ExportName = dynamicSymbolsNames + dynamicSymbols[i].n_un.n_strx + 1; // NOTE: on macos, export starts with '_'.
+            exportDetails[result].ExportCallAddress = (void*)((uintptr_t)moduleBase + dynamicSymbols[i].n_value);
+            exportDetails[result++].ExportOrdinal = i;
+        }
+
+        return result;
     }
 
     size_t GetAllIATSymbols(void* moduleHandle, IATDetails_t* exportDetails, size_t iatDetailsCount)

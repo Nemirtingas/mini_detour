@@ -145,7 +145,6 @@ TEST_CASE("List modules iat symbols", "[module_list_iat_symbols]") {
 TEST_CASE("List modules exported symbols", "[module_list_export_symbols]") {
     MiniDetour::ModuleManipulation::ExportDetails_t* exportedSymbols;
     size_t exportedSymbolsCount = 0;
-#if defined(TESTS_OS_WINDOWS) || defined(TESTS_OS_LINUX)
     auto h = LOAD_LIBRARY(EXPORT_HOOK_TEST_LIBRARY);
     if (h != nullptr)
     {
@@ -164,7 +163,6 @@ TEST_CASE("List modules exported symbols", "[module_list_export_symbols]") {
 
         free(exportedSymbols);
     }
-#endif
 }
 
 TEST_CASE("Module IAT hook", "[module_iat_hook]") {
