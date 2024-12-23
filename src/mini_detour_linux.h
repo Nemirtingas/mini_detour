@@ -636,6 +636,11 @@ namespace ModuleManipulation {
 
         return 0;
     }
+
+    size_t RestoreModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
+    {
+        return 0;
+    }
 }//namespace ModuleManipulation
 
 }//namespace MiniDetour

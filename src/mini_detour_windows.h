@@ -375,6 +375,43 @@ namespace ModuleManipulation {
         return nullptr;
     }
 
+    static inline void** _GetIATAddress(void* moduleBase, PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor, const char* moduleName, const char* symbolName, DWORD ordinal)
+    {
+        void** addressTable = nullptr;
+        PIMAGE_THUNK_DATA thunkData = nullptr;
+
+        for (auto* importDescriptor = imageImportDescriptor;
+            importDescriptor->Characteristics != 0;
+            ++importDescriptor)
+        {
+            auto* libraryName = (const char*)((uintptr_t)moduleBase + importDescriptor->Name);
+            if (stricmp(moduleName, libraryName) == 0)
+            {
+                addressTable = (void**)((uintptr_t)moduleBase + importDescriptor->FirstThunk);
+                thunkData = (PIMAGE_THUNK_DATA)((uintptr_t)moduleBase + importDescriptor->OriginalFirstThunk);
+                break;
+            }
+        }
+
+        if (thunkData == nullptr)
+            return nullptr;
+
+        for (int i = 0; thunkData[i].u1.AddressOfData != 0; ++i)
+        {
+            if (thunkData[i].u1.AddressOfData & 0x80000000)
+            {
+                if (symbolName == nullptr && (thunkData[i].u1.Ordinal & (~0x80000000ul)) == ordinal)
+                    return addressTable + i;
+            }
+            else if (symbolName != nullptr && strcmp(((PIMAGE_IMPORT_BY_NAME)((uintptr_t)moduleBase + thunkData[i].u1.AddressOfData))->Name, symbolName) == 0)
+            {
+                return addressTable + i;
+            }
+        }
+
+        return nullptr;
+    }
+
     size_t GetAllExportedSymbols(void* moduleHandle, ExportDetails_t* exportDetails, size_t exportDetailsCount)
     {
         void* moduleBase = nullptr;
@@ -556,14 +593,66 @@ namespace ModuleManipulation {
         return result;
     }
 
-    size_t ReplaceModuleIATs(const char* moduleName, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
+    size_t ReplaceModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
     {
+        void* moduleBase = nullptr;
+        PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor;
+        size_t result = 0;
+
         for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
             iatReplaceDetails[i].IATCallAddress = nullptr;
 
+        if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &imageImportDescriptor))
+            return result;
 
+        for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+        {
+            auto iatAddress = _GetIATAddress(moduleBase, imageImportDescriptor, iatReplaceDetails[i].IATModuleName, iatReplaceDetails[i].IATName, iatReplaceDetails[i].IATOrdinal);
+            if (iatAddress == nullptr)
+                continue;
 
-        return 0;
+            MiniDetour::MemoryManipulation::MemoryRights oldRights;
+            if (!MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &oldRights))
+                continue;
+
+            iatReplaceDetails[i].IATCallAddress = *iatAddress;
+            *iatAddress = iatReplaceDetails[i].NewIATAddress;
+            MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), oldRights, nullptr);
+            ++result;
+        }
+
+        return result;
+    }
+
+    size_t RestoreModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
+    {
+        void* moduleBase = nullptr;
+        PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor;
+        size_t result = 0;
+
+        for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+            iatReplaceDetails[i].NewIATAddress = nullptr;
+
+        if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &imageImportDescriptor))
+            return result;
+
+        for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+        {
+            auto iatAddress = _GetIATAddress(moduleBase, imageImportDescriptor, iatReplaceDetails[i].IATModuleName, iatReplaceDetails[i].IATName, iatReplaceDetails[i].IATOrdinal);
+            if (iatAddress == nullptr)
+                continue;
+
+            MiniDetour::MemoryManipulation::MemoryRights oldRights;
+            if (!MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &oldRights))
+                continue;
+
+            iatReplaceDetails[i].NewIATAddress = *iatAddress;
+            *iatAddress = iatReplaceDetails[i].IATCallAddress;
+            MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), oldRights, nullptr);
+            ++result;
+        }
+
+        return result;
     }
 }// namespace ModuleManipulation
 

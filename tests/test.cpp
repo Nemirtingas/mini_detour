@@ -122,7 +122,7 @@ TEST_CASE("List modules iat symbols", "[module_list_iat_symbols]") {
     MiniDetour::ModuleManipulation::IATDetails_t* iatSymbols;
     size_t iatSymbolsCount = 0;
 #if defined(TESTS_OS_WINDOWS)
-    auto h = LOAD_LIBRARY(EXPORT_HOOK_TEST_LIBRARY);
+    auto h = GetModuleHandleA(nullptr);
     if (h != nullptr)
     {
         iatSymbolsCount = MiniDetour::ModuleManipulation::GetAllIATSymbols(h, nullptr, 0);
@@ -131,7 +131,7 @@ TEST_CASE("List modules iat symbols", "[module_list_iat_symbols]") {
         iatSymbols = (MiniDetour::ModuleManipulation::IATDetails_t*)malloc(sizeof(MiniDetour::ModuleManipulation::IATDetails_t) * iatSymbolsCount);
         CHECK(MiniDetour::ModuleManipulation::GetAllIATSymbols(h, iatSymbols, iatSymbolsCount) == iatSymbolsCount);
 
-        SPDLOG_INFO("Module: {}", EXPORT_HOOK_TEST_LIBRARY);
+        SPDLOG_INFO("Module: {}", "minidetour_tests");
         for (size_t i = 0; i < iatSymbolsCount; ++i)
         {
             SPDLOG_INFO("  Import module: {}, Symbol: {}, [ordinal]{} at {}", iatSymbols[i].ImportModuleName, iatSymbols[i].ImportName == nullptr ? "" : iatSymbols[i].ImportName, iatSymbols[i].ImportOrdinal, iatSymbols[i].ImportCallAddress);
@@ -165,9 +165,29 @@ TEST_CASE("List modules exported symbols", "[module_list_export_symbols]") {
     }
 }
 
+#if defined(TESTS_OS_WINDOWS)
+HMODULE WINAPI MyGetModuleHandleA(LPCSTR)
+{
+    return (HMODULE)0x99887766;
+}
+#endif
+
 TEST_CASE("Module IAT hook", "[module_iat_hook]") {
 #if defined(TESTS_OS_WINDOWS)
+    // GetModuleHandleA is now in the IAT.
+    auto h = (void*)GetModuleHandleA(nullptr);
+    MiniDetour::ModuleManipulation::IATReplaceParameter_t iatReplace{};
 
+    iatReplace.IATModuleName = "kernel32.dll";
+    iatReplace.IATName = "GetModuleHandleA";
+    iatReplace.NewIATAddress = (void*)&MyGetModuleHandleA;
+    CHECK(MiniDetour::ModuleManipulation::ReplaceModuleIATs(h, &iatReplace, 1) == 1);
+
+    CHECK(GetModuleHandleA(nullptr) == (HMODULE)0x99887766);
+    CHECK(reinterpret_cast<void*(WINAPI *)(void*)>(iatReplace.IATCallAddress)(nullptr) == h);
+
+    CHECK(MiniDetour::ModuleManipulation::RestoreModuleIATs(h, &iatReplace, 1) == 1);
+    CHECK(GetModuleHandleA(nullptr) == (HMODULE)h);
 #endif
 }
 

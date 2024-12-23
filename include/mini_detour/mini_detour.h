@@ -162,6 +162,10 @@ namespace ModuleManipulation {
     struct IATReplaceParameter_t
     {
         /// <summary>
+        /// IN: The module where IATName resides (the same IATName could be used in multiple modules)
+        /// </summary>
+        const char* IATModuleName;
+        /// <summary>
         /// IN: The symbol name
         /// </summary>
         const char* IATName;
@@ -206,14 +210,22 @@ namespace ModuleManipulation {
     size_t RestoreModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount);
 
     /// <summary>
-    /// Convenient function that will try to replace the export symbol of a module without writing code into the function.
-    /// GetProcAddress and dlsym will return a pointer to your function instead.
+    /// Convenient function that will try to replace the import symbol of a module without writing code into the function.
     /// </summary>
-    /// <param name="moduleName"></param>
+    /// <param name="moduleHandle"></param>
     /// <param name="iatReplaceDetails"></param>
     /// <param name="iatReplaceDetailsCount"></param>
     /// <returns>IAT count replaced</returns>
-    size_t ReplaceModuleIATs(const char* moduleName, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount);
+    size_t ReplaceModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount);
+
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="moduleHandle"></param>
+    /// <param name="iatReplaceDetails"></param>
+    /// <param name="iatReplaceDetailsCount"></param>
+    /// <returns></returns>
+    size_t RestoreModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount);
 }
 
 class Hook_t
