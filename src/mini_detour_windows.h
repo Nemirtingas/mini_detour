@@ -398,7 +398,7 @@ namespace ModuleManipulation {
 
         for (int i = 0; thunkData[i].u1.AddressOfData != 0; ++i)
         {
-            if (thunkData[i].u1.AddressOfData & 0x80000000)
+            if (thunkData[i].u1.AddressOfData & 0x80000000ul)
             {
                 if (symbolName == nullptr && (thunkData[i].u1.Ordinal & (~0x80000000ul)) == ordinal)
                     return addressTable + i;
