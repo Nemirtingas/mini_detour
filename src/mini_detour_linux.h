@@ -356,6 +356,14 @@ namespace ModuleManipulation {
     {
         ElfHeader_t* elfHeader = *(ElfHeader_t**)moduleHandle;
 
+        if (elfHeader->e_ident[EI_MAG0] != ELFMAG0 ||
+            elfHeader->e_ident[EI_MAG1] != ELFMAG1 ||
+            elfHeader->e_ident[EI_MAG2] != ELFMAG2 ||
+            elfHeader->e_ident[EI_MAG3] != ELFMAG3)
+        {
+            return false;
+        }
+
         ElfProgramHeader_t* programHeadersStart = (ElfProgramHeader_t*)((uintptr_t)elfHeader + elfHeader->e_phoff);
         ElfProgramHeader_t* programHeadersEnd = (ElfProgramHeader_t*)((uintptr_t)programHeadersStart + elfHeader->e_phentsize * elfHeader->e_phnum);
         ElfSectionHeader_t* sectionHeadersStart = nullptr;
@@ -368,14 +376,6 @@ namespace ModuleManipulation {
         *dynamicSymbolsEnd = nullptr;
         *dynamicSymbolsSize = 0;
         *dynamicSymbolsNames = nullptr;
-
-        if (elfHeader->e_ident[EI_MAG0] != ELFMAG0 ||
-            elfHeader->e_ident[EI_MAG1] != ELFMAG1 ||
-            elfHeader->e_ident[EI_MAG2] != ELFMAG2 ||
-            elfHeader->e_ident[EI_MAG3] != ELFMAG3)
-        {
-            return false;
-        }
 
         for (ElfProgramHeader_t* programHeader = programHeadersStart; programHeader < programHeadersEnd; programHeader = (ElfProgramHeader_t*)((uintptr_t)programHeader + elfHeader->e_phentsize))
         {
@@ -629,7 +629,7 @@ namespace ModuleManipulation {
         return result;
     }
 
-    size_t ReplaceModuleIATs(const char* moduleName, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
+    size_t ReplaceModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
     {
         for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
             iatReplaceDetails[i].IATCallAddress = nullptr;
