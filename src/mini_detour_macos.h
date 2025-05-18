@@ -613,7 +613,7 @@ namespace ModuleManipulation {
         if (exportDetails == nullptr)
         {
             for (uint32_t i = 0; i < dynamicSymbolsCount; ++i)
-                if (dynamicSymbols[i].n_type & N_EXT)
+                if (dynamicSymbols[i].n_type & N_EXT && (dynamicSymbols[i].n_type & N_TYPE) != N_UNDF)
                     ++result;
 
             return result;
@@ -628,6 +628,9 @@ namespace ModuleManipulation {
             //uint8_t type = dynamicSymbols[i].n_type & N_TYPE;
             // If type == N_INDR, might need to do some extra work to figure its address.
             SPDLOG_INFO("{} - ext: {}, type: {}", dynamicSymbolsNames + dynamicSymbols[i].n_un.n_strx, dynamicSymbols[i].n_type & N_EXT, dynamicSymbols[i].n_type & N_TYPE);
+
+            if ((dynamicSymbols[i].n_type & N_TYPE) == N_UNDF)
+                continue;
 
             exportDetails[result].ExportName = dynamicSymbolsNames + dynamicSymbols[i].n_un.n_strx + 1; // NOTE: on macos, export starts with '_'.
             exportDetails[result].ExportCallAddress = (void*)((uintptr_t)moduleBase + dynamicSymbols[i].n_value);
