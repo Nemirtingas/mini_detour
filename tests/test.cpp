@@ -121,17 +121,16 @@ int MyAdd(int a, int b)
 TEST_CASE("List modules iat symbols", "[module_list_iat_symbols]") {
     MiniDetour::ModuleManipulation::IATDetails_t* iatSymbols;
     size_t iatSymbolsCount = 0;
-#if defined(TESTS_OS_WINDOWS)
-    auto h = GetModuleHandleA(nullptr);
+#if defined(TESTS_OS_WINDOWS) || defined(TESTS_OS_LINUX)
+    auto h = LOAD_LIBRARY(EXPORT_HOOK_TEST_LIBRARY);
     if (h != nullptr)
     {
         iatSymbolsCount = MiniDetour::ModuleManipulation::GetAllIATSymbols(h, nullptr, 0);
 
-
         iatSymbols = (MiniDetour::ModuleManipulation::IATDetails_t*)malloc(sizeof(MiniDetour::ModuleManipulation::IATDetails_t) * iatSymbolsCount);
         CHECK(MiniDetour::ModuleManipulation::GetAllIATSymbols(h, iatSymbols, iatSymbolsCount) == iatSymbolsCount);
 
-        SPDLOG_INFO("Module: {}", "minidetour_tests");
+        SPDLOG_INFO("Module: {}", EXPORT_HOOK_TEST_LIBRARY);
         for (size_t i = 0; i < iatSymbolsCount; ++i)
         {
             SPDLOG_INFO("  Import module: {}, Symbol: {}, [ordinal]{} at {}", iatSymbols[i].ImportModuleName, iatSymbols[i].ImportName == nullptr ? "" : iatSymbols[i].ImportName, iatSymbols[i].ImportOrdinal, iatSymbols[i].ImportCallAddress);
@@ -149,7 +148,7 @@ TEST_CASE("List modules exported symbols", "[module_list_export_symbols]") {
     if (h != nullptr)
     {
         exportedSymbolsCount = MiniDetour::ModuleManipulation::GetAllExportedSymbols(h, nullptr, 0);
-        CHECK(exportedSymbolsCount == 2);
+        CHECK(exportedSymbolsCount == 3);
 
         exportedSymbols = (MiniDetour::ModuleManipulation::ExportDetails_t*)malloc(sizeof(MiniDetour::ModuleManipulation::ExportDetails_t) * exportedSymbolsCount);
         CHECK(MiniDetour::ModuleManipulation::GetAllExportedSymbols(h, exportedSymbols, exportedSymbolsCount) == exportedSymbolsCount);
@@ -170,6 +169,11 @@ HMODULE WINAPI MyGetModuleHandleA(LPCSTR)
 {
     return (HMODULE)0x99887766;
 }
+#elif defined(TESTS_OS_LINUX)
+void* Mydlopen(const char*, int)
+{
+    return (void*)0x99887766;
+}
 #endif
 
 TEST_CASE("Module IAT hook", "[module_iat_hook]") {
@@ -188,6 +192,21 @@ TEST_CASE("Module IAT hook", "[module_iat_hook]") {
 
     CHECK(MiniDetour::ModuleManipulation::RestoreModuleIATs(h, &iatReplace, 1) == 1);
     CHECK(GetModuleHandleA(nullptr) == (HMODULE)h);
+#elif defined(TESTS_OS_LINUX)
+    // puts is now in the IAT.
+    auto h = (void*)dlopen(nullptr, RTLD_LAZY);
+    MiniDetour::ModuleManipulation::IATReplaceParameter_t iatReplace{};
+    
+    iatReplace.IATModuleName = "ld.so"; // ELF doesn't have a module tied to the IAT, its useless in this case.
+    iatReplace.IATName = "dlopen";
+    iatReplace.NewIATAddress = (void*)&Mydlopen;
+    CHECK(MiniDetour::ModuleManipulation::ReplaceModuleIATs(h, &iatReplace, 1) == 1);
+    
+    CHECK(dlopen(nullptr, RTLD_LAZY) == (void*)0x99887766);
+    CHECK(reinterpret_cast<void*(*)(void*, int)>(iatReplace.IATCallAddress)(nullptr, RTLD_LAZY) == h);
+    
+    CHECK(MiniDetour::ModuleManipulation::RestoreModuleIATs(h, &iatReplace, 1) == 1);
+    CHECK(dlopen(nullptr, RTLD_LAZY) == (void*)h);
 #endif
 }
 

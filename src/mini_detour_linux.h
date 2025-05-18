@@ -8,24 +8,70 @@
 #include <elf.h>
 
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
-using ElfHeader_t = Elf64_Ehdr;
-using ElfSectionHeader_t = Elf64_Shdr;
-using ElfProgramHeader_t = Elf64_Phdr;
-using ElfSymbol_t = Elf64_Sym;
-using ElfAddr_t = Elf64_Addr;
+    using ElfHeader_t = Elf64_Ehdr;
+    using ElfSectionHeader_t = Elf64_Shdr;
+    using ElfProgramHeader_t = Elf64_Phdr;
+    using ElfSymbol_t = Elf64_Sym;
+    using ElfAddr_t = Elf64_Addr;
+    using ElfRel_t = Elf64_Rel;
+    using ElfRela_t = Elf64_Rela;
+    using ElfDyn_t = Elf64_Dyn;
+    using ElfSxword_t = Elf64_Sxword;
+    using ElfRelocation_t = ElfRela_t;
 
-#define ELF_ST_BIND(val) ELF64_ST_BIND(val)
-#define ELF_ST_TYPE(val) ELF64_ST_TYPE(val)
+    #define ELF_ST_BIND       ELF64_ST_BIND
+    #define ELF_ST_TYPE       ELF64_ST_TYPE
+    #define ELF_R_SYM         ELF64_R_SYM
+    #define ELF_R_TYPE        ELF64_R_TYPE
+    #define ELF_R_INFO        ELF64_R_INFO
+    #define ELF_ST_VISIBILITY ELF64_ST_VISIBILITY
+
+    #if defined(MINIDETOUR_ARCH_X64)
+        #define R_JUMP_SLOT   R_X86_64_JUMP_SLOT
+        #define R_GLOBAL_DATA R_X86_64_GLOB_DAT
+    #elif defined(MINIDETOUR_ARCH_ARM64)
+        #define R_JUMP_SLOT   R_AARCH64_JUMP_SLOT
+        #define R_GLOBAL_DATA R_AARCH64_GLOB_DAT
+    #endif
+
 #elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
-using ElfHeader_t = Elf32_Ehdr;
-using ElfSectionHeader_t = Elf32_Shdr;
-using ElfProgramHeader_t = Elf32_Phdr;
-using ElfSymbol_t = Elf32_Sym;
-using ElfAddr_t = Elf32_Addr;
+    using ElfHeader_t = Elf32_Ehdr;
+    using ElfSectionHeader_t = Elf32_Shdr;
+    using ElfProgramHeader_t = Elf32_Phdr;
+    using ElfSymbol_t = Elf32_Sym;
+    using ElfAddr_t = Elf32_Addr;
+    using ElfRel_t = Elf32_Rel;
+    using ElfRela_t = Elf32_Rela;
+    using ElfDyn_t = Elf32_Dyn;
+    using ElfSxword_t = Elf32_Sxword;
+    using ElfRelocation_t = ElfRel_t;
 
-#define ELF_ST_BIND(val) ELF32_ST_BIND(val)
-#define ELF_ST_TYPE(val) ELF32_ST_TYPE(val)
+    #define ELF_ST_BIND       ELF32_ST_BIND
+    #define ELF_ST_TYPE       ELF32_ST_TYPE
+    #define ELF_R_SYM         ELF32_R_SYM
+    #define ELF_R_TYPE        ELF32_R_TYPE
+    #define ELF_R_INFO        ELF32_R_INFO
+    #define ELF_ST_VISIBILITY ELF32_ST_VISIBILITY
+
+    #if defined(MINIDETOUR_ARCH_X86)
+        #define R_JUMP_SLOT   R_386_JMP_SLOT
+        #define R_GLOBAL_DATA R_386_GLOB_DAT
+    #elif defined(MINIDETOUR_ARCH_ARM)
+        #define R_JUMP_SLOT   R_ARM_JUMP_SLOT
+        #define R_GLOBAL_DATA R_ARM_GLOB_DAT
+    #endif
 #endif
+
+struct GnuHashHeader_t
+{
+  uint32_t nbuckets;
+  uint32_t symndx;    /* Index of the first accessible symbol in .dynsym */
+  uint32_t maskwords; /* Nyumber of elements in the Bloom Filter */
+  uint32_t shift2;    /* Shift count for the Bloom Filter */
+  size_t bloom_filter[/*maskwords*/];
+  //uint32_t buckets[nbuckets];
+  //uint32_t values[dynsymcount - symndx];
+};
 
 namespace MiniDetour {
 namespace MemoryManipulation {
@@ -352,7 +398,63 @@ namespace MemoryManipulation {
 }//namespace MemoryManipulation
 
 namespace ModuleManipulation {
-    static bool _LoadModuleExportDetails(void* moduleHandle, void** moduleBase, ElfSymbol_t** dynamicSymbolsStart, ElfSymbol_t** dynamicSymbolsEnd, size_t* dynamicSymbolsSize, const char** dynamicSymbolsNames)
+    static ElfDyn_t* _FindElfDynFromTag(ElfDyn_t* dynamicSegment, ElfSxword_t tag)
+    {
+        for (; dynamicSegment->d_tag != DT_NULL; ++dynamicSegment)
+        {
+            if (dynamicSegment->d_tag == tag)
+                return dynamicSegment;
+        }
+
+        return nullptr;
+    }
+
+    static bool _LoadModuleExportSymbolsCount(ElfDyn_t* dynamicTableStart, ElfSymbol_t** dynamicSymbolsStart, ElfSymbol_t** dynamicSymbolsEnd, size_t* dynamicSymbolsSize)
+    {
+        auto dynamicEntry = _FindElfDynFromTag(dynamicTableStart, DT_SYMTAB);
+        if (dynamicEntry == nullptr)
+            return false;
+
+        *dynamicSymbolsStart = (ElfSymbol_t*)dynamicEntry->d_un.d_ptr;
+
+        dynamicEntry = _FindElfDynFromTag(dynamicTableStart, DT_HASH);
+        if (dynamicEntry == nullptr)
+        {
+            dynamicEntry = _FindElfDynFromTag(dynamicTableStart, DT_GNU_HASH);
+            if (dynamicEntry == nullptr)
+                return false;
+
+            GnuHashHeader_t* hash_table = (GnuHashHeader_t*)dynamicEntry->d_un.d_ptr;
+            uint32_t* buckets = (uint32_t*)(hash_table->bloom_filter + hash_table->maskwords);
+            uint32_t* chains  = (uint32_t*)(buckets + hash_table->nbuckets);
+
+            uint32_t max_sym = 0;
+            for (uint32_t i = 0; i < hash_table->nbuckets; ++i)
+            {
+                if (buckets[i] > max_sym)
+                    max_sym = buckets[i];
+            }
+
+            while (!(chains[max_sym - hash_table->symndx] & 1))
+                ++max_sym;
+
+            *dynamicSymbolsEnd = *dynamicSymbolsStart + max_sym + 1;
+        }
+        else
+        {
+            uint32_t* hash_table = (uint32_t*)dynamicEntry->d_un.d_ptr;
+            *dynamicSymbolsEnd = *dynamicSymbolsStart + hash_table[1];
+        }
+
+        dynamicEntry = _FindElfDynFromTag(dynamicTableStart, DT_SYMENT);
+        if (dynamicEntry == nullptr)
+            return false;
+
+        *dynamicSymbolsSize = dynamicEntry->d_un.d_val;
+        return true;
+    }
+
+    static bool _LoadModuleDynamicTable(void* moduleHandle, void** moduleBase, ElfDyn_t** dynamicTable)
     {
         ElfHeader_t* elfHeader = *(ElfHeader_t**)moduleHandle;
 
@@ -366,63 +468,54 @@ namespace ModuleManipulation {
 
         ElfProgramHeader_t* programHeadersStart = (ElfProgramHeader_t*)((uintptr_t)elfHeader + elfHeader->e_phoff);
         ElfProgramHeader_t* programHeadersEnd = (ElfProgramHeader_t*)((uintptr_t)programHeadersStart + elfHeader->e_phentsize * elfHeader->e_phnum);
-        ElfSectionHeader_t* sectionHeadersStart = nullptr;
-        ElfSectionHeader_t* sectionHeadersEnd = nullptr;
-        ElfSectionHeader_t* stringSectionHeader = nullptr;
-        const char* sectionNames = nullptr;
-        int64_t relocationOffset = 0;
-
-        *dynamicSymbolsStart = nullptr;
-        *dynamicSymbolsEnd = nullptr;
-        *dynamicSymbolsSize = 0;
-        *dynamicSymbolsNames = nullptr;
 
         for (ElfProgramHeader_t* programHeader = programHeadersStart; programHeader < programHeadersEnd; programHeader = (ElfProgramHeader_t*)((uintptr_t)programHeader + elfHeader->e_phentsize))
         {
-            // Not sure about this, but something is required to compute the new sections headers address.
-            // It doesn't work on libc
-            relocationOffset = programHeader->p_vaddr - programHeader->p_offset;
-            if (relocationOffset != 0)
-                break;
-
-            //SPDLOG_INFO("Program header offset: {}, Program header vaddr: {}, Program header paddr: {}, Program header filesz: {}, Program header memsz: {}, Program header align: {}",
-            //    programHeader->p_offset, programHeader->p_vaddr, programHeader->p_paddr, programHeader->p_filesz, programHeader->p_memsz, programHeader->p_align);
-        }
-
-
-        sectionHeadersStart = (ElfSectionHeader_t*)((char*)elfHeader + elfHeader->e_shoff + relocationOffset);
-        sectionHeadersEnd = (ElfSectionHeader_t*)((char*)sectionHeadersStart + elfHeader->e_phentsize * elfHeader->e_shnum);
-
-        stringSectionHeader = (ElfSectionHeader_t*)((char*)sectionHeadersStart + elfHeader->e_shstrndx * elfHeader->e_shentsize);
-        sectionNames = ((char*)elfHeader + stringSectionHeader->sh_offset + relocationOffset);
-
-        for (ElfSectionHeader_t* sectionHeader = sectionHeadersStart; sectionHeader < sectionHeadersEnd; sectionHeader = (ElfSectionHeader_t*)((uintptr_t)sectionHeader + elfHeader->e_shentsize))
-        {
-            const char* sectionName = sectionNames + sectionHeader->sh_name;
-            // Dynamic sections data don't seem to be relocated.
-            if (sectionHeader->sh_type == SHT_STRTAB && strcmp(sectionName, ".dynstr") == 0)
+            if (programHeader->p_type == PT_DYNAMIC)
             {
-                if (*dynamicSymbolsNames != nullptr)
-                {
-                    SPDLOG_WARN("Multiple SHT_DYNSTR.");
-                }
-                *dynamicSymbolsNames = (const char*)((uintptr_t)elfHeader + sectionHeader->sh_offset);
-            }
-            else if (sectionHeader->sh_type == SHT_DYNSYM)
-            {
-                if (*dynamicSymbolsStart != nullptr)
-                {
-                    SPDLOG_WARN("Multiple SHT_DYNSYM.");
-                }
-                *dynamicSymbolsStart = (ElfSymbol_t*)((char*)elfHeader + sectionHeader->sh_offset);
-                *dynamicSymbolsEnd = (ElfSymbol_t*)((char*)*dynamicSymbolsStart + sectionHeader->sh_size);
-                *dynamicSymbolsSize = sectionHeader->sh_entsize;
+                *moduleBase = (void*)elfHeader;
+                *dynamicTable = (ElfDyn_t*)((uintptr_t)elfHeader + programHeader->p_vaddr);
+                return true;
             }
         }
 
-        *moduleBase = (void*)elfHeader;
+        return false;
+    }
 
-        return *dynamicSymbolsNames != nullptr && *dynamicSymbolsStart != nullptr;
+    static bool _LoadModuleCommonDetails(ElfDyn_t* dynamicTableStart, const char** dynamicSymbolsNames, size_t* dynamicSymbolsNamesSize)
+    {
+        *dynamicSymbolsNames = nullptr;
+        *dynamicSymbolsNamesSize = 0;
+
+        auto dynamicEntry = _FindElfDynFromTag(dynamicTableStart, DT_STRTAB);
+        if (dynamicEntry == nullptr)
+            return false;
+
+        *dynamicSymbolsNames = (const char*)dynamicEntry->d_un.d_ptr;
+
+        dynamicEntry = _FindElfDynFromTag(dynamicTableStart, DT_STRSZ);
+        if (dynamicEntry == nullptr)
+            return false;
+
+        *dynamicSymbolsNamesSize = dynamicEntry->d_un.d_val;
+
+        return *dynamicSymbolsNames != nullptr && dynamicSymbolsNamesSize != 0;
+    }
+
+    static bool _LoadModuleExportDetails(void* moduleHandle, void** moduleBase, ElfSymbol_t** dynamicSymbolsStart, ElfSymbol_t** dynamicSymbolsEnd, size_t* dynamicSymbolsSize, const char** dynamicSymbolsNames, size_t* dynamicSymbolsNamesSize)
+    {
+        ElfDyn_t* dynamicTableStart;
+
+        if (!_LoadModuleDynamicTable(moduleHandle, moduleBase, &dynamicTableStart))
+            return false;
+
+        if (!_LoadModuleCommonDetails(dynamicTableStart, dynamicSymbolsNames, dynamicSymbolsNamesSize))
+            return false;
+
+        if (!_LoadModuleExportSymbolsCount(dynamicTableStart, dynamicSymbolsStart, dynamicSymbolsEnd, dynamicSymbolsSize))
+            return false;
+
+        return true;
     }
 
     static bool _ReplaceModuleExportInPlace(void* moduleBase, ElfAddr_t* exportAddress, void** exportCallAddress, void* newExportAddress)
@@ -477,12 +570,15 @@ namespace ModuleManipulation {
         return false;
     }
 
-    static inline ElfAddr_t* _GetExportAddress(ElfSymbol_t* dynamicSymbolsStart, ElfSymbol_t* dynamicSymbolsEnd, size_t dynamicSymbolsSize, const char* dynamicSymbolsNames, const char* symbolName)
+    static inline ElfAddr_t* _GetExportAddress(ElfSymbol_t* dynamicSymbolsStart, ElfSymbol_t* dynamicSymbolsEnd, size_t dynamicSymbolsSize, const char* dynamicSymbolsNames, size_t dynamicSymbolsNamesSize, const char* symbolName)
     {
         for (ElfSymbol_t* symbol = dynamicSymbolsStart; symbol < dynamicSymbolsEnd; symbol = (ElfSymbol_t*)((uintptr_t)symbol + dynamicSymbolsSize))
         {
             auto symbolBind = ELF_ST_BIND(symbol->st_info);
             auto symbolType = ELF_ST_TYPE(symbol->st_info);
+
+            if ((symbol->st_name + 1) > dynamicSymbolsNamesSize)
+                continue;
 
             if ((symbolBind != STB_GLOBAL && symbolBind != STB_WEAK) || (symbolType != STT_FUNC && symbolType != STT_OBJECT) || strcmp(dynamicSymbolsNames + symbol->st_name, symbolName) != 0)
                 continue;
@@ -493,23 +589,72 @@ namespace ModuleManipulation {
         return nullptr;
     }
 
-    static bool _LoadModuleIATDetails(void* moduleHandle, void** moduleBase)
+    static bool _LoadModuleIATDetails(void* moduleHandle, void** moduleBase, ElfRelocation_t** relSectionStart, ElfRelocation_t** relSectionEnd, ElfSymbol_t** dynamicSymbolsStart, ElfSymbol_t** dynamicSymbolsEnd, size_t* dynamicSymbolSize, const char** dynamicSymbolsNames, size_t* dynamicSymbolsNamesSize)
     {
+        ElfDyn_t* dynamicTableStart;
 
-        return false;
+        if (!_LoadModuleDynamicTable(moduleHandle, moduleBase, &dynamicTableStart))
+            return false;
+
+        if (!_LoadModuleCommonDetails(dynamicTableStart, dynamicSymbolsNames, dynamicSymbolsNamesSize))
+            return false;
+
+        if (!_LoadModuleExportSymbolsCount(dynamicTableStart, dynamicSymbolsStart, dynamicSymbolsEnd, dynamicSymbolSize))
+            return false;
+
+        auto dynamicEntry = _FindElfDynFromTag(dynamicTableStart, DT_JMPREL);
+        if (dynamicEntry == nullptr)
+            return false;
+
+        *relSectionStart = (ElfRelocation_t*)dynamicEntry->d_un.d_ptr;
+
+        dynamicEntry = _FindElfDynFromTag(dynamicTableStart, DT_PLTRELSZ);
+        if (dynamicEntry == nullptr)
+            return false;
+
+        *relSectionEnd = (ElfRelocation_t*)((uintptr_t)*relSectionStart + dynamicEntry->d_un.d_val);
+
+        return true;
+    }
+
+    static inline void** _GetIATAddress(void* moduleBase, ElfRelocation_t* iatSymbolsStart, ElfRelocation_t* iatSymbolsEnd, ElfSymbol_t* dynamicSymbolsStart, size_t dynamicSymbolSize, const char* dynamicSymbolsNames, size_t dynamicSymbolsNamesSize, const char* symbolName)
+    {
+        for (auto relocation = iatSymbolsStart; relocation < iatSymbolsEnd; ++relocation)
+        {
+            size_t symbolType = ELF_R_TYPE(relocation->r_info);
+            size_t dynamicSymbolIndex = ELF_R_SYM(relocation->r_info);
+            size_t dynamicSymbolNameIndex = ((ElfSymbol_t*)((uintptr_t)dynamicSymbolsStart + dynamicSymbolIndex * dynamicSymbolSize))->st_name;
+
+            if (symbolType != R_JUMP_SLOT)
+            {
+                SPDLOG_INFO("Symbol is not a jump slot");
+                continue;
+            }
+
+            if (dynamicSymbolNameIndex + 1 > dynamicSymbolsNamesSize)
+            {
+                SPDLOG_WARN("Symbol name index exceeds symbols string table.");
+                continue;
+            }
+
+            if (strcmp(symbolName, dynamicSymbolsNames + dynamicSymbolNameIndex) == 0)
+                return (void**)((uintptr_t)moduleBase + relocation->r_offset);
+        }
+
+        return nullptr;
     }
 
     size_t GetAllExportedSymbols(void* moduleHandle, ExportDetails_t* exportDetails, size_t exportDetailsCount)
     {
         void* moduleBase = nullptr;
-        int64_t relocationOffset = 0;
         ElfSymbol_t* dynamicSymbolsStart = nullptr;
         ElfSymbol_t* dynamicSymbolsEnd = nullptr;
         size_t dynamicSymbolsSize = 0;
         const char* dynamicSymbolsNames = nullptr;
+        size_t dynamicSymbolsNamesSize = 0;
         size_t result = 0;
 
-        if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolsSize, &dynamicSymbolsNames))
+        if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolsSize, &dynamicSymbolsNames, &dynamicSymbolsNamesSize))
             return result;
 
         if (exportDetails == nullptr)
@@ -518,8 +663,12 @@ namespace ModuleManipulation {
             {
                 auto symbolBind = ELF_ST_BIND(symbol->st_info);
                 auto symbolType = ELF_ST_TYPE(symbol->st_info);
+                //auto symbolVisiblity = ELF_ST_VISIBILITY(symbol->st_other);
 
-                if ((symbolBind != STB_GLOBAL && symbolBind != STB_WEAK) || (symbolType != STT_FUNC && symbolType != STT_OBJECT))
+                if ((symbol->st_name + 1) > dynamicSymbolsNamesSize)
+                    continue;
+
+                if ((symbolBind != STB_GLOBAL && symbolBind != STB_WEAK) || (symbolType != STT_FUNC && symbolType != STT_OBJECT) || symbol->st_value == 0)
                     continue;
 
                 ++result;
@@ -532,6 +681,10 @@ namespace ModuleManipulation {
         {
             auto symbolBind = ELF_ST_BIND(symbol->st_info);
             auto symbolType = ELF_ST_TYPE(symbol->st_info);
+            //auto symbolVisiblity = ELF_ST_VISIBILITY(symbol->st_other);
+
+            if ((symbol->st_name + 1) > dynamicSymbolsNamesSize)
+                continue;
 
             if ((symbolBind != STB_GLOBAL && symbolBind != STB_WEAK) || (symbolType != STT_FUNC && symbolType != STT_OBJECT) || symbol->st_value == 0)
                 continue;
@@ -544,9 +697,72 @@ namespace ModuleManipulation {
         return result;
     }
 
-    size_t GetAllIATSymbols(void* moduleHandle, IATDetails_t* exportDetails, size_t iatDetailsCount)
+    size_t GetAllIATSymbols(void* moduleHandle, IATDetails_t* iatDetails, size_t iatDetailsCount)
     {
-        return 0;
+        void* moduleBase = nullptr;
+        ElfSymbol_t* dynamicSymbolsStart = nullptr;
+        ElfSymbol_t* dynamicSymbolsEnd = nullptr;
+        size_t dynamicSymbolSize = 0;
+        const char* dynStr;
+        size_t dynStrSize;
+        ElfRelocation_t* relocationsStart;
+        ElfRelocation_t* relocationsEnd;
+        size_t result = 0;
+
+        if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &relocationsStart, &relocationsEnd, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolSize, &dynStr, &dynStrSize))
+            return result;
+
+        if (iatDetails == nullptr)
+        {
+            for (auto relocation = relocationsStart; relocation < relocationsEnd; ++relocation)
+            {
+                size_t symbolType = ELF_R_TYPE(relocation->r_info);
+                size_t dynamicSymbolIndex = ELF_R_SYM(relocation->r_info);
+                size_t dynamicSymbolNameIndex = dynamicSymbolsStart[dynamicSymbolIndex].st_name;
+
+                if (symbolType != R_JUMP_SLOT)
+                {
+                    SPDLOG_INFO("Symbol is not a jump slot");
+                    continue;
+                }
+
+                if (dynamicSymbolNameIndex + 1 > dynStrSize)
+                {
+                    SPDLOG_WARN("Symbol name index exceeds symbols string table.");
+                    continue;
+                }
+
+                ++result;
+            }
+
+            return result;
+        }
+
+        for (auto relocation = relocationsStart; relocation < relocationsEnd; ++relocation)
+        {
+            size_t symbolType = ELF_R_TYPE(relocation->r_info);
+            size_t dynamicSymbolIndex = ELF_R_SYM(relocation->r_info);
+            size_t dynamicSymbolNameIndex = dynamicSymbolsStart[dynamicSymbolIndex].st_name;
+
+            if (symbolType != R_JUMP_SLOT)
+            {
+                SPDLOG_INFO("Symbol is not a jump slot");
+                continue;
+            }
+
+            if (dynamicSymbolNameIndex + 1 > dynStrSize)
+            {
+                SPDLOG_WARN("Symbol name index exceeds symbols string table.");
+                continue;
+            }
+
+            iatDetails[result].ImportOrdinal = relocation - relocationsStart;
+            iatDetails[result].ImportName = dynStr + dynamicSymbolNameIndex;
+            iatDetails[result].ImportCallAddress = *reinterpret_cast<void**>(reinterpret_cast<char*>(moduleBase) + relocation->r_offset);
+            iatDetails[result++].ImportModuleName = "";
+        }
+
+        return result;
     }
 
     size_t ReplaceModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
@@ -557,21 +773,25 @@ namespace ModuleManipulation {
         ElfSymbol_t* dynamicSymbolsEnd = nullptr;
         size_t dynamicSymbolsSize = 0;
         const char* dynamicSymbolsNames = nullptr;
+        size_t dynamicSymbolsNamesSize = 0;
         size_t result = 0;
 
         for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
             exportReplaceDetails[i].ExportCallAddress = nullptr;
 
-        if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolsSize, &dynamicSymbolsNames))
+        if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolsSize, &dynamicSymbolsNames, &dynamicSymbolsNamesSize))
             return result;
 
         SPDLOG_INFO("Program base address: {:016X}, Dynamic symbol start: {:016X}, Dynamic symbol stop: {:016X}", (uintptr_t)moduleBase, (uintptr_t)dynamicSymbolsStart, (uintptr_t)dynamicSymbolsEnd);
 
         for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
         {
-            ElfAddr_t* exportAddress = _GetExportAddress(dynamicSymbolsStart, dynamicSymbolsEnd, dynamicSymbolsSize, dynamicSymbolsNames, exportReplaceDetails[i].ExportName);
+            auto exportAddress = _GetExportAddress(dynamicSymbolsStart, dynamicSymbolsEnd, dynamicSymbolsSize, dynamicSymbolsNames, dynamicSymbolsNamesSize, exportReplaceDetails[i].ExportName);
             if (exportAddress == nullptr)
+            {
+                exportReplaceDetails[i].ExportCallAddress = nullptr;
                 continue;
+            }
 
             if (_AddressesAreRelativeJumpable(moduleBase, exportReplaceDetails[i].NewExportAddress))
             {
@@ -596,19 +816,23 @@ namespace ModuleManipulation {
         ElfSymbol_t* dynamicSymbolsEnd = nullptr;
         size_t dynamicSymbolsSize = 0;
         const char* dynamicSymbolsNames = nullptr;
+        size_t dynamicSymbolsNamesSize = 0;
         size_t result = 0;
 
         for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
             exportReplaceDetails[i].NewExportAddress = nullptr;
 
-        if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolsSize, &dynamicSymbolsNames))
+        if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolsSize, &dynamicSymbolsNames, &dynamicSymbolsNamesSize))
             return result;
 
         for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
         {
-            ElfAddr_t* exportAddress = _GetExportAddress(dynamicSymbolsStart, dynamicSymbolsEnd, dynamicSymbolsSize, dynamicSymbolsNames, exportReplaceDetails[i].ExportName);
+            auto exportAddress = _GetExportAddress(dynamicSymbolsStart, dynamicSymbolsEnd, dynamicSymbolsSize, dynamicSymbolsNames, dynamicSymbolsNamesSize, exportReplaceDetails[i].ExportName);
             if (exportAddress == nullptr)
+            {
+                exportReplaceDetails[i].NewExportAddress = nullptr;
                 continue;
+            }
 
             MemoryManipulation::MemoryRights oldRights;
 
@@ -631,15 +855,91 @@ namespace ModuleManipulation {
 
     size_t ReplaceModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
     {
+        void* moduleBase = nullptr;
+        ElfSymbol_t* dynamicSymbolsStart;
+        ElfSymbol_t* dynamicSymbolsEnd;
+        size_t dynamicSymbolSize;
+        const char* dynStr;
+        size_t dynStrSize;
+        ElfRelocation_t* iatStart;
+        ElfRelocation_t* iatEnd;
+        size_t result = 0;
+
         for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
             iatReplaceDetails[i].IATCallAddress = nullptr;
 
-        return 0;
+        if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &iatStart, &iatEnd, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolSize, &dynStr, &dynStrSize))
+            return result;
+
+        SPDLOG_INFO("");
+
+        for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+        {
+            auto iatAddress = _GetIATAddress(moduleBase, iatStart, iatEnd, dynamicSymbolsStart, dynamicSymbolSize, dynStr, dynStrSize, iatReplaceDetails[i].IATName);
+            if (iatAddress == nullptr)
+            {
+                iatReplaceDetails[i].IATCallAddress = nullptr;
+                continue;
+            }
+
+            MiniDetour::MemoryManipulation::MemoryRights oldRights;
+            if (!MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &oldRights))
+            {
+                iatReplaceDetails[i].IATCallAddress = nullptr;
+                continue;
+            }
+
+            iatReplaceDetails[i].IATCallAddress = *iatAddress;
+            *iatAddress = iatReplaceDetails[i].NewIATAddress;
+            MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), oldRights, nullptr);
+            ++result;
+        }
+
+        return result;
     }
 
     size_t RestoreModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
     {
-        return 0;
+        void* moduleBase = nullptr;
+        ElfSymbol_t* dynamicSymbolsStart;
+        ElfSymbol_t* dynamicSymbolsEnd;
+        size_t dynamicSymbolSize;
+        const char* dynStr;
+        size_t dynStrSize;
+        ElfRelocation_t* iatStart;
+        ElfRelocation_t* iatEnd;
+        size_t iatEntrySize;
+        size_t result = 0;
+
+        for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+            iatReplaceDetails[i].NewIATAddress = nullptr;
+
+        if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &iatStart, &iatEnd, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolSize, &dynStr, &dynStrSize))
+            return result;
+
+        for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+        {
+            auto iatAddress = _GetIATAddress(moduleBase, iatStart, iatEnd, dynamicSymbolsStart, dynamicSymbolSize, dynStr, dynStrSize, iatReplaceDetails[i].IATName);
+            if (iatAddress == nullptr)
+            {
+                iatReplaceDetails[i].NewIATAddress = nullptr;
+                continue;
+            }
+
+            MiniDetour::MemoryManipulation::MemoryRights oldRights;
+            if (!MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &oldRights))
+            {
+                iatReplaceDetails[i].NewIATAddress = nullptr;
+                continue;
+            }
+
+            iatReplaceDetails[i].NewIATAddress = *iatAddress;
+            *iatAddress = iatReplaceDetails[i].IATCallAddress;
+            MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), oldRights, nullptr);
+            ++result;
+        }
+
+        return result;
     }
 }//namespace ModuleManipulation
 

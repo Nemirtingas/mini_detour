@@ -10,9 +10,16 @@
 #define EXPORT_SYMBOL __attribute__((visibility("default")))
 #endif
 
+#include <stdio.h>
+
 EXPORT_SYMBOL int add(int a, int b)
 {
     return a + b;
 }
 
 EXPORT_SYMBOL int some_integer = 0;
+
+EXPORT_SYMBOL void iat_puts()
+{
+    puts("Hi");
+}

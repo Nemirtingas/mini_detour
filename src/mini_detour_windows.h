@@ -532,9 +532,12 @@ namespace ModuleManipulation {
 
         for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
         {
-            PDWORD exportAddress = _GetExportAddress(moduleBase, functionAddressesRVA, functionNamesRVA, functionOrdinal, imageExportDirectory->NumberOfNames, exportReplaceDetails[i].ExportName);
+            auto exportAddress = _GetExportAddress(moduleBase, functionAddressesRVA, functionNamesRVA, functionOrdinal, imageExportDirectory->NumberOfNames, exportReplaceDetails[i].ExportName);
             if (exportAddress == nullptr)
+            {
+                exportReplaceDetails[i].ExportCallAddress = nullptr;
                 continue;
+            }
 
             if (_AddressesAreRelativeJumpable(moduleBase, exportReplaceDetails[i].NewExportAddress))
             {
@@ -571,9 +574,12 @@ namespace ModuleManipulation {
         
         for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
         {
-            PDWORD exportAddress = _GetExportAddress(moduleBase, functionAddressesRVA, functionNamesRVA, functionOrdinal, imageExportDirectory->NumberOfNames, exportReplaceDetails[i].ExportName);
+            auto exportAddress = _GetExportAddress(moduleBase, functionAddressesRVA, functionNamesRVA, functionOrdinal, imageExportDirectory->NumberOfNames, exportReplaceDetails[i].ExportName);
             if (exportAddress == nullptr)
+            {
+                exportReplaceDetails[i].NewExportAddress = nullptr;
                 continue;
+            }
 
             MemoryManipulation::MemoryRights oldRights;
 
@@ -609,11 +615,17 @@ namespace ModuleManipulation {
         {
             auto iatAddress = _GetIATAddress(moduleBase, imageImportDescriptor, iatReplaceDetails[i].IATModuleName, iatReplaceDetails[i].IATName, iatReplaceDetails[i].IATOrdinal);
             if (iatAddress == nullptr)
+            {
+                iatReplaceDetails[i].IATCallAddress = nullptr;
                 continue;
+            }
 
             MiniDetour::MemoryManipulation::MemoryRights oldRights;
             if (!MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &oldRights))
+            {
+                iatReplaceDetails[i].IATCallAddress = nullptr;
                 continue;
+            }
 
             iatReplaceDetails[i].IATCallAddress = *iatAddress;
             *iatAddress = iatReplaceDetails[i].NewIATAddress;
@@ -640,11 +652,17 @@ namespace ModuleManipulation {
         {
             auto iatAddress = _GetIATAddress(moduleBase, imageImportDescriptor, iatReplaceDetails[i].IATModuleName, iatReplaceDetails[i].IATName, iatReplaceDetails[i].IATOrdinal);
             if (iatAddress == nullptr)
+            {
+                iatReplaceDetails[i].NewIATAddress = nullptr;
                 continue;
+            }
 
             MiniDetour::MemoryManipulation::MemoryRights oldRights;
             if (!MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &oldRights))
+            {
+                iatReplaceDetails[i].NewIATAddress = nullptr;
                 continue;
+            }
 
             iatReplaceDetails[i].NewIATAddress = *iatAddress;
             *iatAddress = iatReplaceDetails[i].IATCallAddress;
