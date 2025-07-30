@@ -46,7 +46,7 @@ inline intptr_t absolute_addr_to_relative(void* opcode_addr, void* destination_a
     return static_cast<uint8_t*>(destination_addr) - static_cast<uint8_t*>(opcode_addr);
 }
 
-bool addresses_are_relative_jumpable(void* source, void* dest)
+bool _AddressesAreRelativeJumpable(void* source, void* dest)
 {
     uintptr_t min_addr = reinterpret_cast<uintptr_t>(std::min(source, dest));
     uintptr_t max_addr = reinterpret_cast<uintptr_t>(std::max(source, dest));
@@ -68,7 +68,7 @@ struct memory_t
 
 struct AbsJump
 {
-    static inline size_t WriteOpcodes(void* buffer, void* source, void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void* buffer, void* jump_destination, int source_mode, int dest_mode)
     {
         uint32_t movz;     // movz x17, 0
         uint32_t movk16;   // movk x17, 0, lsl 16

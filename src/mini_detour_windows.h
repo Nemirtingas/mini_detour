@@ -6,6 +6,7 @@
 #define NOMINMAX
 #include <Windows.h>
 
+namespace MiniDetour {
 namespace MemoryManipulation {
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
     const void* max_user_address = reinterpret_cast<void*>(0x7ffffffff000);
@@ -13,7 +14,7 @@ namespace MemoryManipulation {
     const void* max_user_address = reinterpret_cast<void*>(0x7ffff000);
 #endif
 
-    DWORD memory_protect_rights_to_native(memory_rights rights)
+    DWORD _MemoryProtectRightsToNative(MemoryRights rights)
     {
         switch (rights)
         {
@@ -29,7 +30,7 @@ namespace MemoryManipulation {
         }
     }
 
-    memory_rights memory_native_to_protect_rights(DWORD rights)
+    MemoryRights _MemoryNativeToProtectRights(DWORD rights)
     {
         switch (rights)
         {
@@ -49,43 +50,43 @@ namespace MemoryManipulation {
         return sysInfo.dwPageSize;
     }
 
-    region_infos_t GetRegionInfos(void* address)
+    RegionInfos_t GetRegionInfos(void* address)
     {
         MEMORY_BASIC_INFORMATION infos;
-        region_infos_t res{};
+        RegionInfos_t res{};
 
         res.rights = mem_unset;
         if (VirtualQuery(address, &infos, sizeof(infos)) != 0)
         {
             res.start = reinterpret_cast<uintptr_t>(infos.BaseAddress);
             res.end = res.start + infos.RegionSize;
-            res.rights = memory_native_to_protect_rights(infos.Protect & 0xFF);
+            res.rights = _MemoryNativeToProtectRights(infos.Protect & 0xFF);
         }
 
         return res;
     }
 
-    std::vector<region_infos_t> GetAllRegions()
+    std::vector<RegionInfos_t> GetAllRegions()
     {
         HANDLE process_handle = GetCurrentProcess();
         LPVOID search_addr = nullptr;
         MEMORY_BASIC_INFORMATION mem_infos{};
-        memory_rights rights;
+        MemoryRights rights;
         std::string module_name;
         std::wstring wmodule_name(1024, L'\0');
         DWORD wmodule_name_size = 1024;
         HMODULE module_handle;
 
-        std::vector<region_infos_t> mappings;
+        std::vector<RegionInfos_t> mappings;
 
         mappings.reserve(256);
         while (VirtualQueryEx(process_handle, search_addr, &mem_infos, sizeof(mem_infos)) != 0)
         {
-            rights = memory_rights::mem_unset;
+            rights = MemoryRights::mem_unset;
 
             if (mem_infos.State != MEM_FREE)
             {
-                rights = MemoryManipulation::memory_native_to_protect_rights(mem_infos.Protect);
+                rights = _MemoryNativeToProtectRights(mem_infos.Protect);
 
                 if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT|GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)mem_infos.BaseAddress, &module_handle) != FALSE && module_handle != nullptr)
                 {
@@ -128,7 +129,7 @@ namespace MemoryManipulation {
         return mappings;
     }
 
-    std::vector<region_infos_t> GetFreeRegions()
+    std::vector<RegionInfos_t> GetFreeRegions()
     {
         HANDLE process_handle = GetCurrentProcess();
         LPVOID search_addr = nullptr;
@@ -138,7 +139,7 @@ namespace MemoryManipulation {
         DWORD wmodule_name_size = 1024;
         HMODULE module_handle;
 
-        std::vector<region_infos_t> mappings;
+        std::vector<RegionInfos_t> mappings;
 
         mappings.reserve(256);
         while (VirtualQueryEx(process_handle, search_addr, &mem_infos, sizeof(mem_infos)) != 0)
@@ -146,7 +147,7 @@ namespace MemoryManipulation {
             if (mem_infos.State == MEM_FREE)
             {
                 mappings.emplace_back(
-                    memory_rights::mem_unset,
+                    MemoryRights::mem_unset,
                     reinterpret_cast<uintptr_t>(mem_infos.BaseAddress),
                     reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize,
                     std::move(module_name)
@@ -159,13 +160,13 @@ namespace MemoryManipulation {
         return mappings;
     }
 
-    bool MemoryProtect(void* address, size_t size, memory_rights rights, memory_rights* old_rights)
+    bool MemoryProtect(void* address, size_t size, MemoryRights rights, MemoryRights* old_rights)
     {
         DWORD oldProtect;
-        bool res = VirtualProtect(address, size, memory_protect_rights_to_native(rights), &oldProtect) != FALSE;
+        bool res = VirtualProtect(address, size, _MemoryProtectRightsToNative(rights), &oldProtect) != FALSE;
 
         if (old_rights != nullptr)
-            *old_rights = memory_native_to_protect_rights(oldProtect & 0xFF);
+            *old_rights = _MemoryNativeToProtectRights(oldProtect & 0xFF);
 
         return res;
     }
@@ -176,47 +177,67 @@ namespace MemoryManipulation {
             VirtualFree(address, 0, MEM_RELEASE);
     }
 
-    void* MemoryAlloc(void* _addressHint, size_t size, memory_rights rights)
+    static inline BOOL MemoryAllocWithProtection(HANDLE hProcess, LPVOID* address, SIZE_T size, MemoryRights rights)
     {
-        if (_addressHint > max_user_address)
-            _addressHint = (void*)max_user_address;
+        *address = VirtualAllocEx(hProcess, *address, size, MEM_RESERVE | MEM_COMMIT, _MemoryProtectRightsToNative(rights));
+        return *address != nullptr;
+    }
+
+    static inline void* MemoryAllocNear(HANDLE hProcess, uintptr_t addressHint, size_t size, MemoryRights rights, size_t pageSize)
+    {
+        void* address;
 
         auto freeRegions = GetFreeRegions();
 
-        auto pageSize = PageSize();
-        auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
-        size = page_addr_size((void*)addressHint, size, pageSize);
-        const auto nativeRights = memory_protect_rights_to_native(rights);
-
-        if (_addressHint != nullptr)
+        std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](MemoryManipulation::RegionInfos_t const& l, MemoryManipulation::RegionInfos_t const& r)
         {
-            std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](MemoryManipulation::region_infos_t const& l, MemoryManipulation::region_infos_t const& r)
-            {
-                return std::max(addressHint, l.start) - std::min(addressHint, l.start) <
-                    std::max(addressHint, r.start) - std::min(addressHint, r.start);
-            });
-        }
-
-        HANDLE hProcess = GetCurrentProcess();
-
-        constexpr size_t allocationAlignement = 0x10000;
-        constexpr size_t mmGranularityMinusOne = allocationAlignement - 1;
+            return std::max(addressHint, l.start) - std::min(addressHint, l.start) <
+                std::max(addressHint, r.start) - std::min(addressHint, r.start);
+        });
 
         for (auto const& region : freeRegions)
         {
-            for (auto allocAddress = ((region.start + mmGranularityMinusOne) & ~mmGranularityMinusOne); (allocAddress + size) < region.end; allocAddress += allocationAlignement)
+            auto start = region.start > addressHint ? region.start : (region.end - pageSize);
+            auto increment = static_cast<int32_t>(region.start > addressHint ? pageSize : -pageSize);
+
+            for (auto allocAddress = start; allocAddress >= region.start && (allocAddress + size) < region.end; allocAddress += increment)
             {
                 if (allocAddress > (uintptr_t)max_user_address)
                     break;
 
-                auto pbAlloc = (void*)VirtualAllocEx(hProcess, (PVOID)allocAddress, size, MEM_RESERVE | MEM_COMMIT, nativeRights);
-
-                if (pbAlloc != nullptr)
-                    return pbAlloc;
+                address = (void*)allocAddress;
+                MemoryAllocWithProtection(hProcess, &address, size, rights);
+                if (address != nullptr)
+                    return address;
             }
         }
 
-        return nullptr;
+        // Fallback to anywhere alloc
+        address = nullptr;
+        MemoryAllocWithProtection(hProcess, &address, size, rights);
+
+        return address;
+    }
+
+    void* MemoryAlloc(void* _addressHint, size_t size, MemoryRights rights)
+    {
+        if (_addressHint > max_user_address)
+            _addressHint = (void*)max_user_address;
+
+        auto pageSize = PageSize();
+        auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
+        size = _PageAddrSize((void*)addressHint, size, pageSize);
+
+        HANDLE hProcess = GetCurrentProcess();
+
+        if (_addressHint == nullptr)
+        {
+            LPVOID address = nullptr;
+            MemoryAllocWithProtection(hProcess, &address, size, rights);
+            return (void*)address;
+        }
+
+        return MemoryAllocNear(hProcess, addressHint, size, rights, pageSize);
     }
     
     bool SafeMemoryRead(void* address, uint8_t* buffer, size_t size)
@@ -245,20 +266,414 @@ namespace MemoryManipulation {
     {
         return ::FlushInstructionCache(GetCurrentProcess(), pBase, size);
     }
-}
 
-#if defined(MINIDETOUR_ARCH_X64)
-#include "mini_detour_x64.h"
+}//namespace MemoryManipulation
 
-#elif defined(MINIDETOUR_ARCH_X86)
-#include "mini_detour_x86.h"
+namespace ModuleManipulation {
+    static bool _LoadModuleExportDetails(void* moduleHandle, void** moduleBase, PIMAGE_EXPORT_DIRECTORY* imageExportDirectory, PDWORD* functionAddressesRVA, PDWORD* functionNamesRVA, PWORD* functionOrdinal)
+    {
+        PIMAGE_DOS_HEADER imageDosHeader = (PIMAGE_DOS_HEADER)moduleHandle;
 
-#elif defined(MINIDETOUR_ARCH_ARM64)
-#include "mini_detour_arm64.h"
+        if (imageDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+            return false;
 
-#elif defined(MINIDETOUR_ARCH_ARM)
-#include "mini_detour_arm.h"
+        PIMAGE_NT_HEADERS imageNTHeaders = (PIMAGE_NT_HEADERS)((DWORD_PTR)moduleHandle + imageDosHeader->e_lfanew);
 
-#endif
+        if (imageNTHeaders->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC)
+            return false;
+
+        *imageExportDirectory = (PIMAGE_EXPORT_DIRECTORY)((LPBYTE)moduleHandle + imageNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
+
+        if (*imageExportDirectory == nullptr)
+            return false;
+
+        *moduleBase = moduleHandle;
+        *functionAddressesRVA = (PDWORD)((LPBYTE)moduleHandle + (*imageExportDirectory)->AddressOfFunctions);
+        *functionNamesRVA = (PDWORD)((LPBYTE)moduleHandle + (*imageExportDirectory)->AddressOfNames);
+        *functionOrdinal = (PWORD)((LPBYTE)moduleHandle + (*imageExportDirectory)->AddressOfNameOrdinals);
+
+        return true;
+    }
+
+    static bool _LoadModuleIATDetails(void* moduleHandle, void** moduleBase, PIMAGE_IMPORT_DESCRIPTOR* imageImportDescriptor)
+    {
+        PIMAGE_DOS_HEADER imageDosHeader = (PIMAGE_DOS_HEADER)moduleHandle;
+
+        if (imageDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+            return false;
+
+        PIMAGE_NT_HEADERS imageNTHeaders = (PIMAGE_NT_HEADERS)((DWORD_PTR)moduleHandle + imageDosHeader->e_lfanew);
+
+        if (imageNTHeaders->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC && imageNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size == 0)
+            return false;
+
+        *moduleBase = moduleHandle;
+        *imageImportDescriptor = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)imageDosHeader + imageNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+
+        return true;
+    }
+
+    static bool _ReplaceModuleExportInPlace(void* moduleBase, PDWORD exportAddress, void** exportCallAddress, void* newExportAddress)
+    {
+        MemoryManipulation::MemoryRights oldRights;
+
+        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+            goto Error;
+
+        *exportCallAddress = (void*)((char*)moduleBase + *exportAddress);
+        *exportAddress = (uintptr_t)newExportAddress - (uintptr_t)moduleBase;
+
+        MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
+
+        return true;
+
+    Error:
+        *exportCallAddress = nullptr;
+        return false;
+    }
+
+    static bool _ReplaceModuleExportWithTrampoline(void* moduleBase, PDWORD exportAddress, void** exportCallAddress, void* newExportAddress)
+    {
+        MemoryManipulation::MemoryRights oldRights;
+
+        *exportCallAddress = nullptr;
+        auto exportJump = mm.GetFreeJump(moduleBase);
+        if (exportJump == nullptr)
+            goto Error;
+
+        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+            goto ErrorFree;
+
+        if (!MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::mem_rwx, nullptr))
+            goto ErrorFree;
+
+        MemoryManipulation::WriteAbsoluteJump(exportJump, newExportAddress);
+
+        *exportCallAddress = (void*)((char*)moduleBase + *exportAddress);
+        *exportAddress = (uintptr_t)exportJump - (uintptr_t)moduleBase;
+
+        MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::mem_rx, nullptr);
+        MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
+
+        return true;
+
+    ErrorFree:
+        mm.FreeJump(exportJump);
+    Error:
+        *exportCallAddress = nullptr;
+        return false;
+    }
+
+    static inline PDWORD _GetExportAddress(void* moduleBase, PDWORD functionAddressesRVA, PDWORD functionNamesRVA, PWORD functionOrdinals, DWORD functionNameCount, const char* symbolName)
+    {
+        for (DWORD j = 0; j < functionNameCount; ++j)
+        {
+            if (strcmp((const char*)moduleBase + functionNamesRVA[j], symbolName) == 0)
+                return functionAddressesRVA + functionOrdinals[j];
+        }
+
+        return nullptr;
+    }
+
+    static inline void** _GetIATAddress(void* moduleBase, PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor, const char* moduleName, const char* symbolName, DWORD ordinal)
+    {
+        void** addressTable = nullptr;
+        PIMAGE_THUNK_DATA thunkData = nullptr;
+
+        for (auto* importDescriptor = imageImportDescriptor;
+            importDescriptor->Characteristics != 0;
+            ++importDescriptor)
+        {
+            auto* libraryName = (const char*)((uintptr_t)moduleBase + importDescriptor->Name);
+            if (stricmp(moduleName, libraryName) == 0)
+            {
+                addressTable = (void**)((uintptr_t)moduleBase + importDescriptor->FirstThunk);
+                thunkData = (PIMAGE_THUNK_DATA)((uintptr_t)moduleBase + importDescriptor->OriginalFirstThunk);
+                break;
+            }
+        }
+
+        if (thunkData == nullptr)
+            return nullptr;
+
+        for (int i = 0; thunkData[i].u1.AddressOfData != 0; ++i)
+        {
+            if (thunkData[i].u1.AddressOfData & 0x80000000ul)
+            {
+                if (symbolName == nullptr && (thunkData[i].u1.Ordinal & (~0x80000000ul)) == ordinal)
+                    return addressTable + i;
+            }
+            else if (symbolName != nullptr && strcmp(((PIMAGE_IMPORT_BY_NAME)((uintptr_t)moduleBase + thunkData[i].u1.AddressOfData))->Name, symbolName) == 0)
+            {
+                return addressTable + i;
+            }
+        }
+
+        return nullptr;
+    }
+
+    size_t GetAllExportedSymbols(void* moduleHandle, ExportDetails_t* exportDetails, size_t exportDetailsCount)
+    {
+        void* moduleBase = nullptr;
+        PIMAGE_EXPORT_DIRECTORY imageExportDirectory;
+        PDWORD functionAddressesRVA;
+        PDWORD functionNamesRVA;
+        PWORD functionOrdinal;
+        size_t result = 0;
+
+        if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &imageExportDirectory, &functionAddressesRVA, &functionNamesRVA, &functionOrdinal))
+            return result;
+
+        if (imageExportDirectory->NumberOfFunctions <= 0)
+            return result;
+
+        if (exportDetails == nullptr)
+            return imageExportDirectory->NumberOfFunctions;
+
+        for (DWORD i = 0; i < imageExportDirectory->NumberOfFunctions && i < exportDetailsCount; ++i)
+        {
+            if (functionAddressesRVA[i] == 0)
+                continue;
+
+            exportDetails[result].ExportName = nullptr;
+            for (DWORD j = 0; j < imageExportDirectory->NumberOfNames; ++j)
+            {
+                if (functionOrdinal[j] == i)
+                {
+                    exportDetails[result].ExportName = (const char*)moduleBase + functionNamesRVA[j];
+                    break;
+                }
+            }
+
+            exportDetails[result].ExportCallAddress = (void*)((uintptr_t)moduleBase + functionAddressesRVA[i]);
+            exportDetails[result++].ExportOrdinal = i + imageExportDirectory->Base;
+        }
+
+        return result;
+    }
+
+    size_t GetAllIATSymbols(void* moduleHandle, IATDetails_t* iatDetails, size_t iatDetailsCount)
+    {
+        void* moduleBase = nullptr;
+        PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor;
+        void** addressTable;
+        PIMAGE_THUNK_DATA thunkData;
+        size_t result = 0;
+
+        if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &imageImportDescriptor))
+            return result;
+
+        if (iatDetails == nullptr)
+        {
+            for (auto* importDescriptor = imageImportDescriptor;
+                importDescriptor->Characteristics != 0;
+                ++importDescriptor)
+            {
+                for (thunkData = (PIMAGE_THUNK_DATA)((uintptr_t)moduleBase + importDescriptor->OriginalFirstThunk);
+                    thunkData->u1.AddressOfData != 0;
+                    ++thunkData)
+                {
+                    ++result;
+                }
+            }
+
+            return result;
+        }
+
+        for (auto* importDescriptor = imageImportDescriptor;
+            importDescriptor->Characteristics != 0 && result < iatDetailsCount;
+            ++importDescriptor)
+        {
+            auto* libraryName = (const char*)((uintptr_t)moduleBase + importDescriptor->Name);
+
+            addressTable = (void**)((uintptr_t)moduleBase + importDescriptor->FirstThunk);
+            thunkData = (PIMAGE_THUNK_DATA)((uintptr_t)moduleBase + importDescriptor->OriginalFirstThunk);
+
+            for (int i = 0; thunkData[i].u1.AddressOfData != 0 && result < iatDetailsCount; ++i)
+            {
+                if (thunkData[i].u1.AddressOfData & 0x80000000)
+                {
+                    iatDetails[result].ImportOrdinal = thunkData[i].u1.Ordinal & (~0x80000000);
+                    iatDetails[result].ImportName = nullptr;
+                }
+                else
+                {
+                    iatDetails[result].ImportOrdinal = uint32_t(-1);
+                    iatDetails[result].ImportName = ((PIMAGE_IMPORT_BY_NAME)((uintptr_t)moduleBase + thunkData[i].u1.AddressOfData))->Name;
+                }
+
+                iatDetails[result].ImportCallAddress = addressTable[i];
+                iatDetails[result++].ImportModuleName = libraryName;
+            }
+        }
+
+        return result;
+    }
+
+    size_t ReplaceModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
+    {
+        void* moduleBase = nullptr;
+        PIMAGE_EXPORT_DIRECTORY imageExportDirectory;
+        PDWORD functionAddressesRVA;
+        PDWORD functionNamesRVA;
+        PWORD functionOrdinal;
+        size_t result = 0;
+
+        for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
+            exportReplaceDetails[i].ExportCallAddress = nullptr;
+
+        if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &imageExportDirectory, &functionAddressesRVA, &functionNamesRVA, &functionOrdinal))
+            return result;
+
+        SPDLOG_INFO("Program base address: {:016X}, Dynamic symbol start: {:016X}", (uintptr_t)moduleBase, (uintptr_t)imageExportDirectory);
+
+        if (imageExportDirectory->NumberOfNames <= 0 || functionNamesRVA == 0 || functionOrdinal == 0)
+            return result;
+
+        for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
+        {
+            auto exportAddress = _GetExportAddress(moduleBase, functionAddressesRVA, functionNamesRVA, functionOrdinal, imageExportDirectory->NumberOfNames, exportReplaceDetails[i].ExportName);
+            if (exportAddress == nullptr)
+            {
+                exportReplaceDetails[i].ExportCallAddress = nullptr;
+                continue;
+            }
+
+            if (_AddressesAreRelativeJumpable(moduleBase, exportReplaceDetails[i].NewExportAddress))
+            {
+                if (_ReplaceModuleExportInPlace(moduleBase, exportAddress, &exportReplaceDetails[i].ExportCallAddress, exportReplaceDetails[i].NewExportAddress))
+                    ++result;
+            }
+            else
+            {
+                if (_ReplaceModuleExportWithTrampoline(moduleBase, exportAddress, &exportReplaceDetails[i].ExportCallAddress, exportReplaceDetails[i].NewExportAddress))
+                    ++result;
+            }
+        }
+
+        return result;
+    }
+
+    size_t RestoreModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
+    {
+        void* moduleBase = nullptr;
+        PIMAGE_EXPORT_DIRECTORY imageExportDirectory;
+        PDWORD functionAddressesRVA;
+        PDWORD functionNamesRVA;
+        PWORD functionOrdinal;
+        size_t result = 0;
+
+        for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
+            exportReplaceDetails[i].NewExportAddress = nullptr;
+
+        if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &imageExportDirectory, &functionAddressesRVA, &functionNamesRVA, &functionOrdinal))
+            return result;
+
+        if (imageExportDirectory->NumberOfNames <= 0 || functionNamesRVA == 0 || functionOrdinal == 0)
+            return result;
+        
+        for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
+        {
+            auto exportAddress = _GetExportAddress(moduleBase, functionAddressesRVA, functionNamesRVA, functionOrdinal, imageExportDirectory->NumberOfNames, exportReplaceDetails[i].ExportName);
+            if (exportAddress == nullptr)
+            {
+                exportReplaceDetails[i].NewExportAddress = nullptr;
+                continue;
+            }
+
+            MemoryManipulation::MemoryRights oldRights;
+
+            if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+                break;
+
+            exportReplaceDetails[i].NewExportAddress = (void*)((uintptr_t)*exportAddress + (uintptr_t)moduleBase);
+            auto oldJumpAddress = (void*)((uintptr_t)moduleBase + *exportAddress);
+            *exportAddress = (uintptr_t)exportReplaceDetails[i].ExportCallAddress - (uintptr_t)moduleBase;
+
+            MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
+
+            mm.FreeJump(oldJumpAddress);
+            ++result;
+        }
+
+        return result;
+    }
+
+    size_t ReplaceModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
+    {
+        void* moduleBase = nullptr;
+        PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor;
+        size_t result = 0;
+
+        for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+            iatReplaceDetails[i].IATCallAddress = nullptr;
+
+        if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &imageImportDescriptor))
+            return result;
+
+        for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+        {
+            auto iatAddress = _GetIATAddress(moduleBase, imageImportDescriptor, iatReplaceDetails[i].IATModuleName, iatReplaceDetails[i].IATName, iatReplaceDetails[i].IATOrdinal);
+            if (iatAddress == nullptr)
+            {
+                iatReplaceDetails[i].IATCallAddress = nullptr;
+                continue;
+            }
+
+            MiniDetour::MemoryManipulation::MemoryRights oldRights;
+            if (!MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &oldRights))
+            {
+                iatReplaceDetails[i].IATCallAddress = nullptr;
+                continue;
+            }
+
+            iatReplaceDetails[i].IATCallAddress = *iatAddress;
+            *iatAddress = iatReplaceDetails[i].NewIATAddress;
+            MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), oldRights, nullptr);
+            ++result;
+        }
+
+        return result;
+    }
+
+    size_t RestoreModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
+    {
+        void* moduleBase = nullptr;
+        PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor;
+        size_t result = 0;
+
+        for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+            iatReplaceDetails[i].NewIATAddress = nullptr;
+
+        if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &imageImportDescriptor))
+            return result;
+
+        for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+        {
+            auto iatAddress = _GetIATAddress(moduleBase, imageImportDescriptor, iatReplaceDetails[i].IATModuleName, iatReplaceDetails[i].IATName, iatReplaceDetails[i].IATOrdinal);
+            if (iatAddress == nullptr)
+            {
+                iatReplaceDetails[i].NewIATAddress = nullptr;
+                continue;
+            }
+
+            MiniDetour::MemoryManipulation::MemoryRights oldRights;
+            if (!MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &oldRights))
+            {
+                iatReplaceDetails[i].NewIATAddress = nullptr;
+                continue;
+            }
+
+            iatReplaceDetails[i].NewIATAddress = *iatAddress;
+            *iatAddress = iatReplaceDetails[i].IATCallAddress;
+            MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), oldRights, nullptr);
+            ++result;
+        }
+
+        return result;
+    }
+}// namespace ModuleManipulation
+
+}//namespace MiniDetour
 
 #endif//MINI_DETOUR_WINDOWS_H

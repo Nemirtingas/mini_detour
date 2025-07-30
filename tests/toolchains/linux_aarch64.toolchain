@@ -1,0 +1,6 @@
+set(CMAKE_SYSTEM_NAME Linux)
+
+set(CMAKE_C_COMPILER aarch64-linux-gnu-gcc CACHE INTERNAL "C compiler")
+set(CMAKE_CXX_COMPILER aarch64-linux-gnu-g++ CACHE INTERNAL "C++ compiler")
+
+set( CMAKE_SIZEOF_VOID_P 8 )

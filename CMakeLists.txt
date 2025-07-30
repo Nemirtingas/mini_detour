@@ -134,7 +134,7 @@ set_target_properties(mini_detour PROPERTIES
 target_link_libraries(
   mini_detour
   PUBLIC
-	
+    
   $<$<BOOL:${WIN32}>:shell32>
   # For library UNIX loading
   $<$<NOT:$<BOOL:${WIN32}>>:dl>
@@ -178,6 +178,20 @@ endif()
 
 if(MINIDETOUR_BUILD_TESTS)
   add_library(
+    export_hook_test_library SHARED
+    tests/dll_test.c
+  )
+
+  set_target_properties(export_hook_test_library PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:${MINIDETOUR_DYNAMIC_RUNTIME}>:DLL>"
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+    PREFIX ""
+  )
+
+  add_library(
     mini_detour_test
     src/mini_detour.cpp
     src/mini_detour_arm.h
@@ -188,8 +202,8 @@ if(MINIDETOUR_BUILD_TESTS)
     src/mini_detour_macos.h
     src/mini_detour_windows.h
     include/mini_detour/mini_detour.h
-	
-	${CAPSTONE_HEADERS}
+    
+    ${CAPSTONE_HEADERS}
     ${CAPSTONE_SOURCES}
   )
   
@@ -206,7 +220,7 @@ if(MINIDETOUR_BUILD_TESTS)
     mini_detour_test
     PUBLIC
     
-	$<$<BOOL:${WIN32}>:shell32>
+    $<$<BOOL:${WIN32}>:shell32>
     # For library UNIX loading
     $<$<NOT:$<BOOL:${WIN32}>>:dl>
   )
@@ -214,12 +228,12 @@ if(MINIDETOUR_BUILD_TESTS)
   target_compile_definitions(
     mini_detour_test
     PRIVATE
-	-DCAPSTONE_USE_SYS_DYN_MEM
+    -DCAPSTONE_USE_SYS_DYN_MEM
     -DCAPSTONE_HAS_X86
-	-DCAPSTONE_HAS_ARM64
-	-DCAPSTONE_HAS_ARM
-	USE_SPDLOG
-	$<$<BOOL:${WIN32}>:_SILENCE_ALL_MS_EXT_DEPRECATION_WARNINGS>
+    -DCAPSTONE_HAS_ARM64
+    -DCAPSTONE_HAS_ARM
+    USE_SPDLOG
+    $<$<BOOL:${WIN32}>:_SILENCE_ALL_MS_EXT_DEPRECATION_WARNINGS>
   )
   
   target_compile_options(
@@ -253,6 +267,8 @@ if(MINIDETOUR_BUILD_TESTS)
     tests
     PRIVATE
     mini_detour_test
+    # For library UNIX loading
+    $<$<NOT:$<BOOL:${WIN32}>>:dl>
   )
 
   target_include_directories(
@@ -265,7 +281,7 @@ if(MINIDETOUR_BUILD_TESTS)
   target_compile_definitions(
     tests
     PRIVATE
-	$<$<BOOL:${WIN32}>:_SILENCE_ALL_MS_EXT_DEPRECATION_WARNINGS>
+    $<$<BOOL:${WIN32}>:_SILENCE_ALL_MS_EXT_DEPRECATION_WARNINGS>
   )
 
 endif()
