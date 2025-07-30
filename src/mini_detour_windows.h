@@ -8,6 +8,7 @@
 
 namespace MiniDetour {
 namespace MemoryManipulation {
+namespace Implementation {
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
     const void* max_user_address = reinterpret_cast<void*>(0x7ffffffff000);
 #elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
@@ -18,13 +19,13 @@ namespace MemoryManipulation {
     {
         switch (rights)
         {
-            case mem_r  : return PAGE_READONLY;
-            case mem_w  : return PAGE_READWRITE;
-            case mem_x  : return PAGE_EXECUTE;
-            case mem_rw : return PAGE_READWRITE;
-            case mem_rx : return PAGE_EXECUTE_READ;
-            case mem_wx : return PAGE_EXECUTE_READWRITE;
-            case mem_rwx: return PAGE_EXECUTE_READWRITE;
+            case MemoryRights::mem_r  : return PAGE_READONLY;
+            case MemoryRights::mem_w  : return PAGE_READWRITE;
+            case MemoryRights::mem_x  : return PAGE_EXECUTE;
+            case MemoryRights::mem_rw : return PAGE_READWRITE;
+            case MemoryRights::mem_rx : return PAGE_EXECUTE_READ;
+            case MemoryRights::mem_wx : return PAGE_EXECUTE_READWRITE;
+            case MemoryRights::mem_rwx: return PAGE_EXECUTE_READWRITE;
 
             default: return PAGE_NOACCESS;
         }
@@ -34,12 +35,12 @@ namespace MemoryManipulation {
     {
         switch (rights)
         {
-            case PAGE_READONLY         : return mem_r;
-            case PAGE_READWRITE        : return mem_rw;
-            case PAGE_EXECUTE          : return mem_x;
-            case PAGE_EXECUTE_READ     : return mem_rx;
-            case PAGE_EXECUTE_READWRITE: return mem_rwx;
-            default                    : return mem_none;
+            case PAGE_READONLY         : return MemoryRights::mem_r;
+            case PAGE_READWRITE        : return MemoryRights::mem_rw;
+            case PAGE_EXECUTE          : return MemoryRights::mem_x;
+            case PAGE_EXECUTE_READ     : return MemoryRights::mem_rx;
+            case PAGE_EXECUTE_READWRITE: return MemoryRights::mem_rwx;
+            default                    : return MemoryRights::mem_none;
         }
     }
 
@@ -55,7 +56,7 @@ namespace MemoryManipulation {
         MEMORY_BASIC_INFORMATION infos;
         RegionInfos_t res{};
 
-        res.rights = mem_unset;
+        res.rights = MemoryRights::mem_unset;
         if (VirtualQuery(address, &infos, sizeof(infos)) != 0)
         {
             res.start = reinterpret_cast<uintptr_t>(infos.BaseAddress);
@@ -267,9 +268,11 @@ namespace MemoryManipulation {
         return ::FlushInstructionCache(GetCurrentProcess(), pBase, size);
     }
 
+}//namespace Implementation
 }//namespace MemoryManipulation
 
 namespace ModuleManipulation {
+namespace Implementation {
     static bool _LoadModuleExportDetails(void* moduleHandle, void** moduleBase, PIMAGE_EXPORT_DIRECTORY* imageExportDirectory, PDWORD* functionAddressesRVA, PDWORD* functionNamesRVA, PWORD* functionOrdinal)
     {
         PIMAGE_DOS_HEADER imageDosHeader = (PIMAGE_DOS_HEADER)moduleHandle;
@@ -317,7 +320,7 @@ namespace ModuleManipulation {
     {
         MemoryManipulation::MemoryRights oldRights;
 
-        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::MemoryRights::mem_rw, &oldRights))
             goto Error;
 
         *exportCallAddress = (void*)((char*)moduleBase + *exportAddress);
@@ -341,10 +344,10 @@ namespace ModuleManipulation {
         if (exportJump == nullptr)
             goto Error;
 
-        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::MemoryRights::mem_rw, &oldRights))
             goto ErrorFree;
 
-        if (!MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::mem_rwx, nullptr))
+        if (!MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rwx, nullptr))
             goto ErrorFree;
 
         MemoryManipulation::WriteAbsoluteJump(exportJump, newExportAddress);
@@ -352,7 +355,7 @@ namespace ModuleManipulation {
         *exportCallAddress = (void*)((char*)moduleBase + *exportAddress);
         *exportAddress = (uintptr_t)exportJump - (uintptr_t)moduleBase;
 
-        MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::mem_rx, nullptr);
+        MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rx, nullptr);
         MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
 
         return true;
@@ -571,7 +574,7 @@ namespace ModuleManipulation {
 
         if (imageExportDirectory->NumberOfNames <= 0 || functionNamesRVA == 0 || functionOrdinal == 0)
             return result;
-        
+
         for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
         {
             auto exportAddress = _GetExportAddress(moduleBase, functionAddressesRVA, functionNamesRVA, functionOrdinal, imageExportDirectory->NumberOfNames, exportReplaceDetails[i].ExportName);
@@ -583,7 +586,7 @@ namespace ModuleManipulation {
 
             MemoryManipulation::MemoryRights oldRights;
 
-            if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+            if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::MemoryRights::mem_rw, &oldRights))
                 break;
 
             exportReplaceDetails[i].NewExportAddress = (void*)((uintptr_t)*exportAddress + (uintptr_t)moduleBase);
@@ -672,8 +675,9 @@ namespace ModuleManipulation {
 
         return result;
     }
-}// namespace ModuleManipulation
 
+}//namespace Implementation
+}//namespace ModuleManipulation
 }//namespace MiniDetour
 
 #endif//MINI_DETOUR_WINDOWS_H

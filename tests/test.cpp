@@ -5,73 +5,28 @@
 #include <spdlog/spdlog-inl.h>
 #include <iostream>
 
-#if defined(WIN64) || defined(_WIN64) || defined(__MINGW64__) ||\
-    defined(WIN32) || defined(_WIN32) || defined(__MINGW32__)
-#define TESTS_OS_WINDOWS
-
+#if defined(MINIDETOUR_OS_WINDOWS)
 #define EXPORT_HOOK_TEST_LIBRARY "./export_hook_test_library.dll"
 #define LOAD_LIBRARY(filePath) ((void*)LoadLibraryA(filePath))
 #define GET_LIBRARY_PROC(handle, name) ((void*)GetProcAddress((HMODULE)(handle), name))
 #define FREE_LIBRARY(handle) FreeLibrary((HMODULE)handle)
 
-#elif defined(__linux__) || defined(linux)
+#elif defined(MINIDETOUR_OS_LINUX)
 #include <dlfcn.h>
-
-#define TESTS_OS_LINUX
 
 #define EXPORT_HOOK_TEST_LIBRARY "./export_hook_test_library.so"
 #define LOAD_LIBRARY(filePath) ((void*)dlopen(filePath, RTLD_LAZY))
 #define GET_LIBRARY_PROC(handle, name) ((void*)dlsym((void*)(handle), name))
 #define FREE_LIBRARY(handle) dlclose((void*)(handle))
 
-#elif defined(__APPLE__)
+#elif defined(MINIDETOUR_OS_APPLE)
 #include <dlfcn.h>
-
-#define TESTS_OS_APPLE
 
 #define EXPORT_HOOK_TEST_LIBRARY "./export_hook_test_library.dylib"
 #define LOAD_LIBRARY(filePath) dlopen(filePath, RTLD_LAZY)
 #define GET_LIBRARY_PROC(handle, name) ((void*)dlsym(handle, name))
 #define FREE_LIBRARY(handle) dlclose(handle)
 
-#endif
-
-#if defined(TESTS_OS_WINDOWS)
-    #if defined(_M_IX86)
-        #define MINIDETOUR_ARCH_X86
-    #elif defined(_M_AMD64)
-        #define MINIDETOUR_ARCH_X64
-    #elif defined(_M_ARM)
-        #define MINIDETOUR_ARCH_ARM
-    #elif defined(_M_ARM64)
-        #define MINIDETOUR_ARCH_ARM64
-    #else
-        #error "Unhandled arch"
-    #endif
-#elif defined(TESTS_OS_LINUX)
-    #if defined(__i386__) || defined(__i386) || defined(i386)
-        #define MINIDETOUR_ARCH_X86
-    #elif defined(__x86_64__) || defined(__x86_64) || defined(__amd64) || defined(__amd64__)
-        #define MINIDETOUR_ARCH_X64
-    #elif defined(__arm__)
-        #define MINIDETOUR_ARCH_ARM
-    #elif defined(__aarch64__)
-        #define MINIDETOUR_ARCH_ARM64
-    #else
-        #error "Unhandled arch"
-    #endif
-#elif defined(TESTS_OS_APPLE)
-    #if defined(__i386__) || defined(__i386) || defined(i386)
-        #define MINIDETOUR_ARCH_X86
-    #elif defined(__x86_64__) || defined(__x86_64) || defined(__amd64) || defined(__amd64__)
-        #define MINIDETOUR_ARCH_X64
-    #elif defined(__arm__)
-        #define MINIDETOUR_ARCH_ARM
-    #elif defined(__aarch64__)
-        #define MINIDETOUR_ARCH_ARM64
-    #else
-        #error "Unhandled arch"
-    #endif
 #endif
 
 inline void* relative_addr_to_absolute(void* source_addr, int32_t rel_addr)
@@ -121,7 +76,7 @@ int MyAdd(int a, int b)
 TEST_CASE("List modules iat symbols", "[module_list_iat_symbols]") {
     MiniDetour::ModuleManipulation::IATDetails_t* iatSymbols;
     size_t iatSymbolsCount = 0;
-#if defined(TESTS_OS_WINDOWS) || defined(TESTS_OS_LINUX)
+#if defined(MINIDETOUR_OS_WINDOWS) || defined(MINIDETOUR_OS_LINUX)
     auto h = LOAD_LIBRARY(EXPORT_HOOK_TEST_LIBRARY);
     if (h != nullptr)
     {
@@ -164,12 +119,12 @@ TEST_CASE("List modules exported symbols", "[module_list_export_symbols]") {
     }
 }
 
-#if defined(TESTS_OS_WINDOWS)
+#if defined(MINIDETOUR_OS_WINDOWS)
 HMODULE WINAPI MyGetModuleHandleA(LPCSTR)
 {
     return (HMODULE)0x99887766;
 }
-#elif defined(TESTS_OS_LINUX)
+#elif defined(MINIDETOUR_OS_LINUX)
 void* Mydlopen(const char*, int)
 {
     return (void*)0x99887766;
@@ -177,7 +132,7 @@ void* Mydlopen(const char*, int)
 #endif
 
 TEST_CASE("Module IAT hook", "[module_iat_hook]") {
-#if defined(TESTS_OS_WINDOWS)
+#if defined(MINIDETOUR_OS_WINDOWS)
     // GetModuleHandleA is now in the IAT.
     auto h = (void*)GetModuleHandleA(nullptr);
     MiniDetour::ModuleManipulation::IATReplaceParameter_t iatReplace{};
@@ -192,7 +147,7 @@ TEST_CASE("Module IAT hook", "[module_iat_hook]") {
 
     CHECK(MiniDetour::ModuleManipulation::RestoreModuleIATs(h, &iatReplace, 1) == 1);
     CHECK(GetModuleHandleA(nullptr) == (HMODULE)h);
-#elif defined(TESTS_OS_LINUX)
+#elif defined(MINIDETOUR_OS_LINUX)
     // puts is now in the IAT.
     auto h = (void*)dlopen(nullptr, RTLD_LAZY);
     MiniDetour::ModuleManipulation::IATReplaceParameter_t iatReplace{};
@@ -212,7 +167,7 @@ TEST_CASE("Module IAT hook", "[module_iat_hook]") {
 
 TEST_CASE("Module export hook", "[module_export_hook]") {
     SPDLOG_INFO("Test module export hook");
-#if defined(TESTS_OS_WINDOWS) || defined(TESTS_OS_LINUX)
+#if defined(MINIDETOUR_OS_WINDOWS) || defined(MINIDETOUR_OS_LINUX)
     auto h = LOAD_LIBRARY(EXPORT_HOOK_TEST_LIBRARY);
     if (h != nullptr)
     {
@@ -244,7 +199,7 @@ TEST_CASE("Module export hook", "[module_export_hook]") {
 
         FREE_LIBRARY(h);
     }
-#elif defined(TESTS_OS_APPLE)
+#elif defined(MINIDETOUR_OS_APPLE)
     //MacOS (MachO) not implemented.
 #endif
 }
@@ -257,12 +212,12 @@ int AbsoluteJumpWriteTest(int x)
 TEST_CASE("Test absolute jump write", "[absolute_jump_write]") {
     SPDLOG_INFO("Test absolute jump write");
     auto allocSize = MiniDetour::MemoryManipulation::WriteAbsoluteJump(nullptr, nullptr);
-    auto jumpAddress = (int(*)(int))MiniDetour::MemoryManipulation::MemoryAlloc(nullptr, allocSize, MiniDetour::MemoryManipulation::mem_rw);
+    auto jumpAddress = (int(*)(int))MiniDetour::MemoryManipulation::MemoryAlloc(nullptr, allocSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rw);
     CHECK(jumpAddress != nullptr);
     if (jumpAddress != nullptr)
     {
         if (MiniDetour::MemoryManipulation::WriteAbsoluteJump((void*)jumpAddress, (void*)&AbsoluteJumpWriteTest) &&
-            MiniDetour::MemoryManipulation::MemoryProtect((void*)jumpAddress, allocSize, MiniDetour::MemoryManipulation::mem_rx))
+            MiniDetour::MemoryManipulation::MemoryProtect((void*)jumpAddress, allocSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rx))
         {
             auto a1 = jumpAddress(2);
             auto a2 = jumpAddress(3);
@@ -342,7 +297,7 @@ TEST_CASE("Memory allocation", "[mem alloc]") {
     MiniDetour::MemoryManipulation::MemoryFree(mem, alloc_size);
 }
 
-#ifndef TESTS_OS_APPLE
+#ifndef MINIDETOUR_OS_APPLE
 
 TEST_CASE("Memory protect", "[memprotect]") {
     MiniDetour::MemoryManipulation::MemoryRights old_rights;
@@ -352,7 +307,7 @@ TEST_CASE("Memory protect", "[memprotect]") {
 
     CHECK(mem != nullptr);
 
-#if defined(TESTS_OS_WINDOWS)
+#if defined(MINIDETOUR_OS_WINDOWS)
     CHECK(MiniDetour::MemoryManipulation::MemoryProtect(mem, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_r, &old_rights) == true);
     CHECK(old_rights == MiniDetour::MemoryManipulation::MemoryRights::mem_none);
 
@@ -373,7 +328,7 @@ TEST_CASE("Memory protect", "[memprotect]") {
 
     CHECK(MiniDetour::MemoryManipulation::MemoryProtect(mem, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &old_rights) == true);
     CHECK(old_rights == MiniDetour::MemoryManipulation::MemoryRights::mem_rwx); // Windows doesn't have a pure wx
-#elif defined(TESTS_OS_LINUX)
+#elif defined(MINIDETOUR_OS_LINUX)
     CHECK(MiniDetour::MemoryManipulation::MemoryProtect(mem, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_r, &old_rights) == true);
     CHECK(old_rights == MiniDetour::MemoryManipulation::MemoryRights::mem_none);
 
@@ -394,7 +349,7 @@ TEST_CASE("Memory protect", "[memprotect]") {
 
     CHECK(MiniDetour::MemoryManipulation::MemoryProtect(mem, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &old_rights) == true);
     CHECK(old_rights == MiniDetour::MemoryManipulation::MemoryRights::mem_wx);
-#elif defined(TESTS_OS_APPLE)
+#elif defined(MINIDETOUR_OS_APPLE)
     CHECK(MiniDetour::MemoryManipulation::MemoryProtect(mem, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_r, &old_rights) == true);
     CHECK(old_rights == MiniDetour::MemoryManipulation::MemoryRights::mem_none);
 
@@ -454,7 +409,7 @@ TEST_CASE("Memory read/write", "[memread/memwrite]")
 bool Myputs_called = false;
 MiniDetour::Hook_t puts_hook;
 
-#ifdef TESTS_OS_WINDOWS
+#ifdef MINIDETOUR_OS_WINDOWS
 int __cdecl Myputs(const char* str)
 #else
 int Myputs(const char* str)
@@ -600,4 +555,4 @@ TEST_CASE("Hook small function with call", "[Hook function]") {
 }
 #endif
 
-#endif//TESTS_OS_APPLE
+#endif//MINIDETOUR_OS_APPLE
