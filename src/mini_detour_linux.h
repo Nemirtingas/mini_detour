@@ -874,8 +874,6 @@ namespace Implementation {
         if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &iatStart, &iatEnd, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolSize, &dynStr, &dynStrSize))
             return result;
 
-        SPDLOG_INFO("");
-
         for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
         {
             auto iatAddress = _GetIATAddress(moduleBase, iatStart, iatEnd, dynamicSymbolsStart, dynamicSymbolSize, dynStr, dynStrSize, iatReplaceDetails[i].IATName);
