@@ -1,6 +1,10 @@
 cmake_policy(SET CMP0091 NEW)
 cmake_minimum_required(VERSION 3.15)
-project(mini_detour)
+project(
+  mini_detour
+  VERSION 0.0.0
+  LANGUAGES C CXX
+)
 
 if(APPLE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
@@ -306,5 +310,24 @@ install(
   EXPORT MiniDetourTargets
   FILE MiniDetourConfig.cmake
   NAMESPACE Nemirtingas::
-  DESTINATION lib/cmake/MiniDetour
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/MiniDetour
 )
+
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/MiniDetourConfig.cmake.in
+  ${CMAKE_CURRENT_BINARY_DIR}/MiniDetourConfig.cmake
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/MiniDetour
+  NO_SET_AND_CHECK_MACRO
+  NO_CHECK_REQUIRED_COMPONENTS_MACRO
+)
+  
+write_basic_package_version_file(
+  ${CMAKE_CURRENT_BINARY_DIR}/MiniDetourConfigVersion.cmake
+  VERSION 0.0.0
+  COMPATIBILITY SameMajorVersion)
+  
+install(FILES
+  ${CMAKE_CURRENT_BINARY_DIR}/MiniDetourConfig.cmake
+  ${CMAKE_CURRENT_BINARY_DIR}/MiniDetourConfigVersion.cmake
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/MiniDetour)
