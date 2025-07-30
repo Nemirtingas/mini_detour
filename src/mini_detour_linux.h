@@ -75,6 +75,7 @@ struct GnuHashHeader_t
 
 namespace MiniDetour {
 namespace MemoryManipulation {
+namespace Implementation {
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
     const void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
 #elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
@@ -85,13 +86,13 @@ namespace MemoryManipulation {
     {
         switch (rights)
         {
-            case mem_r  : return PROT_READ;
-            case mem_w  : return PROT_WRITE;
-            case mem_x  : return PROT_EXEC;
-            case mem_rw : return PROT_WRITE | PROT_READ;
-            case mem_rx : return PROT_READ  | PROT_EXEC;
-            case mem_wx : return PROT_WRITE | PROT_EXEC;
-            case mem_rwx: return PROT_WRITE | PROT_READ | PROT_EXEC;
+            case MemoryRights::mem_r  : return PROT_READ;
+            case MemoryRights::mem_w  : return PROT_WRITE;
+            case MemoryRights::mem_x  : return PROT_EXEC;
+            case MemoryRights::mem_rw : return PROT_WRITE | PROT_READ;
+            case MemoryRights::mem_rx : return PROT_READ  | PROT_EXEC;
+            case MemoryRights::mem_wx : return PROT_WRITE | PROT_EXEC;
+            case MemoryRights::mem_rwx: return PROT_WRITE | PROT_READ | PROT_EXEC;
 
             default: return PROT_NONE;
         }
@@ -129,17 +130,17 @@ namespace MemoryManipulation {
                     res.start = start;
                     res.end = end;
 
-                    rights = mem_none;
+                    rights = MemoryRights::mem_none;
 
                     ++str_it;
                     if (str_it[0] == 'r')
-                        rights |= mem_r;
+                        rights |= MemoryRights::mem_r;
 
                     if (str_it[1] == 'w')
-                        rights |= mem_w;
+                        rights |= MemoryRights::mem_w;
 
                     if (str_it[2] == 'x')
-                        rights |= mem_x;
+                        rights |= MemoryRights::mem_x;
 
                     for (int i = 0; i < 4; ++i)
                     {
@@ -204,13 +205,13 @@ namespace MemoryManipulation {
 
                     ++str_it;
                     if (str_it[0] == 'r')
-                        rights |= mem_r;
+                        rights |= MemoryRights::mem_r;
 
                     if (str_it[1] == 'w')
-                        rights |= mem_w;
+                        rights |= MemoryRights::mem_w;
 
                     if (str_it[2] == 'x')
-                        rights |= mem_x;
+                        rights |= MemoryRights::mem_x;
 
                     for (int i = 0; i < 4; ++i)
                     {
@@ -395,9 +396,11 @@ namespace MemoryManipulation {
     {
         return 1;
     }
+}//namespace Implementation
 }//namespace MemoryManipulation
 
 namespace ModuleManipulation {
+namespace Implementation {
     static ElfDyn_t* _FindElfDynFromTag(ElfDyn_t* dynamicSegment, ElfSxword_t tag)
     {
         for (; dynamicSegment->d_tag != DT_NULL; ++dynamicSegment)
@@ -522,7 +525,7 @@ namespace ModuleManipulation {
     {
         MemoryManipulation::MemoryRights oldRights;
 
-        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::MemoryRights::mem_rw, &oldRights))
             goto Error;
 
         *exportCallAddress = (void*)((char*)moduleBase + *exportAddress);
@@ -545,10 +548,10 @@ namespace ModuleManipulation {
         if (exportJump == nullptr)
             goto Error;
 
-        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::MemoryRights::mem_rw, &oldRights))
             goto ErrorFree;
 
-        if (!MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::mem_rwx, nullptr))
+        if (!MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rwx, nullptr))
             goto ErrorFree;
 
         MemoryManipulation::WriteAbsoluteJump(exportJump, newExportAddress);
@@ -558,7 +561,7 @@ namespace ModuleManipulation {
 
         *exportAddress = (uintptr_t)exportJump - (uintptr_t)moduleBase;
 
-        MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::mem_rx, nullptr);
+        MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rx, nullptr);
         MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
 
         return true;
@@ -836,7 +839,7 @@ namespace ModuleManipulation {
 
             MemoryManipulation::MemoryRights oldRights;
 
-            if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::mem_rw, &oldRights))
+            if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::MemoryRights::mem_rw, &oldRights))
                 continue;
 
             exportReplaceDetails[i].NewExportAddress = (void*)((uintptr_t)*exportAddress + (uintptr_t)moduleBase);
@@ -941,8 +944,9 @@ namespace ModuleManipulation {
 
         return result;
     }
-}//namespace ModuleManipulation
 
+}//namespace Implementation
+}//namespace ModuleManipulation
 }//namespace MiniDetour
 
 #endif//MINI_DETOUR_LINUX_H

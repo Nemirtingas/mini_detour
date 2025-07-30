@@ -106,6 +106,7 @@ std::string kern_return_t_2_str(kern_return_t v)
 
 namespace MiniDetour {
 namespace MemoryManipulation {
+namespace Implementation {
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
     const void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
 #elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
@@ -116,13 +117,13 @@ namespace MemoryManipulation {
     {
         switch (rights)
         {
-            case mem_r  : return VM_PROT_READ;
-            case mem_w  : return VM_PROT_WRITE;
-            case mem_x  : return VM_PROT_EXECUTE;
-            case mem_rw : return VM_PROT_WRITE | VM_PROT_READ;
-            case mem_rx : return VM_PROT_READ  | VM_PROT_EXECUTE;
-            case mem_wx : return VM_PROT_WRITE | VM_PROT_EXECUTE;
-            case mem_rwx: return VM_PROT_WRITE | VM_PROT_READ | VM_PROT_EXECUTE;
+            case MemoryRights::mem_r  : return VM_PROT_READ;
+            case MemoryRights::mem_w  : return VM_PROT_WRITE;
+            case MemoryRights::mem_x  : return VM_PROT_EXECUTE;
+            case MemoryRights::mem_rw : return VM_PROT_WRITE | VM_PROT_READ;
+            case MemoryRights::mem_rx : return VM_PROT_READ  | VM_PROT_EXECUTE;
+            case MemoryRights::mem_wx : return VM_PROT_WRITE | VM_PROT_EXECUTE;
+            case MemoryRights::mem_rwx: return VM_PROT_WRITE | VM_PROT_READ | VM_PROT_EXECUTE;
 
             default: return VM_PROT_NONE;
         }
@@ -144,7 +145,7 @@ namespace MemoryManipulation {
         mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
         mach_port_t object_name = MACH_PORT_NULL;
 
-        unsigned int rights = mem_unset;
+        unsigned int rights = MemoryRights::mem_unset;
 
         // mach_vm_region returns the region or the next region to vm_address, so if the region queried is free, it will not return the free region but the next one.
         ret = mach_vm_region(mach_task_self(), &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name);
@@ -156,16 +157,16 @@ namespace MemoryManipulation {
                 res.start = (uintptr_t)vm_address;
                 res.end = res.start + size;
 
-                rights = mem_none;
+                rights = MemoryRights::mem_none;
 
                 if (infos.protection & VM_PROT_READ)
-                    rights |= mem_r;
+                    rights |= MemoryRights::mem_r;
 
                 if (infos.protection & VM_PROT_WRITE)
-                    rights |= mem_w;
+                    rights |= MemoryRights::mem_w;
 
                 if (infos.protection & VM_PROT_EXECUTE)
-                    rights |= mem_x;
+                    rights |= MemoryRights::mem_x;
             }
         }
 
@@ -205,13 +206,13 @@ namespace MemoryManipulation {
             rights = MemoryRights::mem_none;
 
             if (infos.protection & VM_PROT_READ)
-                rights |= mem_r;
+                rights |= MemoryRights::mem_r;
 
             if (infos.protection & VM_PROT_WRITE)
-                rights |= mem_w;
+                rights |= MemoryRights::mem_w;
 
             if (infos.protection & VM_PROT_EXECUTE)
-                rights |= mem_x;
+                rights |= MemoryRights::mem_x;
 
             mappings.emplace_back(RegionInfos_t{
                 (MemoryRights)rights,
@@ -296,7 +297,7 @@ namespace MemoryManipulation {
         else
         {
             *address = (void*)mach_address;
-            if (!MemoryProtect(*address, mach_size, rights))
+            if (!MemoryProtect(*address, mach_size, rights, nullptr))
             {
                 MemoryFree(*address, size);
                 *address = nullptr;
@@ -388,9 +389,11 @@ namespace MemoryManipulation {
     {
         return 1;
     }
+}//namespace Implementation
 }//namespace MemoryManipulation
 
 namespace ModuleManipulation {
+namespace Implementation {
     /*
     static void* _LoadModuleBaseFromHandleDYLDPre941(void* moduleHandle)
     {
@@ -675,8 +678,9 @@ namespace ModuleManipulation {
     {
         return 0;
     }
-}//namespace ModuleManipulation
 
+}//namespace Implementation
+}//namespace ModuleManipulation
 }//namespace MiniDetour
 
 #endif//MINI_DETOUR_MACOS_H

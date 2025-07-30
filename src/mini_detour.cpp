@@ -52,50 +52,6 @@ struct fmt::formatter<MiniDetour::MemoryManipulation::MemoryRights> {
 #define SPDLOG_DEBUG(...)
 #endif
 
-#if defined(WIN64) || defined(_WIN64) || defined(__MINGW64__) || defined(WIN32) || defined(_WIN32) || defined(__MINGW32__)
-    #define MINIDETOUR_OS_WINDOWS
-
-    #if defined(_M_IX86)
-        #define MINIDETOUR_ARCH_X86
-    #elif defined(_M_AMD64)
-        #define MINIDETOUR_ARCH_X64
-    #elif defined(_M_ARM)
-        #define MINIDETOUR_ARCH_ARM
-    #elif defined(_M_ARM64)
-        #define MINIDETOUR_ARCH_ARM64
-    #else
-        #error "Unhandled arch"
-    #endif
-#elif defined(__linux__) || defined(linux)
-    #define MINIDETOUR_OS_LINUX
-
-    #if defined(__i386__) || defined(__i386) || defined(i386)
-        #define MINIDETOUR_ARCH_X86
-    #elif defined(__x86_64__) || defined(__x86_64) || defined(__amd64) || defined(__amd64__)
-        #define MINIDETOUR_ARCH_X64
-    #elif defined(__arm__)
-        #define MINIDETOUR_ARCH_ARM
-    #elif defined(__aarch64__)
-        #define MINIDETOUR_ARCH_ARM64
-    #else
-        #error "Unhandled arch"
-    #endif
-#elif defined(__APPLE__)
-    #define MINIDETOUR_OS_APPLE
-
-    #if defined(__i386__) || defined(__i386) || defined(i386)
-        #define MINIDETOUR_ARCH_X86
-    #elif defined(__x86_64__) || defined(__x86_64) || defined(__amd64) || defined(__amd64__)
-        #define MINIDETOUR_ARCH_X64
-    #elif defined(__arm__)
-        #define MINIDETOUR_ARCH_ARM
-    #elif defined(__aarch64__)
-        #define MINIDETOUR_ARCH_ARM64
-    #else
-        #error "Unhandled arch"
-    #endif
-#endif
-
 //#include <keystone/keystone.h>
 #include <capstone/capstone.h>
 
@@ -207,7 +163,7 @@ class CodeDisasm
 {
     csh _DisasmHandle;
     cs_insn _CurrentInstruction;
-    cs_detail _InstructionDetails;
+    cs_detail _InstructionImplementation;
 
     inline bool _IsHandleValid()
     {
@@ -227,9 +183,9 @@ public:
     CodeDisasm() :
         _DisasmHandle{},
         _CurrentInstruction{},
-        _InstructionDetails{}
+        _InstructionImplementation{}
     {
-        _CurrentInstruction.detail = &_InstructionDetails;
+        _CurrentInstruction.detail = &_InstructionImplementation;
     }
 
     ~CodeDisasm()
@@ -528,26 +484,31 @@ static MemoryManager mm;
 
 namespace MiniDetour {
 namespace MemoryManipulation {
+namespace Implementation {
 
-size_t WriteAbsoluteJump(void* address, void* destination)
-{
+    size_t WriteAbsoluteJump(void* address, void* destination)
+    {
 #if defined(MINIDETOUR_ARCH_ARM)
-    int source_mode = reinterpret_cast<uintptr_t>(address) & 1;
-    int destination_mode = reinterpret_cast<uintptr_t>(destination) & 1;
+        int source_mode = reinterpret_cast<uintptr_t>(address) & 1;
+        int destination_mode = reinterpret_cast<uintptr_t>(destination) & 1;
 #else
-    int source_mode = 0;
-    int destination_mode = 0;
+        int source_mode = 0;
+        int destination_mode = 0;
 #endif
 
-    if (address == nullptr)
-        return AbsJump::GetOpcodeSize(destination, source_mode, destination_mode);
+        if (address == nullptr)
+            return AbsJump::GetOpcodeSize(destination, source_mode, destination_mode);
 
-    return AbsJump::WriteOpcodes(address, destination, source_mode, destination_mode);
-}
+        return AbsJump::WriteOpcodes(address, destination, source_mode, destination_mode);
+    }
+}//namespace Implementation
+}//namespace MemoryManipulation
+}//namespace MiniDetour
 
-}
+namespace MiniDetour {
+namespace Implementation {
 
-class HookImpl
+class Hook_t
 {
     // Where the original bytes were modified for hook
     void* _OriginalFuncAddress;
@@ -569,7 +530,7 @@ public:
     // This can be different than _OriginalTrampolineAddress on ARM Thumb for example
     void* _OriginalTrampolineCallAddress;
 
-    HookImpl() :
+    Hook_t() :
         _OriginalFuncAddress{},
         _OriginalTrampolineAddress(nullptr),
         _DetourFunc(nullptr),
@@ -579,7 +540,7 @@ public:
         _OriginalTrampolineCallAddress(nullptr)
     {}
 
-    HookImpl(HookImpl&& other) noexcept:
+    Hook_t(Hook_t&& other) noexcept:
         _OriginalFuncAddress(std::move(other._OriginalFuncAddress)),
         _SavedCode(std::move(other._SavedCode)),
         _HookCode(std::move(other._HookCode)),
@@ -593,7 +554,7 @@ public:
             other._RestoreOnDestroy = false;
     }
 
-    HookImpl& operator=(HookImpl&& other) noexcept
+    Hook_t& operator=(Hook_t&& other) noexcept
     {
         if (this != &other)
         {
@@ -613,7 +574,7 @@ public:
         return *this;
     }
 
-    ~HookImpl()
+    ~Hook_t()
     {
         if (_RestoreOnDestroy)
         {
@@ -1061,64 +1022,169 @@ public:
     }
 };
 
-Hook_t::Hook_t() :
-    _Impl(new HookImpl)
-{}
-
-Hook_t::Hook_t(Hook_t&& other) noexcept
-{
-    auto t = other._Impl;
-    other._Impl = nullptr;
-    _Impl = t;
-}
-
-Hook_t& Hook_t::operator=(Hook_t&& other) noexcept
-{
-    auto t = other._Impl;
-    other._Impl = _Impl;
-    _Impl = t;
-
-    return *this;
-}
-
-Hook_t::~Hook_t()
-{
-    delete _Impl;
-}
-
-void Hook_t::RestoreOnDestroy(bool restore)
-{
-    _Impl->_RestoreOnDestroy = restore;
-}
-
-bool Hook_t::CanHook(void* func)
-{
-    return _Impl->CanHook(func);
-}
-
-bool Hook_t::ReplaceFunction(void* functionToReplace, void* newFunction)
-{
-    return HookImpl::ReplaceFunction(functionToReplace, newFunction);
-}
-
-void* Hook_t::HookFunction(void* functionToHook, void* newFunction)
-{
-    return _Impl->HookFunc(functionToHook, newFunction);
-}
-
-void* Hook_t::RestoreFunction()
-{
-    return _Impl->RestoreFunc();
-}
-
-void* Hook_t::GetHookFunction()
-{
-    return _Impl->_DetourCallFunc;
-}
-
-void* Hook_t::GetOriginalFunction()
-{
-    return _Impl->_OriginalTrampolineCallAddress;
-}
-
+}//namespace Implementation
 }//namespace MiniDetour
+
+// MiniDetour Utils C functions
+
+MINIDETOUR_EXPORT(void*) MiniDetourUtilsPageRoundUp(void* _addr, size_t page_size)
+{
+    uintptr_t addr = (uintptr_t)_addr;
+    return (void*)((addr + (page_size - 1)) & (((uintptr_t)-1) ^ (page_size - 1)));
+}
+
+MINIDETOUR_EXPORT(void*) MiniDetourUtilsPageRound(void* _addr, size_t page_size)
+{
+    uintptr_t addr = (uintptr_t)_addr;
+    return (void*)(addr & (((uintptr_t)-1) ^ (page_size - 1)));
+}
+
+MINIDETOUR_EXPORT(size_t) MiniDetourUtilsPageSize()
+{
+    return MiniDetour::MemoryManipulation::Implementation::PageSize();
+}
+
+// MiniDetour MemoryManipulation C functions
+MINIDETOUR_EXPORT(bool) MiniDetourMemoryManipulationMemoryProtect(void* address, size_t size, MiniDetourMemoryManipulationMemoryRights rights, MiniDetourMemoryManipulationMemoryRights* old_rights)
+{
+    return MiniDetour::MemoryManipulation::Implementation::MemoryProtect(address, size, rights, old_rights);
+}
+
+MINIDETOUR_EXPORT(void) MiniDetourMemoryManipulationMemoryFree(void* address, size_t size)
+{
+    return MiniDetour::MemoryManipulation::Implementation::MemoryFree(address, size);
+}
+
+MINIDETOUR_EXPORT(void*) MiniDetourMemoryManipulationMemoryAlloc(void* address_hint, size_t size, MiniDetourMemoryManipulationMemoryRights rights)
+{
+    return MiniDetour::MemoryManipulation::Implementation::MemoryAlloc(address_hint, size, rights);
+}
+
+MINIDETOUR_EXPORT(bool) MiniDetourMemoryManipulationSafeMemoryRead(void* address, uint8_t* buffer, size_t size)
+{
+    return MiniDetour::MemoryManipulation::Implementation::SafeMemoryRead(address, buffer, size);
+}
+
+MINIDETOUR_EXPORT(bool) MiniDetourMemoryManipulationSafeMemoryWrite(void* address, const uint8_t* buffer, size_t size)
+{
+    return MiniDetour::MemoryManipulation::Implementation::SafeMemoryWrite(address, buffer, size);
+}
+
+MINIDETOUR_EXPORT(size_t) MiniDetourMemoryManipulationWriteAbsoluteJump(void* address, void* destination)
+{
+    return MiniDetour::MemoryManipulation::Implementation::WriteAbsoluteJump(address, destination);
+}
+
+MINIDETOUR_EXPORT(int) MiniDetourMemoryManipulationFlushInstructionCache(void* address, size_t size)
+{
+    return MiniDetour::MemoryManipulation::Implementation::FlushInstructionCache(address, size);
+}
+
+// MiniDetour ModuleManipulation C functions
+
+MINIDETOUR_EXPORT(size_t) MiniDetourModuleManipulationGetAllExportedSymbols(void* moduleHandle, MiniDetourModuleManipulationExportDetails_t* exportDetails, size_t exportDetailsCount)
+{
+    return MiniDetour::ModuleManipulation::Implementation::GetAllExportedSymbols(moduleHandle, exportDetails, exportDetailsCount);
+}
+
+MINIDETOUR_EXPORT(size_t) MiniDetourModuleManipulationGetAllIATSymbols(void* moduleHandle, MiniDetourModuleManipulationIATDetails_t* iatDetails, size_t iatDetailsCount)
+{
+    return MiniDetour::ModuleManipulation::Implementation::GetAllIATSymbols(moduleHandle, iatDetails, iatDetailsCount);
+}
+
+MINIDETOUR_EXPORT(size_t) MiniDetourModuleManipulationReplaceModuleExports(void* moduleHandle, MiniDetourModuleManipulationExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
+{
+    return MiniDetour::ModuleManipulation::Implementation::ReplaceModuleExports(moduleHandle, exportReplaceDetails, exportReplaceDetailsCount);
+}
+
+MINIDETOUR_EXPORT(size_t) MiniDetourModuleManipulationRestoreModuleExports(void* moduleHandle, MiniDetourModuleManipulationExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
+{
+    return MiniDetour::ModuleManipulation::Implementation::RestoreModuleExports(moduleHandle, exportReplaceDetails, exportReplaceDetailsCount);
+}
+
+MINIDETOUR_EXPORT(size_t) MiniDetourModuleManipulationReplaceModuleIATs(void* moduleHandle, MiniDetourModuleManipulationIATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
+{
+    return MiniDetour::ModuleManipulation::Implementation::ReplaceModuleIATs(moduleHandle, iatReplaceDetails, iatReplaceDetailsCount);
+}
+
+MINIDETOUR_EXPORT(size_t) MiniDetourModuleManipulationRestoreModuleIATs(void* moduleHandle, MiniDetourModuleManipulationIATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
+{
+    return MiniDetour::ModuleManipulation::Implementation::RestoreModuleIATs(moduleHandle, iatReplaceDetails, iatReplaceDetailsCount);
+}
+
+// MiniDetour Hook_t C functions
+
+MINIDETOUR_EXPORT(minidetour_hook_handle_t) MiniDetourHookTAlloc()
+{
+    return reinterpret_cast<minidetour_hook_handle_t>(new MiniDetour::Implementation::Hook_t());
+}
+
+MINIDETOUR_EXPORT(void) MiniDetourHookTFree(minidetour_hook_handle_t handle)
+{
+    auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t*>(handle);
+    delete hook;
+}
+
+MINIDETOUR_EXPORT(void) MiniDetourHookTRestoreOnDestroy(minidetour_hook_handle_t handle, bool restore)
+{
+    auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t*>(handle);
+    hook->_RestoreOnDestroy = restore;
+}
+
+MINIDETOUR_EXPORT(bool) MiniDetourHookTCanHook(minidetour_hook_handle_t handle, void* function)
+{
+    auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t*>(handle);
+    return hook->CanHook(function);
+}
+
+MINIDETOUR_EXPORT(void*) MiniDetourHookTHookFunction(minidetour_hook_handle_t handle, void* function_to_hook, void* new_function)
+{
+    auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t*>(handle);
+    return hook->HookFunc(function_to_hook, new_function);
+}
+
+MINIDETOUR_EXPORT(void*) MiniDetourHookTRestoreFunction(minidetour_hook_handle_t handle)
+{
+    auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t*>(handle);
+    return hook->RestoreFunc();
+}
+
+MINIDETOUR_EXPORT(void*) MiniDetourHookTGetHookFunction(minidetour_hook_handle_t handle)
+{
+    auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t*>(handle);
+    return hook->_DetourCallFunc;
+}
+
+MINIDETOUR_EXPORT(void*) MiniDetourHookTGetOriginalFunction(minidetour_hook_handle_t handle)
+{
+    auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t*>(handle);
+    return hook->_OriginalTrampolineCallAddress;
+}
+
+MINIDETOUR_EXPORT(bool) MiniDetourHookTReplaceFunction(void* function_to_replace, void* new_function)
+{
+    return MiniDetour::Implementation::Hook_t::ReplaceFunction(function_to_replace, new_function);
+}
+
+
+// FIXME!
+namespace MiniDetour {
+namespace MemoryManipulation {
+
+MINIDETOUR_CXX_EXPORT(RegionInfos_t) GetRegionInfos(void* address)
+{
+    return MiniDetour::MemoryManipulation::Implementation::GetRegionInfos(address);
+}
+
+MINIDETOUR_CXX_EXPORT(std::vector<RegionInfos_t>) GetAllRegions()
+{
+    return MiniDetour::MemoryManipulation::Implementation::GetAllRegions();
+}
+
+MINIDETOUR_CXX_EXPORT(std::vector<RegionInfos_t>) GetFreeRegions()
+{
+    return MiniDetour::MemoryManipulation::Implementation::GetFreeRegions();
+}
+
+}
+}

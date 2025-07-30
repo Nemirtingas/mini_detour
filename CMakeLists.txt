@@ -17,6 +17,7 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(BUILD_SHARED_LIBS "Build shared library" OFF)
 option(MINIDETOUR_DYNAMIC_RUNTIME "Link against dynamic runtime (Windows)" ON)
 option(MINIDETOUR_BUILD_TESTS "Build tests" OFF)
 
@@ -147,10 +148,13 @@ target_link_libraries(
 target_compile_definitions(
   mini_detour
   PRIVATE
+  $<BUILD_INTERFACE:MINIDETOUR_BUILD>
   -DCAPSTONE_USE_SYS_DYN_MEM
   -DCAPSTONE_HAS_X86
   -DCAPSTONE_HAS_ARM64
   -DCAPSTONE_HAS_ARM
+  PUBLIC
+  $<$<BOOL:${BUILD_SHARED_LIBS}>:MINIDETOUR_SHARED>
 )
 
 target_compile_options(
@@ -232,12 +236,15 @@ if(MINIDETOUR_BUILD_TESTS)
   target_compile_definitions(
     mini_detour_test
     PRIVATE
+    $<BUILD_INTERFACE:MINIDETOUR_BUILD>
     -DCAPSTONE_USE_SYS_DYN_MEM
     -DCAPSTONE_HAS_X86
     -DCAPSTONE_HAS_ARM64
     -DCAPSTONE_HAS_ARM
     USE_SPDLOG
     $<$<BOOL:${WIN32}>:_SILENCE_ALL_MS_EXT_DEPRECATION_WARNINGS>
+	PUBLIC
+	$<$<BOOL:${BUILD_SHARED_LIBS}>:MINIDETOUR_SHARED>
   )
   
   target_compile_options(
