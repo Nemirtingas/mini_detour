@@ -1048,15 +1048,113 @@ public:
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,       // call address
             };
 
+            std::vector<uint8_t> optimizedBuffer;
+
+            switch (argCount)
+            {
+                default:
+                    optimizedBuffer = {
+                        0x56,                                                       // push rsi
+                        0x57,                                                       // push rdi
+                        0x48, 0x8d, 0x74, 0x24, 0x38,                               // lea      rsi,[rsp+0x38]
+                        0x48, 0x81, 0xec, 0x00, 0x00, 0x00, 0x00,                   // sub      rsp,stackSize (imm32)
+                        0x48, 0x8d, 0x7c, 0x24, 0x28,                               // lea      rdi,[rsp+0x28]
+                        0x4c, 0x89, 0x4c, 0x24, 0x20,                               // mov      QWORD PTR [rsp+0x20],r9
+                        0x4d, 0x89, 0xc1,                                           // mov      r9,r8
+                        0x49, 0x89, 0xd0,                                           // mov      r8,rdx
+                        0x48, 0x89, 0xca,                                           // mov      rdx,rcx
+                        0x48, 0xc7, 0xc1, 0x00, 0x00, 0x00, 0x00,                   // mov      rcx,max(argCount-4, 0)
+                        0xfc,                                                       // cld
+                        0xf3, 0x48, 0xa5,                                           // rep movs QWORD PTR es:[rdi],QWORD PTR ds:[rsi]
+                        0x48, 0xb9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // movabs   rcx,userParameter
+                        0xFF, 0x15, 0x0a, 0x00, 0x00, 0x00,                         // call     [rip + 10]
+                        0x48, 0x81, 0xc4, 0x00, 0x00, 0x00, 0x00,                   // add      rsp,stackSize
+                        0x5f,                                                       // pop rdi
+                        0x5e,                                                       // pop rsi
+                        0xc3,                                                       // ret
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,       // call address
+                    };
+                    *reinterpret_cast<int32_t*>(optimizedBuffer.data() + 10) = stackSize;
+                    *reinterpret_cast<int32_t*>(optimizedBuffer.data() + 36) = std::max<int32_t>(argCount - 4, 0);
+                    *reinterpret_cast<void**>(optimizedBuffer.data() + 46) = userParameter;
+                    *reinterpret_cast<int32_t*>(optimizedBuffer.data() + optimizedBuffer.size() - sizeof(void*) - 7 - 1) = stackSize;
+                    break;
+
+                case 4:
+                    optimizedBuffer = {
+                        0x48, 0x83, 0xec, (uint8_t)stackSize,                       // sub      rsp, 0x28
+                        0x4c, 0x89, 0x4c, 0x24, 0x20,                               // mov      QWORD PTR [rsp+0x20],r9
+                        0x4d, 0x89, 0xc1,                                           // mov      r9,r8
+                        0x49, 0x89, 0xd0,                                           // mov      r8,rdx
+                        0x48, 0x89, 0xca,                                           // mov      rdx,rcx
+                        0x48, 0xb9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // movabs   rcx,userParameter
+                        0xFF, 0x15, 0x05, 0x00, 0x00, 0x00,                         // call     [rip + 5]
+                        0x48, 0x83, 0xc4, (uint8_t)stackSize,                       // add      rsp, 0x28
+                        0xc3,                                                       // ret
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,       // call address
+                    };
+                    *reinterpret_cast<void**>(optimizedBuffer.data() + 20) = userParameter;
+                    break;
+
+                case 3:
+                    optimizedBuffer = {
+                        0x48, 0x83, 0xec, (uint8_t)stackSize,                       // sub      rsp, 0x20
+                        0x4d, 0x89, 0xc1,                                           // mov      r9,r8
+                        0x49, 0x89, 0xd0,                                           // mov      r8,rdx
+                        0x48, 0x89, 0xca,                                           // mov      rdx,rcx
+                        0x48, 0xb9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // movabs   rcx,userParameter
+                        0xFF, 0x15, 0x05, 0x00, 0x00, 0x00,                         // call     [rip + 5]
+                        0x48, 0x83, 0xc4, (uint8_t)stackSize,                       // add      rsp, 0x20
+                        0xc3,                                                       // ret
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,       // call address
+                    };
+                    *reinterpret_cast<void**>(optimizedBuffer.data() + 15) = userParameter;
+                    break;
+
+                case 2:
+                    optimizedBuffer = {
+                        0x48, 0x83, 0xec, (uint8_t)stackSize,                       // sub      rsp, 0x20
+                        0x49, 0x89, 0xd0,                                           // mov      r8,rdx
+                        0x48, 0x89, 0xca,                                           // mov      rdx,rcx
+                        0x48, 0xb9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // movabs   rcx,userParameter
+                        0xFF, 0x15, 0x05, 0x00, 0x00, 0x00,                         // call     [rip + 5]
+                        0x48, 0x83, 0xc4, (uint8_t)stackSize,                       // add      rsp, 0x20
+                        0xc3,                                                       // ret
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,       // call address
+                    };
+                    *reinterpret_cast<void**>(optimizedBuffer.data() + 12) = userParameter;
+                    break;
+
+                case 1:
+                    optimizedBuffer = {
+                        0x48, 0x83, 0xec, (uint8_t)stackSize,                       // sub      rsp, 0x20
+                        0x48, 0x89, 0xca,                                           // mov      rdx,rcx
+                        0x48, 0xb9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // movabs   rcx,userParameter
+                        0xFF, 0x15, 0x05, 0x00, 0x00, 0x00,                         // call     [rip + 5]
+                        0x48, 0x83, 0xc4, (uint8_t)stackSize,                       // add      rsp, 0x20
+                        0xc3,                                                       // ret
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,       // call address
+                    };
+                    *reinterpret_cast<void**>(optimizedBuffer.data() + 9) = userParameter;
+                    break;
+
+                case 0:
+                    optimizedBuffer = {
+                        0x48, 0x83, 0xec, (uint8_t)stackSize,                       // sub      rsp, 0x20
+                        0x48, 0xb9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // movabs   rcx,userParameter
+                        0xFF, 0x15, 0x05, 0x00, 0x00, 0x00,                         // call     [rip + 5]
+                        0x48, 0x83, 0xc4, (uint8_t)stackSize,                       // add      rsp, 0x20
+                        0xc3,                                                       // ret
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,       // call address
+                    };
+                    *reinterpret_cast<void**>(optimizedBuffer.data() + 6) = userParameter;
+                    break;
+            }
+
             static_assert(sizeof(buffer) <= _ReservedJumpSize);
 
-            *reinterpret_cast<int32_t*>(buffer + 10) = stackSize;
-            *reinterpret_cast<int32_t*>(buffer + 36) = std::max<int32_t>(argCount - 4, 0);
-            *reinterpret_cast<void**>(buffer + 46) = userParameter;
-            *reinterpret_cast<int32_t*>(buffer + (sizeof(buffer) - sizeof(void*)) - 8) = stackSize;
-
-            *reinterpret_cast<void**>(buffer + (sizeof(buffer) - sizeof(void*) - 1)) = newFunction;
-            memcpy(jump_mem, buffer, sizeof(buffer));
+            *reinterpret_cast<void**>(optimizedBuffer.data() + optimizedBuffer.size() - sizeof(void*) - 1) = newFunction;
+            memcpy(jump_mem, optimizedBuffer.data(), optimizedBuffer.size());
 
             //AbsJump::WriteOpcodes(jump_mem, newFunction, func_mode, hook_mode);
 

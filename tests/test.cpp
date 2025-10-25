@@ -415,16 +415,6 @@ TEST_CASE("Memory allocation", "[mem alloc]") {
 
 #ifndef MINIDETOUR_OS_APPLE
 
-int MySimpleInjected(int* userParameter, int a, int b)
-{
-    return a + b + *userParameter;
-}
-
-int SimpleFunction(int a, int b)
-{
-    return a + b;
-}
-
 template<typename Function> struct CallConventionTraits;
 
 template<typename R, typename... Args>
@@ -451,18 +441,74 @@ struct CallConventionTraits<R(Args...)>
     static constexpr MiniDetourCallConvention call_convention = MiniDetourCallConvention::MniDetourStandardCall;
 };
 
-struct BigOne
+int64_t InjectTest0Arg()
 {
-    char v[1];
-};
-
-void test(int64_t rcx, int64_t rdx, int64_t r8, int64_t r9, int64_t rsp8)
-{
+    return 0;
 }
 
-void my_test(int* arcx, int64_t ardx, int64_t ar8, int64_t ar9, int64_t arsp8, int64_t arsp16)
+int64_t MyInjectTest0Arg(int* injected)
 {
+    return *injected;
+}
 
+int64_t InjectTest1Arg(int64_t arg1)
+{
+    return 0;
+}
+
+int64_t MyInjectTest1Arg(int* injected, int64_t arg1)
+{
+    return *injected + arg1;
+}
+
+int64_t InjectTest2Arg(int64_t arg1, int64_t arg2)
+{
+    return 0;
+}
+
+int64_t MyInjectTest2Arg(int* injected, int64_t arg1, int64_t arg2)
+{
+    return *injected + arg1 + arg2;
+}
+
+int64_t InjectTest3Arg(int64_t arg1, int64_t arg2, int64_t arg3)
+{
+    return 0;
+}
+
+int64_t MyInjectTest3Arg(int* injected, int64_t arg1, int64_t arg2, int64_t arg3)
+{
+    return *injected + arg1 + arg2 + arg3;
+}
+
+int64_t InjectTest4Arg(int64_t arg1, int64_t arg2, int64_t arg3, int64_t arg4)
+{
+    return 0;
+}
+
+int64_t MyInjectTest4Arg(int* injected, int64_t arg1, int64_t arg2, int64_t arg3, int64_t arg4)
+{
+    return *injected + arg1 + arg2 + arg3 + arg4;
+}
+
+int64_t InjectTest5Arg(int64_t arg1, int64_t arg2, int64_t arg3, int64_t arg4, int64_t arg5)
+{
+    return 0;
+}
+
+int64_t MyInjectTest5Arg(int* injected, int64_t arg1, int64_t arg2, int64_t arg3, int64_t arg4, int64_t arg5)
+{
+    return *injected + arg1 + arg2 + arg3 + arg4 + arg5;
+}
+
+int64_t InjectTest6Arg(int64_t arg1, int64_t arg2, int64_t arg3, int64_t arg4, int64_t arg5, int64_t arg6)
+{
+    return 0;
+}
+
+int64_t MyInjectTest6Arg(int* injected, int64_t arg1, int64_t arg2, int64_t arg3, int64_t arg4, int64_t arg5, int64_t arg6)
+{
+    return *injected + arg1 + arg2 + arg3 + arg4 + arg5 + arg6;
 }
 
 TEST_CASE("", "") {
@@ -470,13 +516,55 @@ TEST_CASE("", "") {
     int param = 5;
 
     injectedHook.HookFunctionAndInjectPointer(
-        test,
-        my_test,
-        CallConventionTraits<decltype(test)>::call_convention,
-        CallConventionTraits<decltype(test)>::arg_count,
+        InjectTest0Arg,
+        MyInjectTest0Arg,
+        CallConventionTraits<decltype(InjectTest0Arg)>::call_convention,
+        CallConventionTraits<decltype(InjectTest0Arg)>::arg_count,
+        &param);
+    injectedHook.HookFunctionAndInjectPointer(
+        InjectTest1Arg,
+        MyInjectTest1Arg,
+        CallConventionTraits<decltype(InjectTest1Arg)>::call_convention,
+        CallConventionTraits<decltype(InjectTest1Arg)>::arg_count,
+        &param);
+    injectedHook.HookFunctionAndInjectPointer(
+        InjectTest2Arg,
+        MyInjectTest2Arg,
+        CallConventionTraits<decltype(InjectTest2Arg)>::call_convention,
+        CallConventionTraits<decltype(InjectTest2Arg)>::arg_count,
+        &param);
+    injectedHook.HookFunctionAndInjectPointer(
+        InjectTest3Arg,
+        MyInjectTest3Arg,
+        CallConventionTraits<decltype(InjectTest3Arg)>::call_convention,
+        CallConventionTraits<decltype(InjectTest3Arg)>::arg_count,
+        &param);
+    injectedHook.HookFunctionAndInjectPointer(
+        InjectTest4Arg,
+        MyInjectTest4Arg,
+        CallConventionTraits<decltype(InjectTest4Arg)>::call_convention,
+        CallConventionTraits<decltype(InjectTest4Arg)>::arg_count,
+        &param);
+    injectedHook.HookFunctionAndInjectPointer(
+        InjectTest5Arg,
+        MyInjectTest5Arg,
+        CallConventionTraits<decltype(InjectTest5Arg)>::call_convention,
+        CallConventionTraits<decltype(InjectTest5Arg)>::arg_count,
+        &param);
+    injectedHook.HookFunctionAndInjectPointer(
+        InjectTest6Arg,
+        MyInjectTest6Arg,
+        CallConventionTraits<decltype(InjectTest6Arg)>::call_convention,
+        CallConventionTraits<decltype(InjectTest6Arg)>::arg_count,
         &param);
 
-    test(0x11, 0x22, 0x33, 0x44, 0x55);
+    CHECK(InjectTest0Arg() == param);
+    CHECK(InjectTest1Arg(0x11) == 0x11 + param);
+    CHECK(InjectTest2Arg(0x11, 0x22) == 0x11 + 0x22 + param);
+    CHECK(InjectTest3Arg(0x11, 0x22, 0x33) == 0x11 + 0x22 + 0x33 + param);
+    CHECK(InjectTest4Arg(0x11, 0x22, 0x33, 0x44) == 0x11 + 0x22 + 0x33 + 0x44 + param);
+    CHECK(InjectTest5Arg(0x11, 0x22, 0x33, 0x44, 0x55) == 0x11 + 0x22 + 0x33 + 0x44 + 0x55 + param);
+    CHECK(InjectTest6Arg(0x11, 0x22, 0x33, 0x44, 0x55, 0x66) == 0x11 + 0x22 + 0x33 + 0x44 + 0x55 + 0x66 + param);
 }
 
 TEST_CASE("Memory protect", "[memprotect]") {
