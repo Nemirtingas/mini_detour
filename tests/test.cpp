@@ -415,6 +415,70 @@ TEST_CASE("Memory allocation", "[mem alloc]") {
 
 #ifndef MINIDETOUR_OS_APPLE
 
+int MySimpleInjected(int* userParameter, int a, int b)
+{
+    return a + b + *userParameter;
+}
+
+int SimpleFunction(int a, int b)
+{
+    return a + b;
+}
+
+template<typename Function> struct CallConventionTraits;
+
+template<typename R, typename... Args>
+struct CallConventionTraits<R(*)(Args...)>
+{
+    using result_type = R;
+    using function_type = R(Args...);
+
+    static constexpr size_t arg_count = sizeof...(Args);
+    static constexpr size_t call_size = (sizeof(Args) + ... + 0);
+
+    static constexpr MiniDetourCallConvention call_convention = MiniDetourCallConvention::MniDetourStandardCall;
+};
+
+template<typename R, typename... Args>
+struct CallConventionTraits<R(Args...)>
+{
+    using result_type = R;
+    using function_type = R(Args...);
+
+    static constexpr size_t arg_count = sizeof...(Args);
+    static constexpr size_t call_size = (sizeof(Args) + ... + 0);
+
+    static constexpr MiniDetourCallConvention call_convention = MiniDetourCallConvention::MniDetourStandardCall;
+};
+
+struct BigOne
+{
+    char v[1];
+};
+
+void test(int64_t rcx, int64_t rdx, int64_t r8, int64_t r9)
+{
+}
+
+void my_test(int* arcx, int64_t ardx, int64_t ar8, int64_t ar9, int64_t rsp8)
+{
+
+}
+
+TEST_CASE("", "") {
+    MiniDetour::Hook_t injectedHook;
+    int param = 5;
+
+    injectedHook.HookFunctionAndInjectPointer(
+        test,
+        my_test,
+        CallConventionTraits<decltype(test)>::call_convention,
+        CallConventionTraits<decltype(test)>::arg_count,
+        &param);
+
+    test(0x11, 0x22, 0x33, 0x44);
+}
+
 TEST_CASE("Memory protect", "[memprotect]") {
     MiniDetour::MemoryManipulation::MemoryRights old_rights;
 

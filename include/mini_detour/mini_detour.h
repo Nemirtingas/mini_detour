@@ -134,6 +134,14 @@ struct MiniDetourMemoryManipulationRegionInfos_t
     char ModuleName[1];
 };
 
+enum MiniDetourCallConvention
+{
+    MniDetourStandardCall,
+    MniDetourCDeclCall,
+    MniDetourFastCall,
+    MniDetourThisCall,
+};
+
 struct MiniDetourModuleManipulationExportDetails_t
 {
     const char* ExportName;
@@ -324,6 +332,7 @@ MINIDETOUR_EXPORT(void) MiniDetourHookTFree(minidetour_hook_handle_t handle);
 MINIDETOUR_EXPORT(void) MiniDetourHookTRestoreOnDestroy(minidetour_hook_handle_t handle, bool restore);
 MINIDETOUR_EXPORT(bool) MiniDetourHookTCanHook(minidetour_hook_handle_t handle, void* function);
 MINIDETOUR_EXPORT(void*) MiniDetourHookTHookFunction(minidetour_hook_handle_t handle, void* function_to_hook, void* new_function);
+MINIDETOUR_EXPORT(void*) MiniDetourHookTHookFunctionAndInjectPointer(minidetour_hook_handle_t handle, void* functionToHook, void* newFunction, MiniDetourCallConvention callConvention, int32_t argCount, void* userParameter);
 MINIDETOUR_EXPORT(void*) MiniDetourHookTRestoreFunction(minidetour_hook_handle_t handle);
 MINIDETOUR_EXPORT(void*) MiniDetourHookTGetHookFunction(minidetour_hook_handle_t handle);
 MINIDETOUR_EXPORT(void*) MiniDetourHookTGetOriginalFunction(minidetour_hook_handle_t handle);
@@ -503,6 +512,11 @@ public:
     inline void* HookFunction(void* functionToHook, void* newFunction)
     {
         return MiniDetourHookTHookFunction(_hookHandle, functionToHook, newFunction);
+    }
+
+    inline void* HookFunctionAndInjectPointer(void* functionToHook, void* newFunction, MiniDetourCallConvention callConvention, int32_t argCount, void* userParameter)
+    {
+        return MiniDetourHookTHookFunctionAndInjectPointer(_hookHandle, functionToHook, newFunction, callConvention, argCount, userParameter);
     }
 
     inline void* RestoreFunction()

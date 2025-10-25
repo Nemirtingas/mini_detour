@@ -48,6 +48,8 @@ struct memory_t
     uint8_t data[64]; // Max absolute jump size is 14 bytes
 };
 
+static constexpr size_t _ReservedJumpSize = 96;
+
 struct AbsJump
 {
     static inline size_t WriteOpcodes(void* buffer, void* jump_destination, int source_mode, int dest_mode)
