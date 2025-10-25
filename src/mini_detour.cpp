@@ -1036,11 +1036,12 @@ public:
             int32_t stackSize = 0x20 + std::max<int32_t>(argCount - 3, 0) * sizeof(void*);
 
             uint8_t buffer[] = {
-                0x48, 0x8d, 0x74, 0x24, 0x28,                               // lea      rsi,[rsp+0x28]
-                //0x48, 0x83, 0xec, 0x78                                      // sub      rsp,stackSize (imm8)
+                0x56,                                                       // push rsi
+                0x57,                                                       // push rdi
+                0x48, 0x8d, 0x74, 0x24, 0x38,                               // lea      rsi,[rsp+0x38]
                 0x48, 0x81, 0xec, 0x00, 0x00, 0x00, 0x00,                   // sub      rsp,stackSize (imm32)
-                0x48, 0x8d, 0x7c, 0x24, 0x28,                               // lea      rdi,[rsp+0x48]
-                0x4c, 0x89, 0x4c, 0x24, 0x20,                               // mov      QWORD PTR [rsp+0x40],r9
+                0x48, 0x8d, 0x7c, 0x24, 0x28,                               // lea      rdi,[rsp+0x28]
+                0x4c, 0x89, 0x4c, 0x24, 0x20,                               // mov      QWORD PTR [rsp+0x20],r9
                 0x4d, 0x89, 0xc1,                                           // mov      r9,r8
                 0x49, 0x89, 0xd0,                                           // mov      r8,rdx
                 0x48, 0x89, 0xca,                                           // mov      rdx,rcx
@@ -1048,18 +1049,20 @@ public:
                 0xfc,                                                       // cld
                 0xf3, 0x48, 0xa5,                                           // rep movs QWORD PTR es:[rdi],QWORD PTR ds:[rsi]
                 0x48, 0xb9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // movabs   rcx,userParameter
-                0xFF, 0x15, 0x08, 0x00, 0x00, 0x00,                         // call     [rip + 8]
+                0xFF, 0x15, 0x0a, 0x00, 0x00, 0x00,                         // call     [rip + 10]
                 0x48, 0x81, 0xc4, 0x00, 0x00, 0x00, 0x00,                   // add      rsp,stackSize
-                0xC3,                                                       // ret
+                0x5f,                                                       // pop rdi
+                0x5e,                                                       // pop rsi
+                0xc3,                                                       // ret
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,       // call address
             };
 
             static_assert(sizeof(buffer) <= _ReservedJumpSize);
 
-            *reinterpret_cast<int32_t*>(buffer + 8) = stackSize;
-            *reinterpret_cast<int32_t*>(buffer + 34) = std::max<int32_t>(argCount - 4, 0);
-            *reinterpret_cast<void**>(buffer + 44) = userParameter;
-            *reinterpret_cast<int32_t*>(buffer + (sizeof(buffer) - sizeof(void*)) - 6) = stackSize;
+            *reinterpret_cast<int32_t*>(buffer + 10) = stackSize;
+            *reinterpret_cast<int32_t*>(buffer + 36) = std::max<int32_t>(argCount - 4, 0);
+            *reinterpret_cast<void**>(buffer + 46) = userParameter;
+            *reinterpret_cast<int32_t*>(buffer + (sizeof(buffer) - sizeof(void*)) - 8) = stackSize;
 
             *reinterpret_cast<void**>(buffer + (sizeof(buffer) - sizeof(void*) - 1)) = newFunction;
             memcpy(jump_mem, buffer, sizeof(buffer));

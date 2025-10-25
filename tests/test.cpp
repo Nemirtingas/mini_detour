@@ -456,11 +456,11 @@ struct BigOne
     char v[1];
 };
 
-void test(int64_t rcx, int64_t rdx, int64_t r8, int64_t r9)
+void test(int64_t rcx, int64_t rdx, int64_t r8, int64_t r9, int64_t rsp8)
 {
 }
 
-void my_test(int* arcx, int64_t ardx, int64_t ar8, int64_t ar9, int64_t rsp8)
+void my_test(int* arcx, int64_t ardx, int64_t ar8, int64_t ar9, int64_t arsp8, int64_t arsp16)
 {
 
 }
@@ -476,7 +476,7 @@ TEST_CASE("", "") {
         CallConventionTraits<decltype(test)>::arg_count,
         &param);
 
-    test(0x11, 0x22, 0x33, 0x44);
+    test(0x11, 0x22, 0x33, 0x44, 0x55);
 }
 
 TEST_CASE("Memory protect", "[memprotect]") {
