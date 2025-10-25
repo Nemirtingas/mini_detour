@@ -775,16 +775,7 @@ public:
 
     void _OnHookError()
     {
-        _SavedCode.clear();
-        _HookCode.clear();
-
-        if (_OriginalTrampolineAddress != nullptr)
-        {
-            mm.FreeTrampoline(_OriginalTrampolineAddress);
-            _OriginalTrampolineAddress = nullptr;
-        }
-
-        _OriginalFuncAddress = nullptr;
+        Reset(true);
     }
 
     static bool ReplaceFunction(void* functionToReplace, void* newFunction)
