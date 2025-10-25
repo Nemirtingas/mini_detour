@@ -129,15 +129,85 @@ namespace Implementation {
         }
     }
 
+    size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount, bool onlyFree)
+    {
+        mach_port_t self_task = mach_task_self();
+        mach_vm_address_t oldEnd = 0;
+        size_t writtenRegionCount = 0;
+        size_t currentRegionCount = 0;
+
+        mach_vm_address_t vm_address = 0;
+        mach_vm_size_t size;
+        vm_region_basic_info_data_64_t infos;
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object_name = MACH_PORT_NULL;
+
+        while (mach_vm_region(self_task, &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name) == KERN_SUCCESS)
+        {
+            if (oldEnd != vm_address)
+            {
+                if (regions != nullptr && writtenRegionCount < regionCount)
+                {
+                    auto& region = *regions;
+                    if (region.StructSize >= sizeof(region))
+                    {
+                        regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t*>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
+
+                        region.Rights = MemoryRights::mem_unset;
+                        region.Start = oldEnd;
+                        region.End = static_cast<uintptr_t>(vm_address);
+                        region.ModuleName[0] = '\0';
+                        ++writtenRegionCount;
+                    }
+                }
+                ++currentRegionCount;
+            }
+
+            if (!onlyFree)
+            {
+                if (regions != nullptr && writtenRegionCount < regionCount)
+                {
+                    auto& region = *regions;
+
+                    if (region.StructSize >= sizeof(region))
+                    {
+                        regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t*>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
+
+                        region.Rights = MemoryRights::mem_none;
+                        region.Start = static_cast<uintptr_t>(vm_address);
+                        region.End = static_cast<uintptr_t>(vm_address + size);
+                        region.ModuleName[0] = '\0';
+
+                        if (infos.protection & VM_PROT_READ)
+                            (int&)region.Rights |= (int)MemoryRights::mem_r;
+
+                        if (infos.protection & VM_PROT_WRITE)
+                            (int&)region.Rights |= (int)MemoryRights::mem_w;
+
+                        if (infos.protection & VM_PROT_EXECUTE)
+                            (int&)region.Rights |= (int)MemoryRights::mem_x;
+
+                        ++writtenRegionCount;
+                    }
+                }
+
+                ++currentRegionCount;
+            }
+
+            vm_address += size;
+            oldEnd = vm_address;
+        }
+
+        return currentRegionCount;
+    }
+
     size_t PageSize()
     {
         return sysconf(_SC_PAGESIZE);
     }
 
-    RegionInfos_t GetRegionInfos(void* address)
+    void GetRegionInfos(void* address, MiniDetourMemoryManipulationRegionInfos_t* regionInfos)
     {
-        RegionInfos_t res{};
-
         mach_vm_address_t vm_address = (mach_vm_address_t)address;
         kern_return_t ret;
         mach_vm_size_t size;
@@ -154,123 +224,43 @@ namespace Implementation {
         {
             if (static_cast<uintptr_t>(vm_address) <= reinterpret_cast<uintptr_t>(address) && reinterpret_cast<uintptr_t>(address) < static_cast<uintptr_t>(vm_address) + size)
             {
-                res.start = (uintptr_t)vm_address;
-                res.end = res.start + size;
-
-                rights = MemoryRights::mem_none;
+                regionInfos->Start = (uintptr_t)vm_address;
+                regionInfos->End = regionInfos->Start + size;
+                regionInfos->Rights = MemoryRights::mem_none;
+                regionInfos->ModuleName[0] = '\0';
 
                 if (infos.protection & VM_PROT_READ)
-                    rights |= MemoryRights::mem_r;
+                    (int&)regionInfos->Rights |= (int)MemoryRights::mem_r;
 
                 if (infos.protection & VM_PROT_WRITE)
-                    rights |= MemoryRights::mem_w;
+                    (int&)regionInfos->Rights |= (int)MemoryRights::mem_w;
 
                 if (infos.protection & VM_PROT_EXECUTE)
-                    rights |= MemoryRights::mem_x;
+                    (int&)regionInfos->Rights |= (int)MemoryRights::mem_x;
             }
         }
-
-        res.rights = (MemoryRights)rights;
-
-        return res;
     }
 
-    std::vector<RegionInfos_t> GetAllRegions()
+    size_t GetAllRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount)
     {
-        std::vector<RegionInfos_t> mappings;
+        return _GetRegions(regions, regionCount, false);
+    }
 
-        mach_port_t self_task = mach_task_self();
-        mach_vm_address_t old_end = 0;
+    size_t GetFreeRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount)
+    {
+        return _GetRegions(regions, regionCount, true);
+    }
 
-        mach_vm_address_t vm_address = 0;
-        mach_vm_size_t size;
-        vm_region_basic_info_data_64_t infos;
-        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-        mach_port_t object_name = MACH_PORT_NULL;
-
-        std::string module_name;
-        unsigned int rights;
-
-        while (mach_vm_region(self_task, &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name) == KERN_SUCCESS)
+    bool MemoryProtect(void* address, size_t size, MemoryRights rights, MemoryRights* oldRights)
+    {
+        if (oldRights != nullptr)
         {
-            if (old_end != vm_address)
-            {
-                mappings.emplace_back(
-                    MemoryRights::mem_unset,
-                    (uintptr_t)old_end,
-                    (uintptr_t)vm_address,
-                    std::string()
-                );
-            }
-
-            rights = MemoryRights::mem_none;
-
-            if (infos.protection & VM_PROT_READ)
-                rights |= MemoryRights::mem_r;
-
-            if (infos.protection & VM_PROT_WRITE)
-                rights |= MemoryRights::mem_w;
-
-            if (infos.protection & VM_PROT_EXECUTE)
-                rights |= MemoryRights::mem_x;
-
-            mappings.emplace_back(RegionInfos_t{
-                (MemoryRights)rights,
-                static_cast<uintptr_t>(vm_address),
-                static_cast<uintptr_t>(vm_address + size),
-                std::move(module_name)
-            });
-
-            vm_address += size;
-            old_end = vm_address;
+            RegionInfos_t infos;
+            GetRegionInfos(address, &infos);
+            *oldRights = infos.Rights;
         }
 
-        return mappings;
-    }
-
-    std::vector<RegionInfos_t> GetFreeRegions()
-    {
-        std::vector<RegionInfos_t> mappings;
-
-        mach_port_t self_task = mach_task_self();
-        mach_vm_address_t old_end = 0;
-
-        mach_vm_address_t vm_address = 0;
-        mach_vm_size_t size;
-        vm_region_basic_info_data_64_t infos;
-        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-        mach_port_t object_name = MACH_PORT_NULL;
-
-        while (mach_vm_region(self_task, &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name) == KERN_SUCCESS)
-        {
-            if (old_end != vm_address)
-            {
-                mappings.emplace_back(
-                    MemoryRights::mem_unset,
-                    (uintptr_t)old_end,
-                    (uintptr_t)vm_address,
-                    std::string()
-                );
-            }
-
-            vm_address += size;
-            old_end = vm_address;
-        }
-
-        return mappings;
-    }
-
-    bool MemoryProtect(void* address, size_t size, MemoryRights rights, MemoryRights* old_rights)
-    {
-        kern_return_t kret;
-        RegionInfos_t infos;
-        if (old_rights != nullptr)
-            infos = GetRegionInfos(address);
-
-        kret = mach_vm_protect(mach_task_self(), (mach_vm_address_t)address, (mach_vm_size_t)size, FALSE, _MemoryProtectRightsToNative(rights));
-
-        if (old_rights != nullptr)
-            *old_rights = infos.rights;
+        kern_return_t kret = mach_vm_protect(mach_task_self(), (mach_vm_address_t)address, (mach_vm_size_t)size, FALSE, _MemoryProtectRightsToNative(rights));
 
         if (kret != KERN_SUCCESS)
             SPDLOG_ERROR("mach_vm_protect failed with code: {}", kern_return_t_2_str(kret));
@@ -311,20 +301,24 @@ namespace Implementation {
     {
         void* address;
 
-        auto freeRegions = GetFreeRegions();
+        auto freeRegionCount = GetFreeRegions(nullptr, 0);
+        std::vector<RegionInfos_t> freeRegions((size_t)(freeRegionCount * 1.5));
+        freeRegionCount = GetFreeRegions(freeRegions.data(), freeRegions.size());
+        if (freeRegionCount < freeRegions.size())
+            freeRegions.resize(freeRegionCount);
 
         std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](MemoryManipulation::RegionInfos_t const& l, MemoryManipulation::RegionInfos_t const& r)
         {
-            return std::max(addressHint, l.start) - std::min(addressHint, l.start) <
-                std::max(addressHint, r.start) - std::min(addressHint, r.start);
+            return std::max(addressHint, l.Start) - std::min(addressHint, l.Start) <
+                std::max(addressHint, r.Start) - std::min(addressHint, r.Start);
         });
 
         for (auto const& region : freeRegions)
         {
-            auto start = region.start > addressHint ? region.start : (region.end - pageSize);
-            auto increment = static_cast<int32_t>(region.start > addressHint ? pageSize : -pageSize);
+            auto start = region.Start > addressHint ? region.Start : (region.End - pageSize);
+            auto increment = static_cast<int32_t>(region.Start > addressHint ? pageSize : -pageSize);
 
-            for (auto allocAddress = start; allocAddress >= region.start && (allocAddress + size) < region.end; allocAddress += increment)
+            for (auto allocAddress = start; allocAddress >= region.Start && (allocAddress + size) < region.End; allocAddress += increment)
             {
                 if (allocAddress > (uintptr_t)max_user_address)
                     break;

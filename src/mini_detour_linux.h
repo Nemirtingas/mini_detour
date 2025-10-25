@@ -98,198 +98,158 @@ namespace Implementation {
         }
     }
 
+    bool _GetRegionInfo(uintptr_t target, const char* mapLine, size_t mapLineLength, MiniDetourMemoryManipulationRegionInfos_t& region)
+    {
+        // remove const because of strtoul
+        auto* mapLineStart = (char*)mapLine;
+        auto* mapLineEnd = mapLineStart + mapLineLength;
+
+        auto start = (uintptr_t)strtoul(mapLineStart, &mapLineStart, 16);
+        auto end = (uintptr_t)strtoul(mapLineStart + 1, &mapLineStart, 16);
+        
+        if (start == 0 || end == 0 || (target != 0 && (target < start || end <= target)))
+            return false;
+
+        region.Rights = MemoryRights::mem_none;
+        region.Start = start;
+        region.End = end;
+
+        ++mapLineStart;
+        if (mapLineStart[0] == 'r')
+            (int&)region.Rights |= (int)MemoryRights::mem_r;
+
+        if (mapLineStart[1] == 'w')
+            (int&)region.Rights |= (int)MemoryRights::mem_w;
+
+        if (mapLineStart[2] == 'x')
+            (int&)region.Rights |= (int)MemoryRights::mem_x;
+
+        //  Skip 4 fields from here \/, TODO find latest field instead
+        // 7d3b3fa1d000-7d3b3fa1e000 r--p 00000000 fc:01 38300752                   /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+        for (int i = 0; i < 4; ++i)
+        {
+            while (*mapLineStart != ' ' && mapLineStart < mapLineEnd)
+            {
+                ++mapLineStart;
+            }
+            while (*mapLineStart == ' ' && mapLineStart < mapLineEnd)
+            {
+                ++mapLineStart;
+            }
+        }
+
+        strncpy(region.ModuleName, mapLineStart, region.StructSize - (sizeof(region) - sizeof(region.ModuleName)));
+        region.ModuleName[region.StructSize - (sizeof(region) - sizeof(region.ModuleName)) - 1] = '\0';
+        return true;
+    }
+
+    size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount, bool onlyFree)
+    {
+        uintptr_t start;
+        uintptr_t oldEnd(0);
+        size_t writtenRegionCount = 0;
+        size_t currentRegionCount = 0;
+
+        std::ifstream f("/proc/self/maps");
+        std::string s;
+
+        while (std::getline(f, s))
+        {
+            if (!s.empty())
+            {
+                auto* mapLine = (char*)s.data();
+                auto start = (uintptr_t)strtoul(mapLine, &mapLine, 16);
+                auto end = (uintptr_t)strtoul(mapLine + 1, &mapLine, 16);
+
+                if (start != 0 && end != 0)
+                {
+                    if (oldEnd != start)
+                    {
+                        if (regions != nullptr && writtenRegionCount < regionCount)
+                        {
+                            auto& region = *regions;
+                            if (region.StructSize >= sizeof(region))
+                            {
+                                regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t*>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
+
+                                region.Rights = MemoryRights::mem_unset;
+                                region.Start = oldEnd;
+                                region.End = start;
+                                region.ModuleName[0] = '\0';
+                                ++writtenRegionCount;
+                            }
+                        }
+                        ++currentRegionCount;
+                    }
+
+                    if (!onlyFree)
+                    {
+                        if (regions != nullptr && writtenRegionCount < regionCount)
+                        {
+                            auto& region = *regions;
+                            if (region.StructSize >= sizeof(region))
+                            {
+                                if (_GetRegionInfo(0, s.data(), s.length(), region))
+                                {
+                                    regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t*>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
+                                    ++writtenRegionCount;
+                                }
+                            }
+                        }
+
+                        ++currentRegionCount;
+                    }
+
+                    oldEnd = end;
+                }
+            }
+        }
+
+        return currentRegionCount;
+    }
+
     size_t PageSize()
     {
         return sysconf(_SC_PAGESIZE);
     }
 
-    RegionInfos_t GetRegionInfos(void* address)
+    void GetRegionInfos(void* address, MiniDetourMemoryManipulationRegionInfos_t* regionInfos)
     {
-        RegionInfos_t res{};
-
-        char* str_it;
-        const char* str_end;
-
-        uintptr_t target = (uintptr_t)address;
-        uintptr_t start;
-        uintptr_t end;
-        std::ifstream f("/proc/self/maps");
-        std::string s;
-        unsigned int rights = mem_unset;
-
-        while (std::getline(f, s))
-        {
-            if (!s.empty())
-            {
-                str_it = &s[0];
-                str_end = s.data() + s.length();
-
-                start = (uintptr_t)strtoul(str_it, &str_it, 16);
-                end = (uintptr_t)strtoul(str_it + 1, &str_it, 16);
-                if (start != 0 && end != 0 && start <= target && target < end) {
-                    res.start = start;
-                    res.end = end;
-
-                    rights = MemoryRights::mem_none;
-
-                    ++str_it;
-                    if (str_it[0] == 'r')
-                        rights |= MemoryRights::mem_r;
-
-                    if (str_it[1] == 'w')
-                        rights |= MemoryRights::mem_w;
-
-                    if (str_it[2] == 'x')
-                        rights |= MemoryRights::mem_x;
-
-                    for (int i = 0; i < 4; ++i)
-                    {
-                        while (*str_it != ' ' && str_it < str_end)
-                        {
-                            ++str_it;
-                        }
-                        while (*str_it == ' ' && str_it < str_end)
-                        {
-                            ++str_it;
-                        }
-                    }
-
-                    res.module_name = str_it;
-
-                    break;
-                }
-            }
-        }
-
-        res.rights = (MemoryRights)rights;
-        return res;
-    }
-
-    std::vector<RegionInfos_t> GetAllRegions()
-    {
-        std::vector<RegionInfos_t> mappings;
-
-        char* str_it;
-        const char* str_end;
-        uintptr_t start;
-        uintptr_t end;
-        uintptr_t old_end(0);
-        unsigned int rights;
-
         std::ifstream f("/proc/self/maps");
         std::string s;
 
-        while (std::getline(f, s))
-        {
-            if (!s.empty())
-            {
-                str_it = &s[0];
-                str_end = s.data() + s.length();
-                start = (uintptr_t)strtoul(str_it, &str_it, 16);
-                end = (uintptr_t)strtoul(str_it + 1, &str_it, 16);
-                if (start != 0 && end != 0)
-                {
-                    if (old_end != start)
-                    {
-                        mappings.emplace_back(
-                            MemoryRights::mem_unset,
-                            old_end,
-                            start,
-                            std::string()
-                        );
-                    }
-
-                    old_end = end;
-
-                    rights = MemoryRights::mem_none;
-
-                    ++str_it;
-                    if (str_it[0] == 'r')
-                        rights |= MemoryRights::mem_r;
-
-                    if (str_it[1] == 'w')
-                        rights |= MemoryRights::mem_w;
-
-                    if (str_it[2] == 'x')
-                        rights |= MemoryRights::mem_x;
-
-                    for (int i = 0; i < 4; ++i)
-                    {
-                        while (*str_it != ' ' && str_it < str_end)
-                        {
-                            ++str_it;
-                        }
-                        while (*str_it == ' ' && str_it < str_end)
-                        {
-                            ++str_it;
-                        }
-                    }
-
-                    mappings.emplace_back(
-                        (MemoryRights)rights,
-                        start,
-                        end,
-                        str_it
-                    );
-                }
-            }
-        }
-
-        return mappings;
-    }
-
-    std::vector<RegionInfos_t> GetFreeRegions()
-    {
-        std::vector<RegionInfos_t> mappings;
-
-        char* str_it;
-        const char* str_end;
-        uintptr_t start;
-        uintptr_t end;
-        uintptr_t old_end(0);
-
-        std::ifstream f("/proc/self/maps");
-        std::string s;
+        regionInfos->Rights = MemoryRights::mem_unset;
+        regionInfos->Start = 0;
+        regionInfos->End = 0;
+        regionInfos->ModuleName[0] = '\0';
 
         while (std::getline(f, s))
         {
-            if (!s.empty())
-            {
-                str_it = &s[0];
-                str_end = s.data() + s.length();
-                start = (uintptr_t)strtoul(str_it, &str_it, 16);
-                end = (uintptr_t)strtoul(str_it + 1, &str_it, 16);
-                if (start != 0 && end != 0)
-                {
-                    if (old_end != start)
-                    {
-                        mappings.emplace_back(
-                            MemoryRights::mem_unset,
-                            old_end,
-                            start,
-                            std::string()
-                        );
-                    }
-
-                    old_end = end;
-                }
-            }
+            if (!s.empty() && _GetRegionInfo((uintptr_t)address, s.data(), s.length(), *regionInfos))
+                return;
         }
-
-        return mappings;
     }
 
-    bool MemoryProtect(void* address, size_t size, MemoryRights rights, MemoryRights* old_rights)
+    inline size_t GetAllRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount)
     {
-        RegionInfos_t infos;
-        if (old_rights != nullptr)
-            infos = GetRegionInfos(address);
+        return _GetRegions(regions, regionCount, false);
+    }
+
+    inline size_t GetFreeRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount)
+    {
+        return _GetRegions(regions, regionCount, true);
+    }
+
+    bool MemoryProtect(void* address, size_t size, MemoryRights rights, MemoryRights* oldRights)
+    {
+        if (oldRights != nullptr)
+        {
+            MiniDetour::MemoryManipulation::RegionInfos_t infos;
+            MemoryManipulation::GetRegionInfos(address, &infos);
+            *oldRights = infos.Rights;
+        }
 
         bool res = mprotect(PageRound(address, PageSize()), _PageAddrSize(address, size, PageSize()), _MemoryProtectRightsToNative(rights)) == 0;
-
-        if (old_rights != nullptr)
-            *old_rights = infos.rights;
-
         return res;
     }
 
@@ -309,20 +269,24 @@ namespace Implementation {
     {
         void* address;
 
-        auto freeRegions = GetFreeRegions();
+        auto freeRegionCount = GetFreeRegions(nullptr, 0);
+        std::vector<RegionInfos_t> freeRegions((size_t)(freeRegionCount * 1.5));
+        freeRegionCount = GetFreeRegions(freeRegions.data(), freeRegions.size());
+        if (freeRegionCount < freeRegions.size())
+            freeRegions.resize(freeRegionCount);
 
         std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](MemoryManipulation::RegionInfos_t const& l, MemoryManipulation::RegionInfos_t const& r)
         {
-            return std::max(addressHint, l.start) - std::min(addressHint, l.start) <
-                std::max(addressHint, r.start) - std::min(addressHint, r.start);
+            return std::max(addressHint, l.Start) - std::min(addressHint, l.Start) <
+                std::max(addressHint, r.Start) - std::min(addressHint, r.Start);
         });
 
         for (auto const& region : freeRegions)
         {
-            auto start = region.start > addressHint ? region.start : (region.end - pageSize);
-            auto increment = static_cast<int32_t>(region.start > addressHint ? pageSize : -pageSize);
+            auto start = region.Start > addressHint ? region.Start : (region.End - pageSize);
+            auto increment = static_cast<int32_t>(region.Start > addressHint ? pageSize : -pageSize);
 
-            for (auto allocAddress = start; allocAddress >= region.start && (allocAddress + size) < region.end; allocAddress += increment)
+            for (auto allocAddress = start; allocAddress >= region.Start && (allocAddress + size) < region.End; allocAddress += increment)
             {
                 if (allocAddress > (uintptr_t)max_user_address)
                     break;

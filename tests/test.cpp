@@ -231,26 +231,41 @@ TEST_CASE("Test absolute jump write", "[absolute_jump_write]") {
 }
 
 TEST_CASE("Memory mappings", "[vmmap]") {
-    SPDLOG_INFO("Memory mappings");
-    auto maps = MiniDetour::MemoryManipulation::GetAllRegions();
+    SPDLOG_INFO("Memory mappings with big enough name space");
+
+    struct RegionInfos : MiniDetour::MemoryManipulation::RegionInfos_t
+    {
+        RegionInfos()
+        {
+            StructSize = sizeof(*this);
+        }
+
+        char extraNameSpace[384];
+    };
+
+    auto regionCount = MiniDetour::MemoryManipulation::GetAllRegions(nullptr, 0);
+    std::vector<RegionInfos> regions(regionCount * 2);
+    regionCount = MiniDetour::MemoryManipulation::GetAllRegions(regions.data(), regions.size());
+    if (regionCount < regions.size())
+        regions.resize(regionCount);
 
     char rights_str[5] = { '-', '-', '-', '-', '\0' };
 
-    for (auto const& map : maps)
+    for (auto const& map : regions)
     {
-        if (map.rights != MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
+        if (map.Rights != MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
         {
-            if (map.rights & MiniDetour::MemoryManipulation::MemoryRights::mem_r)
+            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_r)
                 rights_str[0] = 'r';
             else
                 rights_str[0] = '-';
 
-            if (map.rights & MiniDetour::MemoryManipulation::MemoryRights::mem_w)
+            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_w)
                 rights_str[1] = 'w';
             else
                 rights_str[1] = '-';
 
-            if (map.rights & MiniDetour::MemoryManipulation::MemoryRights::mem_x)
+            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_x)
                 rights_str[2] = 'x';
             else
                 rights_str[2] = '-';
@@ -265,26 +280,127 @@ TEST_CASE("Memory mappings", "[vmmap]") {
             rights_str[3] = 'e';
         }
 
-        SPDLOG_INFO("[{:016X}-{:016X}]: [{}] {}", map.start, map.end, rights_str, map.module_name);
+        SPDLOG_INFO("[{:016X}-{:016X}]: [{}] {}", map.Start, map.End, rights_str, map.ModuleName);
+    }
+}
+
+TEST_CASE("Memory mappings with name buffer too small", "[vmmap]") {
+    SPDLOG_INFO("Memory mappings with small module name");
+
+    struct RegionInfos : MiniDetour::MemoryManipulation::RegionInfos_t
+    {
+        RegionInfos()
+        {
+            StructSize = sizeof(*this);
+        }
+
+        char extraNameSpace[7];
+    };
+
+    auto regionCount = MiniDetour::MemoryManipulation::GetAllRegions(nullptr, 0);
+    std::vector<RegionInfos> regions(regionCount * 2);
+    regionCount = MiniDetour::MemoryManipulation::GetAllRegions(regions.data(), regions.size());
+    if (regionCount < regions.size())
+        regions.resize(regionCount);
+
+    char rights_str[5] = { '-', '-', '-', '-', '\0' };
+
+    for (auto const& map : regions)
+    {
+        if (map.Rights != MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
+        {
+            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_r)
+                rights_str[0] = 'r';
+            else
+                rights_str[0] = '-';
+
+            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_w)
+                rights_str[1] = 'w';
+            else
+                rights_str[1] = '-';
+
+            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_x)
+                rights_str[2] = 'x';
+            else
+                rights_str[2] = '-';
+
+            rights_str[3] = '-';
+        }
+        else
+        {
+            rights_str[0] = 'f';
+            rights_str[1] = 'r';
+            rights_str[2] = 'e';
+            rights_str[3] = 'e';
+        }
+
+        SPDLOG_INFO("[{:016X}-{:016X}]: [{}] {}", map.Start, map.End, rights_str, map.ModuleName);
+    }
+}
+
+TEST_CASE("Memory mappings with region buffer too small", "[vmmap]") {
+    SPDLOG_INFO("Only 5 memory mappings without crash");
+
+    std::vector<MiniDetour::MemoryManipulation::RegionInfos_t> regions(5);
+    auto regionCount = MiniDetour::MemoryManipulation::GetAllRegions(regions.data(), regions.size());
+    if (regionCount < regions.size())
+        regions.resize(regionCount);
+
+    char rights_str[5] = { '-', '-', '-', '-', '\0' };
+
+    for (auto const& map : regions)
+    {
+        if (map.Rights != MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
+        {
+            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_r)
+                rights_str[0] = 'r';
+            else
+                rights_str[0] = '-';
+
+            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_w)
+                rights_str[1] = 'w';
+            else
+                rights_str[1] = '-';
+
+            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_x)
+                rights_str[2] = 'x';
+            else
+                rights_str[2] = '-';
+
+            rights_str[3] = '-';
+        }
+        else
+        {
+            rights_str[0] = 'f';
+            rights_str[1] = 'r';
+            rights_str[2] = 'e';
+            rights_str[3] = 'e';
+        }
+
+        SPDLOG_INFO("[{:016X}-{:016X}]: [{}] {}", map.Start, map.End, rights_str, map.ModuleName);
     }
 }
 
 TEST_CASE("Free memory mappings", "[vmmap]") {
     SPDLOG_INFO("Free memory mappings");
-    auto maps = MiniDetour::MemoryManipulation::GetFreeRegions();
+    auto regionCount = MiniDetour::MemoryManipulation::GetFreeRegions(nullptr, 0);
+    std::vector<MiniDetour::MemoryManipulation::RegionInfos_t> regions(regionCount * 2);
+    regionCount = MiniDetour::MemoryManipulation::GetFreeRegions(regions.data(), regions.size());
+    if (regionCount < regions.size())
+        regions.resize(regionCount);
 
     char rights_str[5] = { '-', '-', '-', '-', '\0' };
 
-    for (auto const& map : maps)
+    for (auto const& map : regions)
     {
-        CHECK(map.rights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset);
+        CHECK(map.Rights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset);
 
         rights_str[0] = 'f';
         rights_str[1] = 'r';
         rights_str[2] = 'e';
         rights_str[3] = 'e';
 
-        SPDLOG_INFO("[{:016X}-{:016X}]: [{}] {}", map.start, map.end, rights_str, map.module_name);
+        SPDLOG_INFO("[{:016X}-{:016X}]: [{}] {}", map.Start, map.End, rights_str, map.ModuleName);
     }
 }
 
@@ -372,10 +488,11 @@ TEST_CASE("Memory protect", "[memprotect]") {
     CHECK(old_rights == MiniDetour::MemoryManipulation::MemoryRights::mem_wx);
 #endif
 
-    auto infos = MiniDetour::MemoryManipulation::GetRegionInfos(mem);
-    CHECK(infos.start != 0);
-    CHECK(infos.end != 0);
-    CHECK(infos.rights == MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
+    MiniDetour::MemoryManipulation::RegionInfos_t infos;
+    MiniDetour::MemoryManipulation::GetRegionInfos(mem, &infos);
+    CHECK(infos.Start != 0);
+    CHECK(infos.End != 0);
+    CHECK(infos.Rights == MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
 
     MiniDetour::MemoryManipulation::MemoryFree(mem, alloc_size);
 }

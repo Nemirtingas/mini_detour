@@ -122,6 +122,18 @@ enum MiniDetourMemoryManipulationMemoryRights
     mem_unset = 8,
 };
 
+struct MiniDetourMemoryManipulationRegionInfos_t
+{
+    /// <summary>
+    /// Increase StructSize so there is enought space for ModuleName, else it would only contain '\0'
+    /// </summary>
+    size_t StructSize;
+    MiniDetourMemoryManipulationMemoryRights Rights;
+    uintptr_t Start;
+    uintptr_t End;
+    char ModuleName[1];
+};
+
 struct MiniDetourModuleManipulationExportDetails_t
 {
     const char* ExportName;
@@ -210,6 +222,9 @@ MINIDETOUR_EXPORT(void*) MiniDetourUtilsPageRound(void* _addr, size_t page_size)
 MINIDETOUR_EXPORT(size_t) MiniDetourUtilsPageSize();
 
 // MiniDetour MemoryManipulation C functions
+MINIDETOUR_EXPORT(void) MiniDetourMemoryManipulationGetRegionInfos(void* address, MiniDetourMemoryManipulationRegionInfos_t* regionInfos);
+MINIDETOUR_EXPORT(size_t) MiniDetourMemoryManipulationGetAllRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount);
+MINIDETOUR_EXPORT(size_t) MiniDetourMemoryManipulationGetFreeRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount);
 
 /// <summary>
 /// Changes memory protection. (On Linux and MacOS, address and rights will be aligned to page size, it is required or it will fail)
@@ -324,23 +339,28 @@ namespace MiniDetour {
 namespace MemoryManipulation {
     using MemoryRights = MiniDetourMemoryManipulationMemoryRights;
 
-    struct RegionInfos_t
+    struct RegionInfos_t : public MiniDetourMemoryManipulationRegionInfos_t
     {
-        MemoryRights rights;
-        uintptr_t start;
-        uintptr_t end;
-        std::string module_name;
-
-        RegionInfos_t():
-            rights(MemoryRights::mem_none), start(0), end(0)
-        {}
-
-        RegionInfos_t(MemoryRights rights, uintptr_t start, uintptr_t end, std::string && module_name):
-            rights(rights), start(start), end(end), module_name(std::move(module_name))
-        {}
-
-        inline size_t RegionSize() const { return end - start; }
+        RegionInfos_t()
+        {
+            StructSize = sizeof(MiniDetourMemoryManipulationRegionInfos_t);
+        }
     };
+
+    inline void GetRegionInfos(void* address, RegionInfos_t* regionInfos)
+    {
+        MiniDetourMemoryManipulationGetRegionInfos(address, regionInfos);
+    }
+
+    inline size_t GetAllRegions(RegionInfos_t* regionInfos, size_t regionCount)
+    {
+        return MiniDetourMemoryManipulationGetAllRegions(regionInfos, regionCount);
+    }
+
+    inline size_t GetFreeRegions(RegionInfos_t* regionInfos, size_t regionCount)
+    {
+        return MiniDetourMemoryManipulationGetFreeRegions(regionInfos, regionCount);
+    }
 
     inline void* PageRoundUp(void* _addr, size_t page_size)
     {
@@ -356,11 +376,6 @@ namespace MemoryManipulation {
     {
         return MiniDetourUtilsPageSize();
     }
-
-    // Do not use until refactored!
-    MINIDETOUR_CXX_EXPORT(RegionInfos_t) GetRegionInfos(void* address);
-    MINIDETOUR_CXX_EXPORT(std::vector<RegionInfos_t>) GetAllRegions();
-    MINIDETOUR_CXX_EXPORT(std::vector<RegionInfos_t>) GetFreeRegions();
 
     inline bool MemoryProtect(void* address, size_t size, MemoryRights rights, MemoryRights* old_rights = nullptr)
     {
@@ -522,6 +537,6 @@ public:
 
 }//namespace MiniDetour
 
-#endif
+#endif // #ifdef __cplusplus
 
 #endif // MINI_DETOUR_H

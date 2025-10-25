@@ -4,7 +4,57 @@
 #define WIN32_LEAN_AND_MEAN
 #define VC_EXTRALEAN
 #define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
+#include <tlhelp32.h>
+#include <intsafe.h>
+
+typedef enum _MY_THREAD_INFORMATION_CLASS {
+    ThreadBasicInformation,
+    ThreadTimes,
+    ThreadPriority,
+    ThreadBasePriority,
+    ThreadAffinityMask,
+    ThreadImpersonationToken,
+    ThreadDescriptorTableEntry,
+    ThreadEnableAlignmentFaultFixup,
+    ThreadEventPair,
+    ThreadQuerySetWin32StartAddress,
+    ThreadZeroTlsCell,
+    ThreadPerformanceCount,
+    ThreadAmILastThread,
+    ThreadIdealProcessor,
+    ThreadPriorityBoost,
+    ThreadSetTlsArrayAddress,
+    ThreadIsIoPending,
+    ThreadHideFromDebugger
+} MY_THREAD_INFORMATION_CLASS, * PMY_THREAD_INFORMATION_CLASS;
+
+typedef struct _PEB PEB, * PPEB;
+
+typedef long NTSTATUS;
+
+typedef LONG KPRIORITY, * PKPRIORITY;
+
+typedef struct _CLIENT_ID {
+    HANDLE UniqueProcess;
+    HANDLE UniqueThread;
+} CLIENT_ID;
+
+typedef struct _THREAD_BASIC_INFORMATION {
+    NTSTATUS                ExitStatus;
+    PVOID                   TebBaseAddress;
+    CLIENT_ID               ClientId;
+    KAFFINITY               AffinityMask;
+    KPRIORITY               Priority;
+    KPRIORITY               BasePriority;
+} THREAD_BASIC_INFORMATION, * PTHREAD_BASIC_INFORMATION;
+
+extern "C" NTSTATUS NTAPI NtQueryInformationThread(
+    IN  HANDLE                   ThreadHandle,
+    IN  MY_THREAD_INFORMATION_CLASS ThreadInformationClass,
+    OUT PVOID                    ThreadInformation,
+    IN  ULONG                    ThreadInformationLength,
+    OUT PULONG                   ReturnLength OPTIONAL);
 
 namespace MiniDetour {
 namespace MemoryManipulation {
@@ -14,6 +64,12 @@ namespace Implementation {
 #elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
     const void* max_user_address = reinterpret_cast<void*>(0x7ffff000);
 #endif
+
+    struct ThreadStackInfos_t
+    {
+        DWORD threadId;
+        void* threadStack;
+    };
 
     DWORD _MemoryProtectRightsToNative(MemoryRights rights)
     {
@@ -44,6 +100,163 @@ namespace Implementation {
         }
     }
 
+    void _GetRegionName(
+        std::wstring& wmodule_name,
+        void* address,
+        char* regionName,
+        size_t regionNameSize,
+        std::vector<void*> const& heaps,
+        std::vector<ThreadStackInfos_t> const& stacks)
+    {
+        DWORD wmodule_name_size = 1024;
+        HMODULE moduleHandle;
+
+        regionName[0] = '\0';
+        if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)address, &moduleHandle) != FALSE && moduleHandle != nullptr)
+        {
+            while (wmodule_name_size != 0)
+            {
+                wmodule_name_size = GetModuleFileNameW(moduleHandle, &wmodule_name[0], wmodule_name.size());
+                if (wmodule_name_size == wmodule_name.size())
+                {
+                    if (wmodule_name_size > 0x100000)
+                        break;
+
+                    wmodule_name.resize(wmodule_name_size * 2);
+                }
+                else if (wmodule_name_size != 0)
+                {
+                    wmodule_name.resize(wmodule_name_size);
+                    wmodule_name_size = WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wmodule_name.length(), regionName, regionNameSize, nullptr, nullptr);
+                    regionName[wmodule_name_size] = '\0';
+                    wmodule_name.resize(wmodule_name.capacity());
+                    return;
+                }
+            }
+        }
+
+        for (auto const& heap : heaps)
+        {
+            if (address == heap)
+            {
+                strncpy(regionName, "[heap]", regionNameSize);
+                regionName[regionNameSize - 1] = '\0';
+                return;
+            }
+        }
+        for (auto const& stack : stacks)
+        {
+            if (address == stack.threadStack)
+            {
+                snprintf(regionName, regionNameSize, "[thread %d stack]", stack.threadId);
+                return;
+            }
+        }
+    }
+
+    std::vector<void*> _GetProcessHeapAddresses()
+    {
+        std::vector<void*> heaps;
+        auto numberOfHeaps = GetProcessHeaps(0, nullptr);
+        if (numberOfHeaps > 0)
+        {
+            heaps.resize(numberOfHeaps * 2);
+            numberOfHeaps = GetProcessHeaps(heaps.size(), heaps.data());
+            heaps.resize(std::min<size_t>(numberOfHeaps, heaps.size()));
+        }
+        return heaps;
+    }
+
+    std::vector<ThreadStackInfos_t> _GetProcessStackAddresses()
+    {
+        std::vector<ThreadStackInfos_t> stacks;
+
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if (snap != nullptr && snap != INVALID_HANDLE_VALUE)
+        {
+            THREADENTRY32 te;
+            te.dwSize = sizeof(te);
+
+            if (Thread32First(snap, &te))
+            {
+                auto pid = GetProcessId(GetCurrentProcess());
+                do
+                {
+                    if (te.th32OwnerProcessID == pid)
+                    {
+                        HANDLE hThread = OpenThread(THREAD_QUERY_INFORMATION, FALSE, te.th32ThreadID);
+                        if (hThread)
+                        {
+                            THREAD_BASIC_INFORMATION basicInfo;
+                            if (NtQueryInformationThread(hThread, ThreadBasicInformation, &basicInfo, sizeof(THREAD_BASIC_INFORMATION), NULL) >= 0)
+                            {
+                                auto* tib = (const NT_TIB*)basicInfo.TebBaseAddress;
+                                stacks.emplace_back(ThreadStackInfos_t {
+                                    te.th32ThreadID,
+                                    tib->StackLimit, // Because stack is reversed, our begin is the stack's end
+                                });
+                            }
+
+                            CloseHandle(hThread);
+                        }
+                    }
+                } while (Thread32Next(snap, &te));
+            }
+            CloseHandle(snap);
+        }
+
+        return stacks;
+    }
+
+    size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount, bool onlyFree)
+    {
+        HANDLE processHandle = GetCurrentProcess();
+        LPVOID searchAddress = nullptr;
+        MEMORY_BASIC_INFORMATION memoryBasicInformation{};
+        size_t writtenRegionCount = 0;
+        size_t currentRegionCount = 0;
+        std::wstring regionNameBuffer(1024, L'\0');
+
+        auto heaps = _GetProcessHeapAddresses();
+        auto stacks = _GetProcessStackAddresses();
+
+        while (VirtualQueryEx(processHandle, searchAddress, &memoryBasicInformation, sizeof(memoryBasicInformation)) != 0)
+        {
+            if ((!onlyFree || (onlyFree && memoryBasicInformation.State == MEM_FREE)) && regions != nullptr && writtenRegionCount < regionCount)
+            {
+                auto& region = *regions;
+                if (region.StructSize >= sizeof(region))
+                {
+                    regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t*>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
+                    region.Rights = MemoryRights::mem_unset;
+                    region.Start = reinterpret_cast<uintptr_t>(memoryBasicInformation.BaseAddress);
+                    region.End = reinterpret_cast<uintptr_t>(memoryBasicInformation.BaseAddress) + memoryBasicInformation.RegionSize;
+                    region.ModuleName[0] = '\0';
+
+                    if (memoryBasicInformation.State != MEM_FREE)
+                    {
+                        region.Rights = _MemoryNativeToProtectRights(memoryBasicInformation.Protect);
+                        _GetRegionName(
+                            regionNameBuffer,
+                            memoryBasicInformation.BaseAddress,
+                            region.ModuleName,
+                            region.StructSize - (sizeof(region) - sizeof(region.ModuleName)),
+                            heaps,
+                            stacks);
+                    }
+                    ++writtenRegionCount;
+                }
+            }
+
+            if (!onlyFree || (onlyFree && memoryBasicInformation.State == MEM_FREE))
+                ++currentRegionCount;
+
+            searchAddress = reinterpret_cast<LPVOID>(reinterpret_cast<uintptr_t>(memoryBasicInformation.BaseAddress) + memoryBasicInformation.RegionSize);
+        }
+
+        return currentRegionCount;
+    }
+
     size_t PageSize()
     {
         SYSTEM_INFO sysInfo;
@@ -51,114 +264,38 @@ namespace Implementation {
         return sysInfo.dwPageSize;
     }
 
-    RegionInfos_t GetRegionInfos(void* address)
+    void GetRegionInfos(void* address, MiniDetourMemoryManipulationRegionInfos_t* regionInfos)
     {
         MEMORY_BASIC_INFORMATION infos;
-        RegionInfos_t res{};
+        std::wstring regionNameBuffer(1024, L'\0');
 
-        res.rights = MemoryRights::mem_unset;
+        auto heaps = _GetProcessHeapAddresses();
+        auto stacks = _GetProcessStackAddresses();
+
+        regionInfos->Rights = MemoryRights::mem_unset;
         if (VirtualQuery(address, &infos, sizeof(infos)) != 0)
         {
-            res.start = reinterpret_cast<uintptr_t>(infos.BaseAddress);
-            res.end = res.start + infos.RegionSize;
-            res.rights = _MemoryNativeToProtectRights(infos.Protect & 0xFF);
+            regionInfos->Start = reinterpret_cast<uintptr_t>(infos.BaseAddress);
+            regionInfos->End = regionInfos->Start + infos.RegionSize;
+            regionInfos->Rights = _MemoryNativeToProtectRights(infos.Protect & 0xFF);
+            _GetRegionName(
+                regionNameBuffer,
+                infos.BaseAddress,
+                regionInfos->ModuleName,
+                regionInfos->StructSize - (sizeof(*regionInfos) - sizeof(regionInfos->ModuleName)),
+                heaps,
+                stacks);
         }
-
-        return res;
     }
 
-    std::vector<RegionInfos_t> GetAllRegions()
+    inline size_t GetAllRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount)
     {
-        HANDLE process_handle = GetCurrentProcess();
-        LPVOID search_addr = nullptr;
-        MEMORY_BASIC_INFORMATION mem_infos{};
-        MemoryRights rights;
-        std::string module_name;
-        std::wstring wmodule_name(1024, L'\0');
-        DWORD wmodule_name_size = 1024;
-        HMODULE module_handle;
-
-        std::vector<RegionInfos_t> mappings;
-
-        mappings.reserve(256);
-        while (VirtualQueryEx(process_handle, search_addr, &mem_infos, sizeof(mem_infos)) != 0)
-        {
-            rights = MemoryRights::mem_unset;
-
-            if (mem_infos.State != MEM_FREE)
-            {
-                rights = _MemoryNativeToProtectRights(mem_infos.Protect);
-
-                if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT|GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)mem_infos.BaseAddress, &module_handle) != FALSE && module_handle != nullptr)
-                {
-                    while (wmodule_name_size != 0)
-                    {
-                        wmodule_name_size = GetModuleFileNameW(module_handle, &wmodule_name[0], wmodule_name.size());
-                        if (wmodule_name_size == wmodule_name.size())
-                        {
-                            if (wmodule_name_size > 0x100000)
-                                break;
-
-                            wmodule_name.resize(wmodule_name_size * 2);
-                        }
-                        else if (wmodule_name_size != 0)
-                        {
-                            wmodule_name.resize(wmodule_name_size);
-                            wmodule_name_size = WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wmodule_name.length(), nullptr, 0, nullptr, nullptr);
-                            if (wmodule_name_size != 0)
-                            {
-                                module_name.resize(wmodule_name_size);
-                                WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wmodule_name.length(), &module_name[0], module_name.size(), nullptr, nullptr);
-                            }
-
-                            wmodule_name.resize(wmodule_name.capacity());
-                            break;
-                        }
-                    }
-                }
-            }
-
-            mappings.emplace_back(
-                rights,
-                reinterpret_cast<uintptr_t>(mem_infos.BaseAddress),
-                reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize,
-                std::move(module_name)
-            );
-            search_addr = reinterpret_cast<LPVOID>(reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize);
-        }
-
-        return mappings;
+        return _GetRegions(regions, regionCount, false);
     }
 
-    std::vector<RegionInfos_t> GetFreeRegions()
+    inline size_t GetFreeRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount)
     {
-        HANDLE process_handle = GetCurrentProcess();
-        LPVOID search_addr = nullptr;
-        MEMORY_BASIC_INFORMATION mem_infos{};
-        std::string module_name;
-        std::wstring wmodule_name(1024, L'\0');
-        DWORD wmodule_name_size = 1024;
-        HMODULE module_handle;
-
-        std::vector<RegionInfos_t> mappings;
-
-        mappings.reserve(256);
-        while (VirtualQueryEx(process_handle, search_addr, &mem_infos, sizeof(mem_infos)) != 0)
-        {
-            if (mem_infos.State == MEM_FREE)
-            {
-                mappings.emplace_back(
-                    MemoryRights::mem_unset,
-                    reinterpret_cast<uintptr_t>(mem_infos.BaseAddress),
-                    reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize,
-                    std::move(module_name)
-                );
-            }
-
-            search_addr = reinterpret_cast<LPVOID>(reinterpret_cast<uintptr_t>(mem_infos.BaseAddress) + mem_infos.RegionSize);
-        }
-
-        return mappings;
+        return _GetRegions(regions, regionCount, true);
     }
 
     bool MemoryProtect(void* address, size_t size, MemoryRights rights, MemoryRights* old_rights)
@@ -188,20 +325,24 @@ namespace Implementation {
     {
         void* address;
 
-        auto freeRegions = GetFreeRegions();
+        auto freeRegionCount = GetFreeRegions(nullptr, 0);
+        std::vector<RegionInfos_t> freeRegions((size_t)(freeRegionCount * 1.5));
+        freeRegionCount = GetFreeRegions(freeRegions.data(), freeRegions.size());
+        if (freeRegionCount < freeRegions.size())
+            freeRegions.resize(freeRegionCount);
 
         std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](MemoryManipulation::RegionInfos_t const& l, MemoryManipulation::RegionInfos_t const& r)
         {
-            return std::max(addressHint, l.start) - std::min(addressHint, l.start) <
-                std::max(addressHint, r.start) - std::min(addressHint, r.start);
+            return std::max(addressHint, l.Start) - std::min(addressHint, l.Start) <
+                std::max(addressHint, r.Start) - std::min(addressHint, r.Start);
         });
 
         for (auto const& region : freeRegions)
         {
-            auto start = region.start > addressHint ? region.start : (region.end - pageSize);
-            auto increment = static_cast<int32_t>(region.start > addressHint ? pageSize : -pageSize);
+            auto start = region.Start > addressHint ? region.Start : (region.End - pageSize);
+            auto increment = static_cast<int32_t>(region.Start > addressHint ? pageSize : -pageSize);
 
-            for (auto allocAddress = start; allocAddress >= region.start && (allocAddress + size) < region.end; allocAddress += increment)
+            for (auto allocAddress = start; allocAddress >= region.Start && (allocAddress + size) < region.End; allocAddress += increment)
             {
                 if (allocAddress > (uintptr_t)max_user_address)
                     break;

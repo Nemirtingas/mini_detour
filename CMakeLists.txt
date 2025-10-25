@@ -141,6 +141,7 @@ target_link_libraries(
   PUBLIC
     
   $<$<BOOL:${WIN32}>:shell32>
+  $<$<BOOL:${WIN32}>:ntdll>
   # For library UNIX loading
   $<$<NOT:$<BOOL:${WIN32}>>:dl>
 )
@@ -229,6 +230,7 @@ if(MINIDETOUR_BUILD_TESTS)
     PUBLIC
     
     $<$<BOOL:${WIN32}>:shell32>
+	$<$<BOOL:${WIN32}>:ntdll>
     # For library UNIX loading
     $<$<NOT:$<BOOL:${WIN32}>>:dl>
   )
