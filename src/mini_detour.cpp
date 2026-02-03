@@ -650,10 +650,12 @@ public:
         size_t& relocatableSize,
         void*& jumpDestination,
         size_t& jumpDestinationSize,
-        JumpType_e& jumpType)
+        JumpType_e& jumpType,
+        int& func_mode,
+        int& hook_mode)
     {
-        int func_mode = 0;
-        int hook_mode = 0;
+        func_mode = 0;
+        hook_mode = 0;
         cs_err disasm_err;
 #if defined(MINIDETOUR_ARCH_X86)
         disasm_err = disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_32 | CodeDisasm::RuntimeEndianness()));
@@ -691,8 +693,8 @@ public:
         size_t jumpDestinationSize;
         JumpType_e jumpType;
 
-        int func_mode = 0;
-        int hook_mode = 0;
+        int func_mode;
+        int hook_mode;
         CodeDisasm disasm;
 
         size_t relativeJumpSize = 0;
@@ -700,7 +702,7 @@ public:
         size_t smallestJumpSize = 0;
         size_t relocatableSize = 0;
 
-        if (!_InitializeHookState(functionToReplace, newFunction, true, disasm, relativeJumpSize, absoluteJumpSize, smallestJumpSize, relocatableSize, jumpDestination, jumpDestinationSize, jumpType))
+        if (!_InitializeHookState(functionToReplace, newFunction, true, disasm, relativeJumpSize, absoluteJumpSize, smallestJumpSize, relocatableSize, jumpDestination, jumpDestinationSize, jumpType, func_mode, hook_mode))
             return false;
             
         // can't even make a relative jump
@@ -747,8 +749,8 @@ public:
         size_t jumpDestinationSize;
         JumpType_e jumpType;
 
-        int func_mode = 0;
-        int hook_mode = 0;
+        int func_mode;
+        int hook_mode;
         CodeDisasm disasm;
 
         size_t relativeJumpSize = 0;
@@ -756,7 +758,7 @@ public:
         size_t smallestJumpSize = 0;
         size_t relocatableSize = 0;
 
-        if (!_InitializeHookState(functionToHook, newFunction, false, disasm, relativeJumpSize, absoluteJumpSize, smallestJumpSize, relocatableSize, jumpDestination, jumpDestinationSize, jumpType))
+        if (!_InitializeHookState(functionToHook, newFunction, false, disasm, relativeJumpSize, absoluteJumpSize, smallestJumpSize, relocatableSize, jumpDestination, jumpDestinationSize, jumpType, func_mode, hook_mode))
             return nullptr;
 
         size_t total_original_trampoline_size = 0;
