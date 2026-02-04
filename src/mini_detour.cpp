@@ -606,10 +606,6 @@ public:
         if (_OriginalFuncAddress != nullptr)
             return false;
 
-        void* jumpDestination;
-        size_t jumpDestinationSize;
-        JumpType_e jumpType;
-
         int code_mode = 0;
         cs_err disasm_err;
         CodeDisasm disasm;
@@ -634,9 +630,10 @@ public:
         size_t relativeJumpSize = RelJump::GetOpcodeSize(func, reinterpret_cast<void*>(static_cast<uintptr_t>(0xfffffff0)), code_mode, code_mode);
         size_t absoluteJumpSize = AbsJump::GetOpcodeSize(func, code_mode, code_mode);
         size_t smallest_jump_size = std::min(relativeJumpSize, absoluteJumpSize);
+        size_t relocatedOriginalCodeSize = 0;
 
         _EnterRecursiveThunk(func);
-        return _GetRelocatableSize(func, jumpDestination, jumpDestinationSize, jumpType, false, disasm, absoluteJumpSize) >= smallest_jump_size;
+        return _GetRelocatableSize(func, relocatedOriginalCodeSize, false, disasm, absoluteJumpSize) >= smallest_jump_size;
     }
 
     static bool _InitializeHookState(
@@ -648,9 +645,7 @@ public:
         size_t& absoluteJumpSize,
         size_t& smallestJumpSize,
         size_t& relocatableSize,
-        void*& jumpDestination,
-        size_t& jumpDestinationSize,
-        JumpType_e& jumpType,
+        size_t& relocatedOriginalCodeSize,
         int& func_mode,
         int& hook_mode)
     {
@@ -682,7 +677,7 @@ public:
         relativeJumpSize = RelJump::GetOpcodeSize(functionToHook, newFunction, func_mode, hook_mode);
         absoluteJumpSize = AbsJump::GetOpcodeSize(newFunction, func_mode, hook_mode);
         smallestJumpSize = std::min(relativeJumpSize, absoluteJumpSize);
-        relocatableSize = _GetRelocatableSize(functionToHook, jumpDestination, jumpDestinationSize, jumpType, ignoreRelocations, disasm, absoluteJumpSize);
+        relocatableSize = _GetRelocatableSize(functionToHook, relocatedOriginalCodeSize, ignoreRelocations, disasm, absoluteJumpSize);
 
         return true;
     }
@@ -701,8 +696,9 @@ public:
         size_t absoluteJumpSize = 0;
         size_t smallestJumpSize = 0;
         size_t relocatableSize = 0;
+        size_t relocatedOriginalCodeSize = 0;
 
-        if (!_InitializeHookState(functionToReplace, newFunction, true, disasm, relativeJumpSize, absoluteJumpSize, smallestJumpSize, relocatableSize, jumpDestination, jumpDestinationSize, jumpType, func_mode, hook_mode))
+        if (!_InitializeHookState(functionToReplace, newFunction, true, disasm, relativeJumpSize, absoluteJumpSize, smallestJumpSize, relocatableSize, relocatedOriginalCodeSize, func_mode, hook_mode))
             return false;
             
         // can't even make a relative jump
@@ -745,10 +741,6 @@ public:
 
     void* HookFunc(void* functionToHook, void* newFunction)
     {
-        void* jumpDestination;
-        size_t jumpDestinationSize;
-        JumpType_e jumpType;
-
         int func_mode;
         int hook_mode;
         CodeDisasm disasm;
@@ -757,11 +749,12 @@ public:
         size_t absoluteJumpSize = 0;
         size_t smallestJumpSize = 0;
         size_t relocatableSize = 0;
+        size_t relocatedOriginalCodeSize = 0;
 
-        if (!_InitializeHookState(functionToHook, newFunction, false, disasm, relativeJumpSize, absoluteJumpSize, smallestJumpSize, relocatableSize, jumpDestination, jumpDestinationSize, jumpType, func_mode, hook_mode))
+        if (!_InitializeHookState(functionToHook, newFunction, false, disasm, relativeJumpSize, absoluteJumpSize, smallestJumpSize, relocatableSize, relocatedOriginalCodeSize, func_mode, hook_mode))
             return nullptr;
 
-        size_t total_original_trampoline_size = 0;
+        size_t totalOriginalTrampolineSize = 0;
         SPDLOG_INFO("Needed relocatable size: found({}), rel({})", relocatableSize, relativeJumpSize);
 
         if (relocatableSize < relativeJumpSize)
@@ -776,9 +769,9 @@ public:
         memcpy(&_SavedCode[0], functionToHook, _SavedCode.size());
 
         // The total number of bytes to copy from the original function + abs jump for trampoline
-        total_original_trampoline_size = _SavedCode.size() + AbsJump::GetOpcodeSize(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(functionToHook) + _SavedCode.size()), func_mode, hook_mode);
+        totalOriginalTrampolineSize = relocatedOriginalCodeSize + AbsJump::GetOpcodeSize(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(functionToHook) + relocatedOriginalCodeSize), func_mode, hook_mode);
             
-        _OriginalTrampolineAddress = mm.GetFreeTrampoline(total_original_trampoline_size);
+        _OriginalTrampolineAddress = mm.GetFreeTrampoline(totalOriginalTrampolineSize);
         if (_OriginalTrampolineAddress == nullptr)
         {
             SPDLOG_ERROR("Failed to get memory for trampoline.");
@@ -786,11 +779,11 @@ public:
         }
 
         // RWX on our original trampoline func
-        if (!MemoryManipulation::MemoryProtect(_OriginalTrampolineAddress, total_original_trampoline_size, MemoryManipulation::MemoryRights::mem_rwx))
+        if (!MemoryManipulation::MemoryProtect(_OriginalTrampolineAddress, totalOriginalTrampolineSize, MemoryManipulation::MemoryRights::mem_rwx))
         {
             MiniDetour::MemoryManipulation::RegionInfos_t regionInfos;
             MemoryManipulation::GetRegionInfos(_OriginalTrampolineAddress, &regionInfos);
-            SPDLOG_ERROR("Failed to protect trampoline memory ({} : {}), current rights: {}.", _OriginalTrampolineAddress, total_original_trampoline_size, regionInfos.Rights);
+            SPDLOG_ERROR("Failed to protect trampoline memory ({} : {}), current rights: {}.", _OriginalTrampolineAddress, totalOriginalTrampolineSize, regionInfos.Rights);
             goto error;
         }
 
@@ -803,48 +796,7 @@ public:
             goto error;
         }
 
-        // Copy the original code
-        memcpy(_OriginalTrampolineAddress, functionToHook, _SavedCode.size() - jumpDestinationSize);
-
-        // Write the absolute jump
-        if (jumpDestination == nullptr)
-        {
-            AbsJump::WriteOpcodes(
-                reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + _SavedCode.size()),
-                reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(functionToHook) + _SavedCode.size()),
-                func_mode,  // Write the trampoline in the same
-                func_mode); // mode as the original function mode
-        }
-        else if(jumpType == JumpType_e::Jump)
-        {
-            AbsJump::WriteOpcodes(
-                reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + _SavedCode.size() - jumpDestinationSize),
-                reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(jumpDestination)),
-                func_mode,  // Write the trampoline in the same
-                func_mode); // mode as the original function mode
-        }
-        else if (jumpType == JumpType_e::Call)
-        {
-            // Works only on x86 (32 and 64 bits)
-            // on arm, return address is in LR
-            // Basically, push an abritrary return address:
-            // push CALL RETURN ADDRESS
-            // Saved opcodes
-            // jump ORIGINAL CALL DESTINATION
-                
-            uintptr_t call_ret_addr = reinterpret_cast<uintptr_t>(functionToHook) + _SavedCode.size();
-            size_t push_size = CpuPush::GetOpcodeSize(call_ret_addr);
-            CpuPush::WriteOpcodes(
-                reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + _SavedCode.size() - jumpDestinationSize),
-                call_ret_addr
-            );
-
-            AbsJump::WriteOpcodes(
-                reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) + push_size + _SavedCode.size() - jumpDestinationSize),
-                reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(jumpDestination)),
-                func_mode,  // Write the trampoline in the same
-                func_mode); // mode as the original function mode
-        }
+        _RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, relativeJumpSize);
 
         if (relocatableSize >= relativeJumpSize)
 //            {
@@ -935,8 +887,8 @@ public:
         }
 
         // Try to restore memory rights, if it fails, no problem, we are just a bit too permissive
-        MemoryManipulation::MemoryProtect(_OriginalTrampolineAddress, total_original_trampoline_size, MemoryManipulation::MemoryRights::mem_rx);
-        MemoryManipulation::FlushInstructionCache(_OriginalTrampolineAddress, total_original_trampoline_size);
+        MemoryManipulation::MemoryProtect(_OriginalTrampolineAddress, totalOriginalTrampolineSize, MemoryManipulation::MemoryRights::mem_rx);
+        MemoryManipulation::FlushInstructionCache(_OriginalTrampolineAddress, totalOriginalTrampolineSize);
 
         MemoryManipulation::MemoryProtect(functionToHook, relocatableSize, MemoryManipulation::MemoryRights::mem_rx);
         MemoryManipulation::FlushInstructionCache(functionToHook, relocatableSize);

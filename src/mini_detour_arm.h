@@ -199,23 +199,6 @@ struct RelJump
     }
 };
 
-struct CpuPush
-{
-    static size_t WriteOpcodes(void* source, uint32_t value)
-    {
-        return 0;
-    }
-
-    static constexpr size_t GetOpcodeSize(uint32_t value)
-    {
-        return 0;
-    }
-
-    static constexpr size_t GetMaxOpcodeSize()
-    {
-        return 0;
-    }
-};
 #pragma pack(pop)
 
 void _EnterRecursiveThunk(void*& pCode)
@@ -234,7 +217,7 @@ static bool _UsesInstructionPointer(cs_insn const& instruction)
     return false;
 }
 
-size_t _GetRelocatableSize(void* pCode, void*& jump_destination, size_t& jump_destination_size, JumpType_e& jump_type, bool ignore_relocation, CodeDisasm& disasm, size_t wanted_relocatable_size)
+size_t _GetRelocatableSize(void* pCode, size_t& relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm& disasm, size_t wanted_relocatableSize)
 {
     uint8_t code_buffer[80];
     const uint8_t* code_iterator = code_buffer;
@@ -243,11 +226,8 @@ size_t _GetRelocatableSize(void* pCode, void*& jump_destination, size_t& jump_de
 
     memcpy(code_buffer, reinterpret_cast<void*>(code_addr), 80);
 
-    jump_destination = nullptr;
-    jump_destination_size = 0;
-
-    size_t relocatable_size = 0;
-    while (relocatable_size < wanted_relocatable_size)
+    size_t relocatableSize = 0;
+    while (relocatableSize < wanted_relocatableSize)
     {
         if (!disasm.Disasm(&code_iterator, &code_size, &code_addr))
             break;
@@ -256,13 +236,11 @@ size_t _GetRelocatableSize(void* pCode, void*& jump_destination, size_t& jump_de
         {
             if (ignore_relocation) // Last instruction, overwrite it if we're ignoring relocations
             {
-                relocatable_size += disasm.GetInstruction().size;
+                relocatedOriginalCodeSize += disasm.GetInstruction().size;
+                relocatableSize += disasm.GetInstruction().size;
             }
             else if (disasm.GetJumpType() == 3)
-            {// Don't handle arm64 jump/call relocation.
-                //jump_destination = reinterpret_cast<void*>(disasm.GetInstruction().detail->x86.operands[0].imm);
-                //jump_destination_size += disasm.GetInstruction().size;
-                //relocatable_size += jump_destination_size;
+            {// Don't handle arm jump/call relocation.
             }
 
 #ifdef USE_SPDLOG
@@ -274,10 +252,66 @@ size_t _GetRelocatableSize(void* pCode, void*& jump_destination, size_t& jump_de
 #ifdef USE_SPDLOG
         SPDLOG_INFO("Can relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
 #endif
-        relocatable_size += disasm.GetInstruction().size;
+        relocatedOriginalCodeSize += disasm.GetInstruction().size;
+        relocatableSize += disasm.GetInstruction().size;
     }
 
-    return relocatable_size;
+    return relocatableSize;
+}
+
+size_t _RelocateCode(void* pCode, void* pTrampoline, CodeDisasm& disasm, size_t wanted_relocatableSize)
+{
+    // MOD-REG-R/M Byte
+    //  7 6    5 4 3    2 1 0 - bits
+    //[ MOD ][  REG  ][  R/M  ]
+    static constexpr auto mod_mask = 0xC0;
+    static constexpr auto rm_mask = 0x07; // Register or memory mask
+    static constexpr auto modrm_mask = mod_mask | rm_mask;
+
+    uint8_t code_buffer[80];
+    const uint8_t* code_iterator = code_buffer;
+    size_t code_size = 80;
+    uint64_t code_addr = reinterpret_cast<uint64_t>(pCode);
+    uint8_t* pTrampolineCode = reinterpret_cast<uint8_t*>(pTrampoline);
+
+    memcpy(code_buffer, pCode, 80);
+
+    int func_mode = reinterpret_cast<uintptr_t>(pCode) & 1;
+    int hook_mode = reinterpret_cast<uintptr_t>(pTrampoline) & 1;
+
+    size_t relocatedSize = 0;
+    void* originalCodeTarget = nullptr;
+    while (relocatedSize < wanted_relocatableSize)
+    {
+        if (!disasm.Disasm(&code_iterator, &code_size, &code_addr))
+            break;
+
+        if (disasm.IsInstructionTerminating() || _UsesInstructionPointer(disasm.GetInstruction()))
+        {
+#ifdef USE_SPDLOG
+            SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
+#endif
+            break;
+        }
+
+#ifdef USE_SPDLOG
+        SPDLOG_INFO("Can relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
+#endif
+        memcpy(pTrampolineCode, (void*)disasm.GetInstruction().address, disasm.GetInstruction().size);
+        relocatedSize += disasm.GetInstruction().size;
+        pTrampolineCode += disasm.GetInstruction().size;
+    }
+
+    if (originalCodeTarget == nullptr)
+        originalCodeTarget = reinterpret_cast<void*>(code_addr);
+
+    AbsJump::WriteOpcodes(
+        reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(pTrampolineCode)),
+        originalCodeTarget,
+        hook_mode,
+        func_mode);
+
+    return relocatedSize;
 }
 
 #endif//MINI_DETOUR_ARM_H
