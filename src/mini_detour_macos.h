@@ -110,7 +110,8 @@ namespace Implementation {
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
     const void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
 #elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
-    const void* max_user_address = reinterpret_cast<void*>(0x7ffff000);
+    // 32 bits process on 64 bits kernel gets the whole 4GB
+    const void* max_user_address = reinterpret_cast<void*>(0xfffff000);
 #endif
 
     size_t _MemoryProtectRightsToNative(MemoryRights rights)
