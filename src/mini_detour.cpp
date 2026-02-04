@@ -263,12 +263,6 @@ public:
     }
 };
 
-enum class JumpType_e
-{
-    Jump,
-    Call,
-};
-
 #if defined(MINIDETOUR_ARCH_X64)
 #include "mini_detour_x64.h"
 
@@ -643,7 +637,6 @@ public:
         CodeDisasm& disasm,
         size_t& relativeJumpSize,
         size_t& absoluteJumpSize,
-        size_t& smallestJumpSize,
         size_t& relocatableSize,
         size_t& relocatedOriginalCodeSize,
         int& func_mode,
@@ -676,7 +669,6 @@ public:
 
         relativeJumpSize = RelJump::GetOpcodeSize(functionToHook, newFunction, func_mode, hook_mode);
         absoluteJumpSize = AbsJump::GetOpcodeSize(newFunction, func_mode, hook_mode);
-        smallestJumpSize = std::min(relativeJumpSize, absoluteJumpSize);
         relocatableSize = _GetRelocatableSize(functionToHook, relocatedOriginalCodeSize, ignoreRelocations, disasm, absoluteJumpSize);
 
         return true;
@@ -684,24 +676,20 @@ public:
 
     static bool ReplaceFunction(void* functionToReplace, void* newFunction)
     {
-        void* jumpDestination;
-        size_t jumpDestinationSize;
-        JumpType_e jumpType;
-
         int func_mode;
         int hook_mode;
         CodeDisasm disasm;
 
         size_t relativeJumpSize = 0;
         size_t absoluteJumpSize = 0;
-        size_t smallestJumpSize = 0;
         size_t relocatableSize = 0;
         size_t relocatedOriginalCodeSize = 0;
 
-        if (!_InitializeHookState(functionToReplace, newFunction, true, disasm, relativeJumpSize, absoluteJumpSize, smallestJumpSize, relocatableSize, relocatedOriginalCodeSize, func_mode, hook_mode))
+        if (!_InitializeHookState(functionToReplace, newFunction, true, disasm, relativeJumpSize, absoluteJumpSize, relocatableSize, relocatedOriginalCodeSize, func_mode, hook_mode))
             return false;
             
         // can't even make a relative jump
+        auto smallestJumpSize = std::min(relativeJumpSize, absoluteJumpSize);
         if (relocatableSize < smallestJumpSize)
             return false;
             
@@ -747,11 +735,10 @@ public:
 
         size_t relativeJumpSize = 0;
         size_t absoluteJumpSize = 0;
-        size_t smallestJumpSize = 0;
         size_t relocatableSize = 0;
         size_t relocatedOriginalCodeSize = 0;
 
-        if (!_InitializeHookState(functionToHook, newFunction, false, disasm, relativeJumpSize, absoluteJumpSize, smallestJumpSize, relocatableSize, relocatedOriginalCodeSize, func_mode, hook_mode))
+        if (!_InitializeHookState(functionToHook, newFunction, false, disasm, relativeJumpSize, absoluteJumpSize, relocatableSize, relocatedOriginalCodeSize, func_mode, hook_mode))
             return nullptr;
 
         size_t totalOriginalTrampolineSize = 0;
@@ -799,38 +786,6 @@ public:
         _RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, relativeJumpSize);
 
         if (relocatableSize >= relativeJumpSize)
-//            {
-//                SPDLOG_INFO("Absolute hook {} >= {}", relocatableSize, absoluteJumpSize);
-//
-//#ifdef USE_SPDLOG
-//                {
-//                    size_t dbg_opcode_size = _SavedCode.size();
-//                    std::stringstream sstr;
-//                    for (size_t i = 0; i < dbg_opcode_size; ++i)
-//                    {
-//                        sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)reinterpret_cast<uint8_t*>(func)[i];
-//                    }
-//                    SPDLOG_INFO("Before write {}", sstr.str());
-//                }
-//#endif
-//
-//                _HookCode.resize(absoluteJumpSize);
-//                AbsJump::WriteOpcodes(_HookCode.data(), func, hook_func, func_mode, hook_mode);
-//                memcpy(func, _HookCode.data(), _HookCode.size());
-//
-//#ifdef USE_SPDLOG
-//                {
-//                    size_t dbg_opcode_size = absoluteJumpSize;
-//                    std::stringstream sstr;
-//                    for (size_t i = 0; i < dbg_opcode_size; ++i)
-//                    {
-//                        sstr << std::hex << std::setfill('0') << std::setw(2) << (uint32_t)reinterpret_cast<uint8_t*>(func)[i];
-//                    }
-//                    SPDLOG_INFO("After write {}", sstr.str());
-//                }
-//#endif
-//            }
-//            else
         {
             SPDLOG_INFO("Relative hook");
 
