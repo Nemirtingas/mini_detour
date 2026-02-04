@@ -359,6 +359,7 @@ namespace Implementation {
 
     int FlushInstructionCache(void* address, size_t size)
     {
+        __builtin___clear_cache(address, reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(address) + size));
         return 1;
     }
 }//namespace Implementation
