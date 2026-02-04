@@ -318,7 +318,7 @@ namespace Implementation {
             auto start = region.Start > addressHint ? region.Start : (region.End - pageSize);
             auto increment = static_cast<int32_t>(region.Start > addressHint ? pageSize : -pageSize);
 
-            for (auto allocAddress = start; allocAddress >= region.Start && (allocAddress + size) < region.End; allocAddress += increment)
+            for (auto allocAddress = start; allocAddress >= region.Start && (allocAddress + size) <= region.End; allocAddress += increment)
             {
                 if (allocAddress > (uintptr_t)max_user_address)
                     break;
