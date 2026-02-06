@@ -148,7 +148,7 @@ namespace Implementation {
         {
             if (address == stack.threadStack)
             {
-                snprintf(regionName, regionNameSize, "[thread %d stack]", stack.threadId);
+                snprintf(regionName, regionNameSize, "[thread %lu stack]", stack.threadId);
                 return;
             }
         }
