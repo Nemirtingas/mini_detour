@@ -191,10 +191,14 @@ namespace Implementation {
                             if (NtQueryInformationThread(hThread, ThreadBasicInformation, &basicInfo, sizeof(THREAD_BASIC_INFORMATION), NULL) >= 0)
                             {
                                 auto* tib = (const NT_TIB*)basicInfo.TebBaseAddress;
-                                stacks.emplace_back(ThreadStackInfos_t {
-                                    te.th32ThreadID,
-                                    tib->StackLimit, // Because stack is reversed, our begin is the stack's end
-                                });
+                                // NtQueryInformationThread can succeed but have to TebBaseAddress
+                                if (tib != nullptr)
+                                {
+                                    stacks.emplace_back(ThreadStackInfos_t{
+                                        te.th32ThreadID,
+                                        tib->StackLimit, // Because stack is reversed, our begin is the stack's end
+                                    });
+                                }
                             }
 
                             CloseHandle(hThread);
