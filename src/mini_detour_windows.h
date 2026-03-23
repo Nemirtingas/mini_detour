@@ -546,9 +546,9 @@ namespace Implementation {
 
         for (int i = 0; thunkData[i].u1.AddressOfData != 0; ++i)
         {
-            if (thunkData[i].u1.AddressOfData & 0x80000000ul)
+            if (thunkData[i].u1.AddressOfData & IMAGE_ORDINAL_FLAG)
             {
-                if (symbolName == nullptr && (thunkData[i].u1.Ordinal & (~0x80000000ul)) == ordinal)
+                if (symbolName == nullptr && (thunkData[i].u1.Ordinal & (~IMAGE_ORDINAL_FLAG)) == ordinal)
                     return addressTable + i;
             }
             else if (symbolName != nullptr && strcmp(((PIMAGE_IMPORT_BY_NAME)((uintptr_t)moduleBase + thunkData[i].u1.AddressOfData))->Name, symbolName) == 0)
@@ -639,9 +639,9 @@ namespace Implementation {
 
             for (int i = 0; thunkData[i].u1.AddressOfData != 0 && result < iatDetailsCount; ++i)
             {
-                if (thunkData[i].u1.AddressOfData & 0x80000000)
+                if (thunkData[i].u1.AddressOfData & IMAGE_ORDINAL_FLAG)
                 {
-                    iatDetails[result].ImportOrdinal = thunkData[i].u1.Ordinal & (~0x80000000);
+                    iatDetails[result].ImportOrdinal = thunkData[i].u1.Ordinal & (~IMAGE_ORDINAL_FLAG);
                     iatDetails[result].ImportName = nullptr;
                 }
                 else
