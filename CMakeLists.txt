@@ -162,7 +162,6 @@ target_compile_options(
   mini_detour
   PRIVATE
   $<$<BOOL:${MSVC}>:/MP>
-  PUBLIC
   $<$<BOOL:${MSVC}>:/utf-8>
 )
 
@@ -255,6 +254,7 @@ if(MINIDETOUR_BUILD_TESTS)
     mini_detour_test
     PRIVATE
     $<$<BOOL:${MSVC}>:/MP>
+	$<$<BOOL:${MSVC}>:/utf-8>
   )
   
   target_include_directories(
@@ -297,6 +297,13 @@ if(MINIDETOUR_BUILD_TESTS)
     tests
     PRIVATE
     $<$<BOOL:${WIN32}>:_SILENCE_ALL_MS_EXT_DEPRECATION_WARNINGS>
+  )
+  
+  target_compile_options(
+    tests
+    PRIVATE
+    $<$<BOOL:${MSVC}>:/MP>
+	$<$<BOOL:${MSVC}>:/utf-8>
   )
 
 endif()
