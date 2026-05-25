@@ -34,7 +34,7 @@ struct fmt::formatter<MiniDetour::MemoryManipulation::MemoryRights> {
     // Formats the point p using the parsed format specification (presentation)
     // stored in this formatter.
     template <typename FormatContext>
-    auto format(MiniDetour::MemoryManipulation::MemoryRights rights, FormatContext& ctx) {
+    constexpr auto format(MiniDetour::MemoryManipulation::MemoryRights rights, FormatContext& ctx) const {
         // auto format(const point &p, FormatContext &ctx) -> decltype(ctx.out()) // c++11
           // ctx.out() is an output iterator to write to.
         return format_to(ctx.out(), "{}{}{}",
