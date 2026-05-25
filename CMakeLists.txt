@@ -162,6 +162,8 @@ target_compile_options(
   mini_detour
   PRIVATE
   $<$<BOOL:${MSVC}>:/MP>
+  PUBLIC
+  $<$<BOOL:${MSVC}>:/utf-8>
 )
 
 target_include_directories(
