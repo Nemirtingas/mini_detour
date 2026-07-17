@@ -22,21 +22,29 @@
 // FF 25 00 00 00 00       JMP [RIP+6]
 // XX XX XX XX XX XX XX XX Address to jump to
 
-inline void* relative_addr_to_absolute(void* source_addr, int32_t rel_addr)
+inline void *relative_addr_to_absolute(void *source_addr, int32_t rel_addr)
 {
-    return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(source_addr) + rel_addr + 5);
+    return reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(source_addr) + rel_addr + 5);
 }
 
-inline intptr_t absolute_addr_to_relative(void* opcode_addr, void* destination_addr)
+inline intptr_t absolute_addr_to_relative(void *opcode_addr, void *destination_addr)
 {
-    return reinterpret_cast<uint8_t*>(destination_addr) - reinterpret_cast<uint8_t*>(opcode_addr) - 5;
+    return reinterpret_cast<uint8_t *>(destination_addr) - reinterpret_cast<uint8_t *>(opcode_addr) - 5;
 }
 
-bool _AddressesAreRelativeJumpable(void* source, void* dest)
+bool _AddressesAreRelativeJumpable(void *source, void *dest)
 {
     uintptr_t min_addr = reinterpret_cast<uintptr_t>(std::min(source, dest));
     uintptr_t max_addr = reinterpret_cast<uintptr_t>(std::max(source, dest));
     return (max_addr - min_addr) <= 0x7FFFFFF0;
+}
+
+bool _AddressIsRepresentableAsRva(void *moduleBase, void *address)
+{
+    uintptr_t base = reinterpret_cast<uintptr_t>(moduleBase);
+    uintptr_t addr = reinterpret_cast<uintptr_t>(address);
+
+    return addr >= base && (addr - base) <= UINT32_MAX;
 }
 
 #pragma pack(push, 1)
@@ -50,20 +58,31 @@ struct memory_t
 
 struct AbsJump
 {
-    static inline size_t WriteOpcodes(void* buffer, void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void *buffer, void *jump_destination, int source_mode, int dest_mode)
     {
-        uint8_t  _code[14]{
-            0xFF, 0x25,                                    // JMP
-            0x00, 0x00, 0x00, 0x00,                        // RIP OFFSET (RIP + 0)
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,// ABS_ADDR
+        uint8_t _code[14]{
+            0xFF,
+            0x25, // JMP
+            0x00,
+            0x00,
+            0x00,
+            0x00, // RIP OFFSET (RIP + 0)
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00, // ABS_ADDR
         };
 
-        *reinterpret_cast<void**>(&_code[6]) = jump_destination;
+        *reinterpret_cast<void **>(&_code[6]) = jump_destination;
         memcpy(buffer, _code, GetMaxOpcodeSize());
         return GetMaxOpcodeSize();
     }
 
-    static inline size_t GetOpcodeSize(void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t GetOpcodeSize(void *jump_destination, int source_mode, int dest_mode)
     {
         // JMP
         // RIP OFFSET (RIP + 0)
@@ -82,21 +101,23 @@ struct AbsJump
 
 struct RelJump
 {
-    static inline size_t WriteOpcodes(void* buffer, void* source, void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void *buffer, void *source, void *jump_destination, int source_mode, int dest_mode)
     {
-        uint8_t code[5] =
-        {
-            0xE9,                   // JMP
-            0x00, 0x00, 0x00, 0x00, // REL ADDR
+        uint8_t code[5] = {
+            0xE9, // JMP
+            0x00,
+            0x00,
+            0x00,
+            0x00, // REL ADDR
         };
 
-        *reinterpret_cast<int32_t*>(&code[1]) = absolute_addr_to_relative(source, jump_destination);
+        *reinterpret_cast<int32_t *>(&code[1]) = absolute_addr_to_relative(source, jump_destination);
         memcpy(buffer, code, GetMaxOpcodeSize());
 
         return GetMaxOpcodeSize();
     }
 
-    static inline size_t GetOpcodeSize(void* source, void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t GetOpcodeSize(void *source, void *jump_destination, int source_mode, int dest_mode)
     {
         // E9          | JMP
         // XX XX XX XX | REL ADDR
@@ -113,21 +134,29 @@ struct RelJump
 
 struct CpuPush
 {
-    static size_t WriteOpcodes(void* source, uint64_t value)
+    static size_t WriteOpcodes(void *source, uint64_t value)
     {
-        uint8_t code[13] =
-        {
-            0x68,                   // PUSH
-            0x00, 0x00, 0x00, 0x00, // IMM32
-            0xC7, 0x44, 0x24, 0x04, // mov DWORD PTR [rsp + 4], HIGH IMM32
-            0x00, 0x00, 0x00, 0x00,
+        uint8_t code[13] = {
+            0x68, // PUSH
+            0x00,
+            0x00,
+            0x00,
+            0x00, // IMM32
+            0xC7,
+            0x44,
+            0x24,
+            0x04, // mov DWORD PTR [rsp + 4], HIGH IMM32
+            0x00,
+            0x00,
+            0x00,
+            0x00,
         };
 
-        *reinterpret_cast<uint32_t*>(&code[1]) = static_cast<uint32_t>(value);
+        *reinterpret_cast<uint32_t *>(&code[1]) = static_cast<uint32_t>(value);
 
         if (value & 0xffffffff00000000)
-        {    
-            *reinterpret_cast<uint32_t*>(&code[9]) = static_cast<uint32_t>(value >> 32);
+        {
+            *reinterpret_cast<uint32_t *>(&code[9]) = static_cast<uint32_t>(value >> 32);
             memcpy(source, code, 13);
             return 13;
         }
@@ -158,20 +187,20 @@ struct CpuPush
 
 #pragma pack(pop)
 
-void _EnterRecursiveThunk(void*& _pCode)
+void _EnterRecursiveThunk(void *&_pCode)
 {
-    uint8_t* pCode = reinterpret_cast<uint8_t*>(_pCode);
+    uint8_t *pCode = reinterpret_cast<uint8_t *>(_pCode);
     while (1)
     {
         // If its an imported function.      CALL                JUMP
         if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
         {
             // Get the real imported function address
-            pCode = *reinterpret_cast<uint8_t**>(pCode + 6 + *(int32_t*)(pCode + 2)); // 2 opcodes + 4 relative address ptr
+            pCode = *reinterpret_cast<uint8_t **>(pCode + 6 + *(int32_t *)(pCode + 2)); // 2 opcodes + 4 relative address ptr
         }
         else if (pCode[0] == 0xe8 || pCode[0] == 0xe9)
         {
-            pCode = (uint8_t*)relative_addr_to_absolute(pCode, *(int32_t*)(pCode + 1));
+            pCode = (uint8_t *)relative_addr_to_absolute(pCode, *(int32_t *)(pCode + 1));
         }
         else
         {
@@ -182,19 +211,19 @@ void _EnterRecursiveThunk(void*& _pCode)
     _pCode = pCode;
 }
 
-size_t _GetRelocatableSize(void* pCode, size_t& relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm& disasm, size_t wanted_relocatable_size)
+size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatable_size)
 {
     // MOD-REG-R/M Byte
     //  7 6    5 4 3    2 1 0 - bits
     //[ MOD ][  REG  ][  R/M  ]
-    static constexpr auto mod_mask = 0xC0;
-    static constexpr auto rm_mask = 0x07; // Register or memory mask
+    static constexpr auto mod_mask   = 0xC0;
+    static constexpr auto rm_mask    = 0x07; // Register or memory mask
     static constexpr auto modrm_mask = mod_mask | rm_mask;
 
     uint8_t code_buffer[80];
-    const uint8_t* code_iterator = code_buffer;
-    size_t code_size = 80;
-    uint64_t code_addr = reinterpret_cast<uint64_t>(pCode);
+    const uint8_t *code_iterator = code_buffer;
+    size_t code_size             = 80;
+    uint64_t code_addr           = reinterpret_cast<uint64_t>(pCode);
 
     memcpy(code_buffer, pCode, 80);
 
@@ -230,11 +259,10 @@ size_t _GetRelocatableSize(void* pCode, size_t& relocatedOriginalCodeSize, bool 
         }
 
         if ((disasm.GetInstruction().detail->x86.modrm & modrm_mask) == 0x05)
-        {// Relative addressing opcode
+        { // Relative addressing opcode
             if (!ignore_relocation)
             {
-                if (disasm.GetInstruction().detail->x86.operands[0].type == X86_OP_REG &&
-                    disasm.GetInstruction().detail->x86.operands[1].type == X86_OP_MEM &&
+                if (disasm.GetInstruction().detail->x86.operands[0].type == X86_OP_REG && disasm.GetInstruction().detail->x86.operands[1].type == X86_OP_MEM &&
                     disasm.GetInstruction().detail->x86.operands[1].mem.base == X86_REG_RIP)
                 {
                     relocatedOriginalCodeSize += 10;
@@ -259,25 +287,25 @@ size_t _GetRelocatableSize(void* pCode, size_t& relocatedOriginalCodeSize, bool 
     return relocatable_size;
 }
 
-size_t _RelocateCode(void* pCode, void* pTrampoline, CodeDisasm& disasm, size_t wanted_relocatable_size)
+size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatable_size)
 {
     // MOD-REG-R/M Byte
     //  7 6    5 4 3    2 1 0 - bits
     //[ MOD ][  REG  ][  R/M  ]
-    static constexpr auto mod_mask = 0xC0;
-    static constexpr auto rm_mask = 0x07; // Register or memory mask
+    static constexpr auto mod_mask   = 0xC0;
+    static constexpr auto rm_mask    = 0x07; // Register or memory mask
     static constexpr auto modrm_mask = mod_mask | rm_mask;
 
     uint8_t code_buffer[80];
-    const uint8_t* code_iterator = code_buffer;
-    size_t code_size = 80;
-    uint64_t code_addr = reinterpret_cast<uint64_t>(pCode);
-    uint8_t* pTrampolineCode = reinterpret_cast<uint8_t*>(pTrampoline);
+    const uint8_t *code_iterator = code_buffer;
+    size_t code_size             = 80;
+    uint64_t code_addr           = reinterpret_cast<uint64_t>(pCode);
+    uint8_t *pTrampolineCode     = reinterpret_cast<uint8_t *>(pTrampoline);
 
     memcpy(code_buffer, pCode, 80);
 
-    size_t relocatedSize = 0;
-    void* originalCodeTarget = nullptr;
+    size_t relocatedSize     = 0;
+    void *originalCodeTarget = nullptr;
     while (relocatedSize < wanted_relocatable_size)
     {
         if (!disasm.Disasm(&code_iterator, &code_size, &code_addr))
@@ -288,17 +316,17 @@ size_t _RelocateCode(void* pCode, void* pTrampoline, CodeDisasm& disasm, size_t 
             if (disasm.GetJumpType() == 3)
             {
                 relocatedSize += disasm.GetInstruction().size;
-                originalCodeTarget = reinterpret_cast<void*>(disasm.GetInstruction().detail->x86.operands[0].imm);
+                originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().detail->x86.operands[0].imm);
                 break;
             }
             else if (disasm.GetJumpType() == 5)
             {
                 relocatedSize += disasm.GetInstruction().size;
                 pTrampolineCode += CpuPush::WriteOpcodes(
-                    reinterpret_cast<void*>(pTrampolineCode),
+                    reinterpret_cast<void *>(pTrampolineCode),
                     code_addr // Where to return
                 );
-                originalCodeTarget = reinterpret_cast<void*>(disasm.GetInstruction().detail->x86.operands[0].imm);
+                originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().detail->x86.operands[0].imm);
                 break;
             }
 
@@ -309,15 +337,14 @@ size_t _RelocateCode(void* pCode, void* pTrampoline, CodeDisasm& disasm, size_t 
         }
 
         if ((disasm.GetInstruction().detail->x86.modrm & modrm_mask) == 0x05)
-        {// Relative addressing opcode
-            if (disasm.GetInstruction().detail->x86.operands[0].type == X86_OP_REG &&
-                disasm.GetInstruction().detail->x86.operands[1].type == X86_OP_MEM &&
+        { // Relative addressing opcode
+            if (disasm.GetInstruction().detail->x86.operands[0].type == X86_OP_REG && disasm.GetInstruction().detail->x86.operands[1].type == X86_OP_MEM &&
                 disasm.GetInstruction().detail->x86.operands[1].mem.base == X86_REG_RIP)
             {
                 relocatedSize += disasm.GetInstruction().size;
 
-                auto const& op0 = disasm.GetInstruction().detail->x86.operands[0];
-                auto const& op1 = disasm.GetInstruction().detail->x86.operands[1];
+                auto const &op0 = disasm.GetInstruction().detail->x86.operands[0];
+                auto const &op1 = disasm.GetInstruction().detail->x86.operands[1];
 
                 *pTrampolineCode++ = 0x48;
 
@@ -329,9 +356,9 @@ size_t _RelocateCode(void* pCode, void* pTrampoline, CodeDisasm& disasm, size_t 
                     case X86_REG_RBX: *pTrampolineCode++ = 0xBB; break;
                 }
 
-                *reinterpret_cast<uintptr_t*>(pTrampolineCode) = disasm.GetInstruction().address + disasm.GetInstruction().size + op1.mem.disp;
+                *reinterpret_cast<uintptr_t *>(pTrampolineCode) = disasm.GetInstruction().address + disasm.GetInstruction().size + op1.mem.disp;
                 pTrampolineCode += sizeof(uintptr_t);
-                originalCodeTarget = reinterpret_cast<void*>(disasm.GetInstruction().address + disasm.GetInstruction().size);
+                originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().address + disasm.GetInstruction().size);
 
                 break;
             }
@@ -345,19 +372,15 @@ size_t _RelocateCode(void* pCode, void* pTrampoline, CodeDisasm& disasm, size_t 
 #ifdef USE_SPDLOG
         SPDLOG_INFO("Can relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
 #endif
-        memcpy(pTrampolineCode, (void*)disasm.GetInstruction().address, disasm.GetInstruction().size);
+        memcpy(pTrampolineCode, (void *)disasm.GetInstruction().address, disasm.GetInstruction().size);
         relocatedSize += disasm.GetInstruction().size;
         pTrampolineCode += disasm.GetInstruction().size;
     }
 
     if (originalCodeTarget == nullptr)
-        originalCodeTarget = reinterpret_cast<void*>(code_addr);
+        originalCodeTarget = reinterpret_cast<void *>(code_addr);
 
-    AbsJump::WriteOpcodes(
-        reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(pTrampolineCode)),
-        originalCodeTarget,
-        0,
-        0);
+    AbsJump::WriteOpcodes(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pTrampolineCode)), originalCodeTarget, 0, 0);
 
     return relocatedSize;
 }
