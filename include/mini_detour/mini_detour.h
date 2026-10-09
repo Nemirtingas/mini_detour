@@ -209,7 +209,7 @@ typedef struct MiniDetourModuleManipulationIATReplaceParameter_t
 MINIDETOUR_EXPORT(void*) MiniDetourUtilsPageRoundUp(void* _addr, size_t page_size);
 
 /// <summary>
-/// Round the address to the upper value aligned with page_size.
+/// Round the address down to the lower value aligned with page_size.
 /// If page_size = 0x1000:
 ///   _addr = 0x17ff -> 0x1000
 /// </summary>
@@ -261,6 +261,8 @@ MINIDETOUR_EXPORT(bool) MiniDetourMemoryManipulationSafeMemoryWrite(void* addres
 
 /// <summary>
 /// Convenient function to write an absolute jump at an address. Pass NULL in address to get the required size of the absolute jump in bytes.
+/// The size depends on the destination on some architectures (ARM64 uses fewer instructions for low addresses),
+/// so pass the real destination when querying the size.
 /// </summary>
 /// <param name="address">Where to write the jump</param>
 /// <param name="destination">Where should to jump to</param>
@@ -268,7 +270,7 @@ MINIDETOUR_EXPORT(bool) MiniDetourMemoryManipulationSafeMemoryWrite(void* addres
 MINIDETOUR_EXPORT(size_t) MiniDetourMemoryManipulationWriteAbsoluteJump(void* address, void* destination);
 
 /// <summary>
-/// Flush the instruction cache. (only implemented on Windows)
+/// Flush the instruction cache. (implemented on Windows and Linux, does nothing on MacOS)
 /// </summary>
 /// <param name="address"></param>
 /// <param name="size"></param>
