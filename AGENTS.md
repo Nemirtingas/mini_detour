@@ -32,6 +32,10 @@ Instructions for AI coding agents (and humans) working on **mini_detour**, a min
 - Never add co-author trailers (`Co-Authored-By:` or similar attribution lines) to commit messages.
 - Update `BUGS.md` in the same branch when a listed bug is fixed (remove the entry or mark it fixed).
 
+### Everything committed is in English
+- All code and everything that goes into a commit **must** be written in English: identifiers, comments, log messages, test names, documentation (`README.md`, `BUGS.md`, `AGENTS.md`, ...) and commit messages.
+- This applies whatever language is used to discuss the task: translate before committing.
+
 ## Coding rules
 
 ### Formatting

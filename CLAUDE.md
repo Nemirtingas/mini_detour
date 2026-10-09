@@ -9,4 +9,5 @@ Key rules, in short:
 - Never add `Co-Authored-By:` (or any other attribution) lines to commit messages.
 - Every change is made in its own branch (`fix/...`, `feature/...`, ...), never directly on `master`.
 - One branch = one bug or one feature. No giga PRs; do not bundle unrelated changes.
+- Everything committed is in English: code, comments, docs (including `BUGS.md`) and commit messages.
 - Follow the coding rules in `AGENTS.md` (`.clang-format`, C++11, no new dependencies, no edits to `deps/`).
