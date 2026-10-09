@@ -497,8 +497,10 @@ It decodes `FF 25` as an absolute address (x86 form), while on x64 it is `[rip +
 [tests/test.cpp:638](tests/test.cpp:638), [:663](tests/test.cpp:663)
 The test executable code is a `const` literal in `.rodata`, modified after `MemoryProtect`. Undefined behavior; prefer a buffer allocated with `MemoryAlloc(..., mem_rwx)`.
 
-### 🟡 46. Missing coverage
+### ✅ 46. Missing coverage — fixed in `docs/close-coverage-entry`
 Add tests for: hooking a function whose prologue holds a `jcc` (#11), a `mov reg, [rip+X]` (#12), more than 63 simultaneous hooks (#1), `GetOriginalFunction()` after `RestoreFunction()` (#5), `HookFunction` twice on the same object (#4), a module without exports/imports (#22).
+
+All covered by the tests added with the fixes: `test_jcc_relocation.cpp` (#11), `test_rip_relative_relocation.cpp` (#12), `test_trampoline_slots.cpp` (#1, 300 hooks), `test_hook_state_after_restore.cpp` (#5), `test_hook_twice.cpp` (#4), `test_windows_pe_directories.cpp` and `test_linux_gnu_hash_without_exports.cpp` (#22, #30).
 
 ### ✅ 47. `MemoryAllocNear`: `allocAddress + size` overflow — fixed in `fix/alloc-near-overflow`
 [mini_detour_linux.h](src/mini_detour_linux.h), [mini_detour_windows.h](src/mini_detour_windows.h), [mini_detour_macos.h](src/mini_detour_macos.h)
