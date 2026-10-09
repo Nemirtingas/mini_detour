@@ -34,7 +34,7 @@ static MemoryManager& GetMemoryManager()
 ```
 (or replace every `mm.` with `GetMemoryManager().`)
 
-### 🔴 3. `RestoreFunc`: the "overwritten hook" branch re-enables the hook instead of neutralizing it
+### ✅ 3. `RestoreFunc`: the "overwritten hook" branch re-enables the hook instead of neutralizing it — fixed in `fix/bypass-overwritten-hook`
 [mini_detour.cpp:913-931](src/mini_detour.cpp:913)
 When the hook code was modified by a third party, the intent is to make the hook transparent. But the code writes into `_TrampolineAddress` a jump to… `_DetourCallFunc`, which is exactly what was already there. The detour stays active. Moreover `func_mode` is read from `_TrampolineAddress & 1` (always 0) instead of the original function mode, and the protected size is `_SavedCode.size()` instead of the jump size.
 
