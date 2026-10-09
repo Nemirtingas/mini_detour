@@ -40,13 +40,19 @@ static void _EnterRecursiveThunk(void*& _pCode)
     uint8_t* pCode = reinterpret_cast<uint8_t*>(_pCode);
     while (1)
     {
-        // If its an imported function.      CALL                JUMP
-        if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
+        // Imported function: jmp [address]
+        if (pCode[0] == 0xFF && pCode[1] == 0x25)
         {
-            // Get the real imported function address
-            pCode = **reinterpret_cast<uint8_t***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
+#if defined(MINIDETOUR_ARCH_X64)
+            // jmp [rip + disp32]: the pointer is relative to the next instruction (6 bytes).
+            pCode = *reinterpret_cast<uint8_t**>(pCode + 6 + *reinterpret_cast<int32_t*>(pCode + 2));
+#else
+            // jmp [disp32]: absolute address of the pointer.
+            pCode = **reinterpret_cast<uint8_t***>(pCode + 2);
+#endif
         }
-        else if (pCode[0] == 0xe8 || pCode[0] == 0xe9)
+        // Incremental linking thunk: jmp rel32. A call (E8) is the start of a real function, not a thunk.
+        else if (pCode[0] == 0xE9)
         {
             pCode = (uint8_t*)relative_addr_to_absolute(pCode, *(int32_t*)(pCode + 1));
         }
@@ -58,6 +64,40 @@ static void _EnterRecursiveThunk(void*& _pCode)
 
     _pCode = pCode;
 }
+
+#if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
+// BUGS.md #44: the helper decoded jmp [rip + disp32] (x64) as jmp [disp32] (x86), and followed calls.
+TEST_CASE("Test thunk helper follows jmp [address]", "[test_thunk_helper]")
+{
+    CodeBuffer code;
+    REQUIRE(code.IsValid());
+
+    // The jump target, followed by nothing the helper follows.
+    void* target = code.Data(64);
+    code.Write(64, { 0xC3 }); // ret
+
+#if defined(MINIDETOUR_ARCH_X64)
+    // jmp [rip + 2]; the pointer is 2 bytes after the 6 bytes instruction.
+    code.Write(0, { 0xFF, 0x25, 0x02, 0x00, 0x00, 0x00 });
+    code.WriteValue<void*>(8, target);
+#else
+    // jmp [slot]
+    code.Write(0, { 0xFF, 0x25 });
+    code.WriteValue<void*>(2, code.Data(8));
+    code.WriteValue<void*>(8, target);
+#endif
+
+    void* address = code.Data();
+    _EnterRecursiveThunk(address);
+    CHECK(address == target);
+
+    // A call is a function start, not a thunk.
+    code.Write(16, { 0xE8, 0x00, 0x00, 0x00, 0x00, 0xC3 });
+    address = code.Data(16);
+    _EnterRecursiveThunk(address);
+    CHECK(address == code.Data(16));
+}
+#endif
 
 int main(int argc, char* argv[]) {
     // global setup...
