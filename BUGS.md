@@ -406,7 +406,7 @@ regionInfos->ModuleName[0] = '\0';
 [mini_detour_macos.h:634](src/mini_detour_macos.h:634)
 `n_value` is an unslid virtual address (e.g. `0x100000xxx` for an executable). `moduleBase + n_value` is only right when `__TEXT.vmaddr == 0` (dylib). Compute `slide = moduleBase - textSegment->vmaddr` then `slide + n_value`. The `+ 1` that strips the `_` must check that the name does start with `_`.
 
-### 🟠 38. `FlushInstructionCache` does nothing
+### ✅ 38. `FlushInstructionCache` does nothing — fixed in `fix/macos-flush-instruction-cache`
 [mini_detour_macos.h:383-386](src/mini_detour_macos.h:383)
 On Apple Silicon, the instruction cache must be invalidated after writing code.
 ```cpp

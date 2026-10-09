@@ -10,6 +10,7 @@
 #include <mach-o/dyld_images.h>
 #include <mach-o/nlist.h>
 #include <dlfcn.h>
+#include <libkern/OSCacheControl.h>
 
 #include <unistd.h>
 #include <errno.h>
@@ -438,6 +439,8 @@ namespace Implementation {
 
     int FlushInstructionCache(void* address, size_t size)
     {
+        // Required on Apple Silicon after writing code, a no-op on x86.
+        sys_icache_invalidate(address, size);
         return 1;
     }
 }//namespace Implementation
