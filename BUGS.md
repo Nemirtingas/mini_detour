@@ -102,7 +102,7 @@ On x86/x64, `relocatedOriginalCodeSize` is only increased for special instructio
 [mini_detour.cpp:778-798](src/mini_detour.cpp:778)
 On `goto error` after `MemoryProtect(functionToHook, rwx)`, the function page stays RWX. Add `MemoryProtect(functionToHook, ..., mem_rx)` in the `error` path if the protection was changed.
 
-### 🟡 9. `RestoreFunc` on freed memory leaves the object "hooked"
+### ✅ 9. `RestoreFunc` on freed memory leaves the object "hooked" — fixed in `fix/restore-on-freed-memory`
 [mini_detour.cpp:892-893](src/mini_detour.cpp:892)
 Returns `nullptr` without `Reset()`: the jump and the trampoline leak, and the destructor will try again. Call `Reset(true)` (the `mm` regions are still valid) before returning.
 
