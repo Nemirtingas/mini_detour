@@ -362,7 +362,7 @@ A module that *imports* `foo` has a `foo` entry in `.dynsym` with `st_shndx == S
 
 **Fix:** add `|| symbol->st_shndx == SHN_UNDEF || symbol->st_value == 0` to the `continue` conditions (as `GetAllExportedSymbols` already does).
 
-### 🟠 32. Restoring `mem_unset` rights → `PROT_NONE`
+### ✅ 32. Restoring `mem_unset` rights → `PROT_NONE` — fixed in `fix/refuse-unset-protection`
 [mini_detour_linux.h:244-255](src/mini_detour_linux.h:244) (and the `_Replace*` callers)
 If `GetRegionInfos` doesn't find the address, `oldRights == mem_unset`, and the restore calls `mprotect(..., PROT_NONE)` → the page becomes inaccessible.
 
