@@ -111,6 +111,9 @@ void _GetRegionName(
     DWORD wmodule_name_size = 1024;
     HMODULE moduleHandle;
 
+    if (regionNameSize == 0)
+        return;
+
     regionName[0] = '\0';
     if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)address, &moduleHandle) != FALSE &&
         moduleHandle != nullptr)
@@ -128,8 +131,15 @@ void _GetRegionName(
             else if (wmodule_name_size != 0)
             {
                 wmodule_name.resize(wmodule_name_size);
-                wmodule_name_size             = WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wmodule_name.length(), regionName, regionNameSize, nullptr, nullptr);
-                regionName[wmodule_name_size] = '\0';
+
+                // Convert, then copy what fits in regionName with its terminating '\0'.
+                std::string utf8ModuleName(WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wmodule_name.length(), nullptr, 0, nullptr, nullptr), '\0');
+                WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wmodule_name.length(), &utf8ModuleName[0], utf8ModuleName.length(), nullptr, nullptr);
+
+                size_t copySize = std::min(utf8ModuleName.length(), regionNameSize - 1);
+                memcpy(regionName, utf8ModuleName.data(), copySize);
+                regionName[copySize] = '\0';
+
                 wmodule_name.resize(wmodule_name.capacity());
                 return;
             }

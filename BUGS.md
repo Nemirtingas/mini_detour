@@ -295,7 +295,7 @@ for (uintptr_t a = start; a >= lo && a <= hi; a += step) { ... }
 ```
 Also sort by the distance to the closest edge (`End` if the region is below the hint).
 
-### 🟠 25. `_GetRegionName`: one byte written past the buffer
+### ✅ 25. `_GetRegionName`: one byte written past the buffer — fixed in `fix/windows-region-name-overflow`
 [mini_detour_windows.h:128-129](src/mini_detour_windows.h:128)
 If the name fits exactly in `regionNameSize` bytes, `WideCharToMultiByte` returns `regionNameSize` and `regionName[regionNameSize] = '\0'` overflows.
 
