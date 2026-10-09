@@ -514,6 +514,10 @@ With a huge size, `allocAddress + size` wraps around: the loop condition stays t
 [mini_detour_arm.h](src/mini_detour_arm.h)
 `S = rel_addr >> 31` is -1 (0xFFFF on 16 bits) for a backward jump: `S << 10` and `J1`/`J2` set every bit of the instruction. Every Thumb hook whose jump slot was below the function jumped to a wrong address.
 
+### ✅ 50. Windows: near allocation in the region at address 0 allocates anywhere — fixed in `fix/windows-alloc-at-null`
+[mini_detour_windows.h](src/mini_detour_windows.h)
+`VirtualQuery` reports [0, 64 KB) as free. Trying to allocate at its start called `VirtualAlloc(NULL)`, which means "anywhere": the returned address was taken as the near allocation and the other free regions were skipped. `_MemoryAllocAt` now refuses `NULL` and an allocation that isn't at the requested address.
+
 ---
 
 ## Recommended order
