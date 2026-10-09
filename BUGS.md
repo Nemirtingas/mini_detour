@@ -124,7 +124,7 @@ else if (disasm.GetJumpType() == 3 && disasm.GetInstruction().id == X86_INS_JMP)
 ```
 To support them: write `jcc +N` (inverted or not) to an absolute jump in the trampoline.
 
-### 🔴 12. `mov reg, [rip+X]` relocated as `lea` + unhandled registers
+### ✅ 12. `mov reg, [rip+X]` relocated as `lea` + unhandled registers — fixed in `fix/rip-relative-load-relocation`
 [mini_detour_x64.h:265-270](src/mini_detour_x64.h:265) and [:341-363](src/mini_detour_x64.h:341)
 - The code replaces every `reg, [rip+disp]` instruction with `movabs reg, address`. That is right for `lea`, **wrong for `mov`** (the address is loaded instead of the value).
 - Only RAX/RCX/RDX/RBX are encoded. For RSI, RDI, R8-R15 or a 32-bit register (`mov eax, [rip+X]`), the code writes `0x48` then **no opcode** → corrupted instruction in the trampoline. Yet `_GetRelocatableSize` accepts any register.

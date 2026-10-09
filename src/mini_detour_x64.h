@@ -231,6 +231,96 @@ void _EnterRecursiveThunk(void *&_pCode)
     _pCode = pCode;
 }
 
+// Gets the encoding number (0-15) of a 64 bits or 32 bits general purpose register.
+static bool _GetRegisterNumber(x86_reg reg, uint8_t &number, bool &is64)
+{
+    static const x86_reg registers64[] = {
+        X86_REG_RAX, X86_REG_RCX, X86_REG_RDX, X86_REG_RBX, X86_REG_RSP, X86_REG_RBP, X86_REG_RSI, X86_REG_RDI,
+        X86_REG_R8,  X86_REG_R9,  X86_REG_R10, X86_REG_R11, X86_REG_R12, X86_REG_R13, X86_REG_R14, X86_REG_R15,
+    };
+    static const x86_reg registers32[] = {
+        X86_REG_EAX, X86_REG_ECX, X86_REG_EDX,  X86_REG_EBX,  X86_REG_ESP,  X86_REG_EBP,  X86_REG_ESI,  X86_REG_EDI,
+        X86_REG_R8D, X86_REG_R9D, X86_REG_R10D, X86_REG_R11D, X86_REG_R12D, X86_REG_R13D, X86_REG_R14D, X86_REG_R15D,
+    };
+
+    for (uint8_t i = 0; i < 16; ++i)
+    {
+        if (registers64[i] == reg || registers32[i] == reg)
+        {
+            number = i;
+            is64   = registers64[i] == reg;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// Max size of the code written by _WriteRipRelativeLoad: movabs reg, imm64 (10) + mov reg, [reg] (up to 4)
+static constexpr size_t _RipRelativeLoadMaxSize = 14;
+
+// Matches "mov reg, [rip + disp]" and "lea reg, [rip + disp]", the only rip relative instructions we can relocate.
+static bool _GetRipRelativeLoad(cs_insn const &instruction, uint8_t &reg, bool &is64, bool &dereference, uint64_t &address)
+{
+    auto const &x86 = instruction.detail->x86;
+
+    if (instruction.id != X86_INS_MOV && instruction.id != X86_INS_LEA)
+        return false;
+
+    if (x86.op_count != 2 || x86.operands[0].type != X86_OP_REG || x86.operands[1].type != X86_OP_MEM || x86.operands[1].mem.base != X86_REG_RIP ||
+        x86.operands[1].mem.index != X86_REG_INVALID)
+        return false;
+
+    if (!_GetRegisterNumber(x86.operands[0].reg, reg, is64))
+        return false;
+
+    // rsp would be used as a temporary register and a 32 bits lea doesn't zero the upper bits like movabs does.
+    if (reg == 4 || (instruction.id == X86_INS_LEA && !is64))
+        return false;
+
+    dereference = instruction.id == X86_INS_MOV;
+    address     = instruction.address + instruction.size + x86.operands[1].mem.disp;
+    return true;
+}
+
+// Writes "movabs reg, address" and, for a mov, "mov reg, [reg]".
+static size_t _WriteRipRelativeLoad(uint8_t *code, uint8_t reg, bool is64, bool dereference, uint64_t address)
+{
+    uint8_t *start   = code;
+    uint8_t lowReg   = reg & 7;
+    uint8_t extended = reg >= 8 ? 1 : 0;
+
+    *code++ = 0x48 | extended; // REX.W + REX.B
+    *code++ = 0xB8 + lowReg;   // movabs reg, imm64
+    memcpy(code, &address, sizeof(address));
+    code += sizeof(address);
+
+    if (dereference)
+    {
+        uint8_t rex = (is64 ? 0x48 : 0x40) | (extended << 2) | extended; // REX.W + REX.R + REX.B
+        if (rex != 0x40)
+            *code++ = rex;
+
+        *code++ = 0x8B; // mov reg, [reg]
+        if (lowReg == 5)
+        {// rbp/r13 base needs a displacement: [reg + 0]
+            *code++ = 0x40 | (lowReg << 3) | lowReg;
+            *code++ = 0x00;
+        }
+        else if (lowReg == 4)
+        {// r12 base needs a SIB byte
+            *code++ = (lowReg << 3) | lowReg;
+            *code++ = 0x24;
+        }
+        else
+        {
+            *code++ = (lowReg << 3) | lowReg;
+        }
+    }
+
+    return code - start;
+}
+
 size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatable_size)
 {
     // MOD-REG-R/M Byte
@@ -292,10 +382,13 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
         { // Relative addressing opcode
             if (!ignore_relocation)
             {
-                if (disasm.GetInstruction().detail->x86.operands[0].type == X86_OP_REG && disasm.GetInstruction().detail->x86.operands[1].type == X86_OP_MEM &&
-                    disasm.GetInstruction().detail->x86.operands[1].mem.base == X86_REG_RIP)
+                uint8_t reg;
+                bool is64;
+                bool dereference;
+                uint64_t address;
+                if (_GetRipRelativeLoad(disasm.GetInstruction(), reg, is64, dereference, address))
                 {
-                    relocatedOriginalCodeSize += 10;
+                    relocatedOriginalCodeSize += _RipRelativeLoadMaxSize;
                     relocatable_size += disasm.GetInstruction().size;
                 }
                 else
@@ -381,26 +474,14 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
 
         if ((disasm.GetInstruction().detail->x86.modrm & modrm_mask) == 0x05)
         { // Relative addressing opcode
-            if (disasm.GetInstruction().detail->x86.operands[0].type == X86_OP_REG && disasm.GetInstruction().detail->x86.operands[1].type == X86_OP_MEM &&
-                disasm.GetInstruction().detail->x86.operands[1].mem.base == X86_REG_RIP)
+            uint8_t reg;
+            bool is64;
+            bool dereference;
+            uint64_t address;
+            if (_GetRipRelativeLoad(disasm.GetInstruction(), reg, is64, dereference, address))
             {
                 relocatedSize += disasm.GetInstruction().size;
-
-                auto const &op0 = disasm.GetInstruction().detail->x86.operands[0];
-                auto const &op1 = disasm.GetInstruction().detail->x86.operands[1];
-
-                *pTrampolineCode++ = 0x48;
-
-                switch (op0.reg)
-                {
-                    case X86_REG_RAX: *pTrampolineCode++ = 0xB8; break;
-                    case X86_REG_RCX: *pTrampolineCode++ = 0xB9; break;
-                    case X86_REG_RDX: *pTrampolineCode++ = 0xBA; break;
-                    case X86_REG_RBX: *pTrampolineCode++ = 0xBB; break;
-                }
-
-                *reinterpret_cast<uintptr_t *>(pTrampolineCode) = disasm.GetInstruction().address + disasm.GetInstruction().size + op1.mem.disp;
-                pTrampolineCode += sizeof(uintptr_t);
+                pTrampolineCode += _WriteRipRelativeLoad(pTrampolineCode, reg, is64, dereference, address);
                 originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().address + disasm.GetInstruction().size);
 
                 break;
