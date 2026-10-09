@@ -269,6 +269,7 @@ if(MINIDETOUR_BUILD_TESTS)
   file(GLOB MINIDETOUR_TEST_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_LIST_DIR}/tests/test.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tests/test_*.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tests/test_*.c
   )
 
   add_executable(
