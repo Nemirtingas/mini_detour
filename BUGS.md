@@ -113,7 +113,7 @@ Returns `nullptr` without `Reset()`: the jump and the trampoline leak, and the d
 
 ## x86 / x64 (`src/mini_detour_x64.h`, `src/mini_detour_x86.h`)
 
-### 🔴 11. Conditional jumps (`jcc`, `jrcxz`, `loop`) are relocated as unconditional `jmp`s
+### ✅ 11. Conditional jumps (`jcc`, `jrcxz`, `loop`) are relocated as unconditional `jmp`s — fixed in `fix/jcc-relocation`
 [mini_detour_x64.h:244](src/mini_detour_x64.h:244), [:316](src/mini_detour_x64.h:316) — same on x86 [:195](src/mini_detour_x86.h:195), [:267](src/mini_detour_x86.h:267)
 In Capstone, `jne`/`je`/… have the `BRANCH_RELATIVE` + `JUMP` groups (checked in `X86MappingInsn.inc`: same signature as `jmp`), so `GetJumpType() == 3`. The trampoline then **always** jumps to the target → the semantics of the original function are broken (e.g. `test ecx,ecx; je ...` in a prologue).
 
