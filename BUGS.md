@@ -282,6 +282,8 @@ if (imageNTHeaders->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC ||
 [mini_detour_windows.h:345-348](src/mini_detour_windows.h:345)
 `start = region.End - pageSize` then the condition `(allocAddress + size) < region.End` with `size == pageSize` is false from the first iteration. Moreover `VirtualAlloc` rounds reservations to `dwAllocationGranularity` (64 KB), not to the page.
 
+- ✅ Start of the downward search — fixed in `fix/alloc-near-overflow` (#47). Left: the 64 KB `VirtualAlloc` granularity and the sort by closest edge.
+
 **Fix:**
 ```cpp
 SYSTEM_INFO si; GetSystemInfo(&si);
@@ -497,6 +499,10 @@ The test executable code is a `const` literal in `.rodata`, modified after `Memo
 
 ### 🟡 46. Missing coverage
 Add tests for: hooking a function whose prologue holds a `jcc` (#11), a `mov reg, [rip+X]` (#12), more than 63 simultaneous hooks (#1), `GetOriginalFunction()` after `RestoreFunction()` (#5), `HookFunction` twice on the same object (#4), a module without exports/imports (#22).
+
+### ✅ 47. `MemoryAllocNear`: `allocAddress + size` overflow — fixed in `fix/alloc-near-overflow`
+[mini_detour_linux.h](src/mini_detour_linux.h), [mini_detour_windows.h](src/mini_detour_windows.h), [mini_detour_macos.h](src/mini_detour_macos.h)
+With a huge size, `allocAddress + size` wraps around: the loop condition stays true and the search tries every page of the address space (hours long hang on x64). The bounds are now computed from the region size (`End - size`), which also fixes the start of the downward search (#24).
 
 ---
 
