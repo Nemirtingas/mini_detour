@@ -518,6 +518,16 @@ With a huge size, `allocAddress + size` wraps around: the loop condition stays t
 [mini_detour_windows.h](src/mini_detour_windows.h)
 `VirtualQuery` reports [0, 64 KB) as free. Trying to allocate at its start called `VirtualAlloc(NULL)`, which means "anywhere": the returned address was taken as the near allocation and the other free regions were skipped. `_MemoryAllocAt` now refuses `NULL` and an allocation that isn't at the requested address.
 
+### ✅ 51. Hard coded user address space end — fixed in `fix/user-address-range`
+[mini_detour.cpp](src/mini_detour.cpp), [mini_detour_linux.h](src/mini_detour_linux.h), [mini_detour_windows.h](src/mini_detour_windows.h), [mini_detour_macos.h](src/mini_detour_macos.h)
+`max_user_address` was a constant per architecture, wrong on most systems:
+- Linux AArch64 with a 48 bits kernel: libraries are loaded around `0xFFFF8xxxxxxx`, far above the `0x7ffefffff000` cap, so hooks in libraries could never get a jump slot in range (invisible under qemu, which emulates 47 bits).
+- Linux and macOS x64: the top 4 GB of the address space were never used.
+- Windows x86 with `/LARGEADDRESSAWARE`: everything above 2 GB was excluded, so exports of a module loaded there couldn't be replaced.
+- Linux: the gap between the stack and `[vsyscall]` (x64) or `[vectors]` (ARM) was listed as free memory, although it is above the user address space.
+
+Each platform now gives `_MinUserAddress` and `_MaxUserAddress`: `GetSystemInfo` on Windows, `__PAGEZERO` and `MACH_VM_MAX_ADDRESS` on macOS, `vm.mmap_min_addr` and a search of the end of the user address space with `mmap` on Linux (the kernel doesn't expose it). The free regions are clipped to these bounds.
+
 ---
 
 ## Recommended order

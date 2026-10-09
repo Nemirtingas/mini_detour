@@ -298,14 +298,14 @@ static uintptr_t _DistanceToRegion(uintptr_t address, MiniDetour::MemoryManipula
 // Tries to allocate size bytes in a free region, at a multiple of step (the allocation granularity), starting from the
 // address closest to addressHint: upward from there, then downward. tryAlloc(address) returns the allocation or nullptr.
 template <typename TryAlloc>
-static void* _AllocInFreeRegion(MiniDetour::MemoryManipulation::RegionInfos_t const& region, uintptr_t addressHint, size_t size, size_t step, uintptr_t maxAddress, TryAlloc tryAlloc)
+static void* _AllocInFreeRegion(MiniDetour::MemoryManipulation::RegionInfos_t const& region, uintptr_t addressHint, size_t size, size_t step, TryAlloc tryAlloc)
 {
     // Computed from the region size so a huge size can't wrap around.
     if (size > region.End - region.Start)
         return nullptr;
 
     const uintptr_t lowest = (region.Start + step - 1) / step * step;
-    uintptr_t highest = std::min<uintptr_t>(region.End - size, maxAddress);
+    uintptr_t highest = region.End - size;
     highest -= highest % step;
     if (highest < lowest)
         return nullptr;
@@ -638,11 +638,14 @@ namespace MemoryManipulation {
 namespace Implementation {
 
     // Allocates as close as possible to the hint, so hooks can reach the memory with relative jumps.
-    // The platform gives _MemoryAllocAt, _MemoryAllocAnywhere and _AllocationGranularity.
+    // The platform gives _MemoryAllocAt, _MemoryAllocAnywhere, _AllocationGranularity and the user address space
+    // bounds, _MinUserAddress and _MaxUserAddress (end of the user address space).
     void* MemoryAlloc(void* _addressHint, size_t size, MemoryRights rights)
     {
-        if (_addressHint > max_user_address)
-            _addressHint = (void*)max_user_address;
+        const uintptr_t minAddress = _MinUserAddress();
+        const uintptr_t maxAddress = _MaxUserAddress();
+        if (reinterpret_cast<uintptr_t>(_addressHint) >= maxAddress)
+            _addressHint = reinterpret_cast<void*>(maxAddress - 1);
 
         auto pageSize = PageSize();
         auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
@@ -657,6 +660,14 @@ namespace Implementation {
         if (freeRegionCount < freeRegions.size())
             freeRegions.resize(freeRegionCount);
 
+        // Only keep the part of the free regions the process can allocate.
+        for (auto& region : freeRegions)
+        {
+            region.Start = std::max<uintptr_t>(region.Start, minAddress);
+            region.End = std::min<uintptr_t>(region.End, maxAddress);
+        }
+        freeRegions.erase(std::remove_if(freeRegions.begin(), freeRegions.end(), [](RegionInfos_t const& region) { return region.Start >= region.End; }), freeRegions.end());
+
         std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](RegionInfos_t const& l, RegionInfos_t const& r)
         {
             return _DistanceToRegion(addressHint, l) < _DistanceToRegion(addressHint, r);
@@ -665,7 +676,7 @@ namespace Implementation {
         const size_t granularity = _AllocationGranularity();
         for (auto const& region : freeRegions)
         {
-            void* address = _AllocInFreeRegion(region, addressHint, size, granularity, (uintptr_t)max_user_address, [&](uintptr_t allocAddress)
+            void* address = _AllocInFreeRegion(region, addressHint, size, granularity, [&](uintptr_t allocAddress)
             {
                 return _MemoryAllocAt((void*)allocAddress, size, rights);
             });
