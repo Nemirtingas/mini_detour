@@ -384,7 +384,7 @@ The GOT/IAT is data: `mem_rw` is enough, RWX is needlessly permissive. `R_GLOBAL
 
 ## macOS (`src/mini_detour_macos.h`)
 
-### 🔴 35. Null dereference if the module isn't found
+### ✅ 35. Null dereference if the module isn't found — fixed in `fix/macos-module-not-found`
 [mini_detour_macos.h:555-557](src/mini_detour_macos.h:555)
 If no `dlopen(imageFilePath)` matches the handle (e.g. the `dlopen(NULL)` handle or the main executable), `foundModuleBase == nullptr` then `machHeader->magic` crashes.
 
