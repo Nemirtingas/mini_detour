@@ -536,16 +536,25 @@ namespace Implementation {
         {
             if (foundModuleBase == nullptr)
             {
-                void* loadedHandle = dlopen(infos->infoArray[i].imageFilePath, RTLD_NOW);
-                if (loadedHandle == moduleHandle)
-                    foundModuleBase = (void*)infos->infoArray[i].imageLoadAddress;
-                dlclose(loadedHandle);
+                // RTLD_NOLOAD: only get the handle of images already loaded, never load a new one.
+                void* loadedHandle = dlopen(infos->infoArray[i].imageFilePath, RTLD_NOW | RTLD_NOLOAD);
+                if (loadedHandle != nullptr)
+                {
+                    if (loadedHandle == moduleHandle)
+                        foundModuleBase = (void*)infos->infoArray[i].imageLoadAddress;
+
+                    dlclose(loadedHandle);
+                }
             }
 
             if (cacheBase == nullptr)
                 cacheBase = (void*)infos->sharedCacheBaseAddress;
 
         }
+
+        // No loaded image has this handle (dlopen(NULL) handle, invalid handle).
+        if (foundModuleBase == nullptr)
+            return false;
 
         MachHeader_t* machHeader = (MachHeader_t*)foundModuleBase;
 
