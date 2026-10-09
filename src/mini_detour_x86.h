@@ -184,13 +184,6 @@ void _EnterRecursiveThunk(void *&_pCode)
 
 size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatable_size)
 {
-    // MOD-REG-R/M Byte
-    //  7 6    5 4 3    2 1 0 - bits
-    //[ MOD ][  REG  ][  R/M  ]
-    static constexpr auto mod_mask   = 0xC0;
-    static constexpr auto rm_mask    = 0x07; // Register or memory mask
-    static constexpr auto modrm_mask = mod_mask | rm_mask;
-
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
     size_t code_size             = 80;
@@ -239,25 +232,8 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
             break;
         }
 
-        if ((disasm.GetInstruction().detail->x86.modrm & modrm_mask) == 0x05)
-        { // Relative addressing opcode
-            if (!ignore_relocation)
-            {
-                if (disasm.GetInstruction().detail->x86.operands[0].type == X86_OP_REG && disasm.GetInstruction().detail->x86.operands[1].type == X86_OP_MEM &&
-                    disasm.GetInstruction().detail->x86.operands[1].mem.base == X86_REG_EIP)
-                {
-                    relocatedOriginalCodeSize += 5;
-                    relocatable_size += disasm.GetInstruction().size;
-                }
-                else
-                {
-#ifdef USE_SPDLOG
-                    SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
-#endif
-                }
-                break;
-            }
-        }
+        // On x86, modrm mod=00 rm=101 is an absolute [disp32] address: there is no instruction pointer
+        // relative addressing, so the instruction can be copied as is.
 
 #ifdef USE_SPDLOG
         SPDLOG_INFO("Can relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
@@ -270,13 +246,6 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
 
 size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatable_size)
 {
-    // MOD-REG-R/M Byte
-    //  7 6    5 4 3    2 1 0 - bits
-    //[ MOD ][  REG  ][  R/M  ]
-    static constexpr auto mod_mask   = 0xC0;
-    static constexpr auto rm_mask    = 0x07; // Register or memory mask
-    static constexpr auto modrm_mask = mod_mask | rm_mask;
-
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
     size_t code_size             = 80;
@@ -328,37 +297,6 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
             SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
 #endif
             break;
-        }
-
-        if ((disasm.GetInstruction().detail->x86.modrm & modrm_mask) == 0x05)
-        { // Relative addressing opcode
-            if (disasm.GetInstruction().detail->x86.operands[0].type == X86_OP_REG && disasm.GetInstruction().detail->x86.operands[1].type == X86_OP_MEM &&
-                disasm.GetInstruction().detail->x86.operands[1].mem.base == X86_REG_RIP)
-            {
-                relocatedSize += disasm.GetInstruction().size;
-
-                auto const &op0 = disasm.GetInstruction().detail->x86.operands[0];
-                auto const &op1 = disasm.GetInstruction().detail->x86.operands[1];
-
-                switch (op0.reg)
-                {
-                    case X86_REG_EAX: *pTrampolineCode++ = 0xB8; break;
-                    case X86_REG_ECX: *pTrampolineCode++ = 0xB9; break;
-                    case X86_REG_EDX: *pTrampolineCode++ = 0xBA; break;
-                    case X86_REG_EBX: *pTrampolineCode++ = 0xBB; break;
-                }
-
-                *reinterpret_cast<uintptr_t *>(pTrampolineCode) = disasm.GetInstruction().address + disasm.GetInstruction().size + op1.mem.disp;
-                pTrampolineCode += sizeof(uintptr_t);
-                originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().address + disasm.GetInstruction().size);
-
-                break;
-            }
-
-#ifdef USE_SPDLOG
-            SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
-#endif
-            return 0;
         }
 
 #ifdef USE_SPDLOG

@@ -191,7 +191,7 @@ memcpy(code_buffer, pCode, code_size);
 ```
 or use `SafeMemoryRead`, reducing the size until it succeeds.
 
-### 🟠 16. 32-bit x86: absolute `disp32` addressing is handled as "RIP relative"
+### ✅ 16. 32-bit x86: absolute `disp32` addressing is handled as "RIP relative" — fixed in `fix/x86-absolute-addressing`
 [mini_detour_x86.h:212-229](src/mini_detour_x86.h:212), [:290-293](src/mini_detour_x86.h:290)
 In 32-bit mode, `mod=00 rm=101` means an absolute `[disp32]` address, which **doesn't need** to be relocated. The code stops the relocation (and tests `X86_REG_RIP` in `_RelocateCode`, a typo for `EIP`, which doesn't exist in 32-bit mode anyway). Result: perfectly hookable functions are refused.
 
