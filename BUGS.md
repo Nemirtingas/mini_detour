@@ -7,7 +7,7 @@ Severity: 🔴 critical (crash / memory corruption / wrong behavior) · 🟠 imp
 
 ## Core (`src/mini_detour.cpp`)
 
-### 🔴 1. Trampoline array overflow (`GetFreeTrampoline`)
+### ✅ 1. Trampoline array overflow (`GetFreeTrampoline`) — fixed in `fix/trampoline-slot-overflow`
 [mini_detour.cpp:427](src/mini_detour.cpp:427)
 ```cpp
 memory_t* end = memory + _RegionSize() / sizeof(memory_t) + 1;
