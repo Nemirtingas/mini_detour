@@ -182,14 +182,29 @@ struct RelJump
 #pragma pack(pop)
 
 
+// Follows PLT entries to the function they jump to, read from their GOT entry:
+//   [bti c]; adrp x16, page; ldr x17, [x16, #offset]; add x16, x16, #offset; br x17
 void _EnterRecursiveThunk(void*& _pCode)
 {
-    // TODO
-    // Common PLT format:
-    // adrp    x16, #0x9e01f
-    // ldr     x17, [x16, #2168]
-    // add     x16, x16, #0x878
-    // br      x17
+    // A longer chain is most likely a loop.
+    for (int i = 0; i < 8; ++i)
+    {
+        const uint32_t* code = reinterpret_cast<const uint32_t*>(_pCode);
+        if (code[0] == 0xD503245F) // bti c
+            ++code;
+
+        if ((code[0] & 0x9F00001F) != 0x90000010 || (code[1] & 0xFFC003FF) != 0xF9400211 || code[3] != 0xD61F0220)
+            return;
+
+        // adrp: signed 21 bits page count, immhi (bits 5-23) and immlo (bits 29-30).
+        int64_t pages = static_cast<int64_t>((((code[0] >> 5) & 0x7FFFF) << 2) | ((code[0] >> 29) & 3));
+        if (pages & (int64_t(1) << 20))
+            pages -= int64_t(1) << 21;
+
+        const uintptr_t page = (reinterpret_cast<uintptr_t>(code) & ~uintptr_t(0xFFF)) + static_cast<uintptr_t>(pages * 0x1000);
+        const uintptr_t gotEntry = page + ((code[1] >> 10) & 0xFFF) * 8;
+        _pCode = *reinterpret_cast<void**>(gotEntry);
+    }
 }
 
 // adr, adrp and the literal loads (LDR, LDRSW, PRFM, SIMD LDR) compute their address from pc.
