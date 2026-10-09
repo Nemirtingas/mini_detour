@@ -870,7 +870,7 @@ namespace Implementation {
             }
 
             MiniDetour::MemoryManipulation::MemoryRights oldRights;
-            if (!MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &oldRights))
+            if (!_MakeImportSlotWritable(iatAddress, sizeof(*iatAddress), &oldRights))
             {
                 iatReplaceDetails[i].IATCallAddress = nullptr;
                 continue;
@@ -914,7 +914,7 @@ namespace Implementation {
             }
 
             MiniDetour::MemoryManipulation::MemoryRights oldRights;
-            if (!MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &oldRights))
+            if (!_MakeImportSlotWritable(iatAddress, sizeof(*iatAddress), &oldRights))
             {
                 iatReplaceDetails[i].NewIATAddress = nullptr;
                 continue;

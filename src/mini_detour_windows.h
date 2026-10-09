@@ -786,7 +786,7 @@ size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDe
         }
 
         MiniDetour::MemoryManipulation::MemoryRights oldRights;
-        if (!MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &oldRights))
+        if (!_MakeImportSlotWritable(iatAddress, sizeof(*iatAddress), &oldRights))
         {
             iatReplaceDetails[i].IATCallAddress = nullptr;
             continue;
@@ -823,7 +823,7 @@ size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDe
         }
 
         MiniDetour::MemoryManipulation::MemoryRights oldRights;
-        if (!MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &oldRights))
+        if (!_MakeImportSlotWritable(iatAddress, sizeof(*iatAddress), &oldRights))
         {
             iatReplaceDetails[i].NewIATAddress = nullptr;
             continue;
