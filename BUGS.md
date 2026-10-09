@@ -272,7 +272,7 @@ if (imageNTHeaders->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC ||
     return false;
 ```
 
-### 🟠 23. Export jump placed below the module base (negative RVA) on x64
+### ✅ 23. Export jump placed below the module base (negative RVA) on x64 — fixed in `fix/export-jump-above-module`
 [mini_detour_windows.h:490](src/mini_detour_windows.h:490)
 `GetFreeJump(moduleBase)` guarantees ±2 GB, but an export RVA is an unsigned `DWORD`: if the slot is **below** `moduleBase`, `exportJump - moduleBase` wraps around and `GetProcAddress` returns anything.
 
