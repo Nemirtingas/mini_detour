@@ -154,7 +154,7 @@ else if (insn.id != X86_INS_LEA)
 ```
 and do the same check (`id` and register) in `_GetRelocatableSize` so both functions stay consistent.
 
-### 🔴 13. `_EnterRecursiveThunk` follows `call`s (`E8`)
+### ✅ 13. `_EnterRecursiveThunk` follows `call`s (`E8`) — fixed in `fix/thunk-follows-call`
 [mini_detour_x64.h:201](src/mini_detour_x64.h:201), [mini_detour_x86.h:152](src/mini_detour_x86.h:152)
 A function starting with a `call` (e.g. `call __fentry__` with `-pg`, `call _RTC_...`, `call __chkstk`) is taken for a thunk: **the called function** gets hooked. Only `E9` (jmp rel32), `EB` (jmp rel8) and `FF 25` are thunks.
 
