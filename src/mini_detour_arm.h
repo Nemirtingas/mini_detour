@@ -194,9 +194,40 @@ struct RelJump
 
 #pragma pack(pop)
 
+// Immediate of an ARM data processing instruction: imm8 rotated right by twice the 4 bits rotation.
+static uint32_t _ArmImmediate(uint32_t instruction)
+{
+    const uint32_t imm8 = instruction & 0xFF;
+    const uint32_t rotation = ((instruction >> 8) & 0xF) * 2;
+    return rotation == 0 ? imm8 : (imm8 >> rotation) | (imm8 << (32 - rotation));
+}
+
+// Follows PLT entries to the function they jump to, read from their GOT entry (keeps its Thumb bit):
+//   add ip, pc, #A; add ip, ip, #B; ldr pc, [ip, #C]!   (GOT entry at entry + 8 + A + B + C)
+// Thumb callers can go through a "bx pc; nop" stub to the ARM entry.
 void _EnterRecursiveThunk(void*& pCode)
 {
-    // TODO
+    // A longer chain is most likely a loop.
+    for (int i = 0; i < 8; ++i)
+    {
+        const uintptr_t address = reinterpret_cast<uintptr_t>(pCode);
+        if (address & 1)
+        {
+            const uint16_t* thumb = reinterpret_cast<const uint16_t*>(address & ~uintptr_t(1));
+            if (thumb[0] != 0x4778 || thumb[1] != 0x46c0)
+                return;
+
+            pCode = reinterpret_cast<void*>((address & ~uintptr_t(1)) + 4);
+            continue;
+        }
+
+        const uint32_t* arm = reinterpret_cast<const uint32_t*>(address);
+        if ((arm[0] & 0xFFFFF000) != 0xE28FC000 || (arm[1] & 0xFFFFF000) != 0xE28CC000 || (arm[2] & 0xFFFFF000) != 0xE5BCF000)
+            return;
+
+        const uintptr_t gotEntry = address + 8 + _ArmImmediate(arm[0]) + _ArmImmediate(arm[1]) + (arm[2] & 0xFFF);
+        pCode = *reinterpret_cast<void**>(gotEntry);
+    }
 }
 
 static bool _UsesInstructionPointer(cs_insn const& instruction)
