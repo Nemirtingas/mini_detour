@@ -510,7 +510,7 @@ namespace Implementation {
     {
         MemoryManipulation::MemoryRights oldRights;
 
-        auto exportJump = mm.GetFreeJump(moduleBase);
+        auto exportJump = GetMemoryManager().GetFreeJump(moduleBase);
         if (exportJump == nullptr)
             goto Error;
 
@@ -533,7 +533,7 @@ namespace Implementation {
         return true;
 
     ErrorFree:
-        mm.FreeJump(exportJump);
+        GetMemoryManager().FreeJump(exportJump);
     Error:
         *exportCallAddress = nullptr;
         return false;
@@ -814,7 +814,7 @@ namespace Implementation {
 
             MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
 
-            mm.FreeJump(oldJumpAddress);
+            GetMemoryManager().FreeJump(oldJumpAddress);
 
             ++result;
         }

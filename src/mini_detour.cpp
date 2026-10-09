@@ -463,7 +463,13 @@ public:
     }
 };
 
-static MemoryManager mm;
+// Never destroyed: Hook_t objects with static storage restore their hook (and use the manager) during static
+// destruction, possibly after the manager would have been destroyed.
+static MemoryManager& GetMemoryManager()
+{
+    static MemoryManager* memoryManager = new MemoryManager();
+    return *memoryManager;
+}
 
 #if defined(MINIDETOUR_OS_WINDOWS)
 #include "mini_detour_windows.h"
@@ -582,11 +588,11 @@ public:
         {
             if (_TrampolineAddress != nullptr)
             {// If we have a relative jump, clear it
-                mm.FreeJump(_TrampolineAddress);
+                GetMemoryManager().FreeJump(_TrampolineAddress);
                 _TrampolineAddress = nullptr;
             }
 
-            mm.FreeTrampoline(_OriginalTrampolineAddress);
+            GetMemoryManager().FreeTrampoline(_OriginalTrampolineAddress);
         }
 
         _SavedCode.clear();
@@ -703,13 +709,13 @@ public:
         else
         {
             // Setup the trampoline
-            void* jump_mem = mm.GetFreeJump(functionToReplace);
+            void* jump_mem = GetMemoryManager().GetFreeJump(functionToReplace);
             if (jump_mem == nullptr)
                 return false;
             
             if (!MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rwx))
             {
-                mm.FreeJump(jump_mem);
+                GetMemoryManager().FreeJump(jump_mem);
                 return false;
             }
             
@@ -758,7 +764,7 @@ public:
         // The total number of bytes to copy from the original function + abs jump for trampoline
         totalOriginalTrampolineSize = relocatedOriginalCodeSize + AbsJump::GetOpcodeSize(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(functionToHook) + relocatedOriginalCodeSize), func_mode, hook_mode);
             
-        _OriginalTrampolineAddress = mm.GetFreeTrampoline(totalOriginalTrampolineSize);
+        _OriginalTrampolineAddress = GetMemoryManager().GetFreeTrampoline(totalOriginalTrampolineSize);
         if (_OriginalTrampolineAddress == nullptr)
         {
             SPDLOG_ERROR("Failed to get memory for trampoline.");
@@ -790,7 +796,7 @@ public:
             SPDLOG_INFO("Relative hook");
 
             // Setup the trampoline
-            void* jump_mem = mm.GetFreeJump(functionToHook);
+            void* jump_mem = GetMemoryManager().GetFreeJump(functionToHook);
             if (jump_mem == nullptr)
             {
                 SPDLOG_ERROR("Failed to get memory for jump.");
@@ -799,7 +805,7 @@ public:
 
             if (!MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rwx))
             {
-                mm.FreeJump(jump_mem);
+                GetMemoryManager().FreeJump(jump_mem);
                 SPDLOG_ERROR("Failed to protect jump memory.");
                 goto error;
             }
@@ -866,7 +872,7 @@ public:
 
         if (_OriginalTrampolineAddress != nullptr)
         {
-            mm.FreeTrampoline(_OriginalTrampolineAddress);
+            GetMemoryManager().FreeTrampoline(_OriginalTrampolineAddress);
             _OriginalTrampolineAddress = nullptr;
         }
 

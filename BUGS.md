@@ -19,7 +19,7 @@ The `+ 1` walks one slot more than the page holds. On x64, `sizeof(memory_t) == 
 memory_t* end = memory + _RegionSize() / sizeof(memory_t);
 ```
 
-### 🔴 2. Static destruction order (`static MemoryManager mm`)
+### ✅ 2. Static destruction order (`static MemoryManager mm`) — fixed in `fix/memory-manager-lifetime`
 [mini_detour.cpp:466](src/mini_detour.cpp:466)
 The user's global `Hook_t` objects (e.g. `puts_hook` in the tests) call `RestoreFunc()` → `mm.FreeJump()` / `mm.FreeTrampoline()` in their destructor. The destruction order across translation units is unspecified: `mm` (and its `std::vector`s) may already be destroyed → use-after-free at program exit.
 
