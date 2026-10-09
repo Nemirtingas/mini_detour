@@ -431,7 +431,7 @@ inline Hook_t& operator=(Hook_t&& other) noexcept
 ```
 Same remark for `Implementation::Hook_t::operator=` ([mini_detour.cpp:551](src/mini_detour.cpp:551)), which should first call `RestoreFunc()` if `_RestoreOnDestroy`.
 
-### 🟡 40. The "C" API doesn't compile as C
+### ✅ 40. The "C" API doesn't compile as C — fixed in `fix/c-compatible-header`
 [mini_detour.h:112-135](include/mini_detour/mini_detour.h:112), [:225-331](include/mini_detour/mini_detour.h:225)
 - `bool` used without `#include <stdbool.h>`.
 - `MiniDetourMemoryManipulationRegionInfos_t*` and `MiniDetourMemoryManipulationMemoryRights` used without `struct`/`enum` → error in C.
