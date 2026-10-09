@@ -856,7 +856,9 @@ public:
         if (relocatableSize < smallestJumpSize)
             return false;
             
-        if (!MemoryManipulation::MemoryProtect(functionToReplace, relocatableSize, MemoryManipulation::MemoryRights::mem_rwx))
+        // Restored if the replace fails after this point.
+        MemoryManipulation::MemoryRights functionOldRights;
+        if (!MemoryManipulation::MemoryProtect(functionToReplace, relocatableSize, MemoryManipulation::MemoryRights::mem_rwx, &functionOldRights))
             return false;
             
         if (relocatableSize >= absoluteJumpSize)
@@ -868,11 +870,15 @@ public:
             // Setup the trampoline
             void* jump_mem = GetMemoryManager().GetFreeJump(functionToReplace);
             if (jump_mem == nullptr)
+            {
+                MemoryManipulation::MemoryProtect(functionToReplace, relocatableSize, functionOldRights);
                 return false;
+            }
             
             if (!MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rwx))
             {
                 GetMemoryManager().FreeJump(jump_mem);
+                MemoryManipulation::MemoryProtect(functionToReplace, relocatableSize, functionOldRights);
                 return false;
             }
             
@@ -912,6 +918,9 @@ public:
             return nullptr;
 
         size_t totalOriginalTrampolineSize = 0;
+        // Restored in the error path once the function was made writable.
+        bool functionRightsChanged = false;
+        MemoryManipulation::MemoryRights functionOldRights = MemoryManipulation::MemoryRights::mem_unset;
         SPDLOG_INFO("Needed relocatable size: found({}), rel({})", relocatableSize, relativeJumpSize);
 
         if (relocatableSize < relativeJumpSize)
@@ -945,13 +954,14 @@ public:
         }
 
         // RWX on the orignal func
-        if (!MemoryManipulation::MemoryProtect(functionToHook, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rwx))
+        if (!MemoryManipulation::MemoryProtect(functionToHook, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rwx, &functionOldRights))
         {
             MiniDetour::MemoryManipulation::RegionInfos_t regionInfos;
             MemoryManipulation::GetRegionInfos(functionToHook, &regionInfos);
             SPDLOG_ERROR("Failed to protect function memory ({} : {}), current rights: {}.", functionToHook, _SavedCode.size(), regionInfos.Rights);
             goto error;
         }
+        functionRightsChanged = true;
 
         // A failed relocation leaves the trampoline without its jump back to the original function.
         if (_RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, relativeJumpSize, func_mode) < relativeJumpSize)
@@ -1037,6 +1047,10 @@ public:
 
         return _OriginalTrampolineCallAddress;
     error:
+        // The function code wasn't modified yet: only its rights.
+        if (functionRightsChanged)
+            MemoryManipulation::MemoryProtect(functionToHook, relocatableSize, functionOldRights);
+
         _SavedCode.clear();
         _HookCode.clear();
 

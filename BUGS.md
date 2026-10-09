@@ -98,7 +98,7 @@ On x86/x64, `relocatedOriginalCodeSize` is only increased for special instructio
 
 **Fix:** make `_RelocateCode` return the number of bytes **written** in the trampoline (in addition to the bytes consumed), and use that value for protect/flush. Otherwise, protect/flush `sizeof(memory_t::data)`.
 
-### 🟡 8. Intermediate states not restored on error
+### ✅ 8. Intermediate states not restored on error — fixed in `fix/restore-protection-on-hook-error`
 [mini_detour.cpp:778-798](src/mini_detour.cpp:778)
 On `goto error` after `MemoryProtect(functionToHook, rwx)`, the function page stays RWX. Add `MemoryProtect(functionToHook, ..., mem_rx)` in the `error` path if the protection was changed.
 
