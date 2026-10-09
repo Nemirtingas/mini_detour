@@ -510,6 +510,10 @@ With a huge size, `allocAddress + size` wraps around: the loop condition stays t
 [mini_detour_macos.h](src/mini_detour_macos.h)
 `__PAGEZERO` is reserved from 0 up to the main executable (its end follows the ASLR slide), but `mach_vm_region` doesn't report it: `GetFreeRegions` listed it as free, and `MemoryAllocNear` tried (in vain) every page of it before going elsewhere. The executable is found by its `MH_EXECUTE` type: with `DYLD_INSERT_LIBRARIES`, image 0 is the inserted library.
 
+### ✅ 49. Thumb: `B.W` jump to a lower address badly encoded — fixed in `fix/thumb-backward-branch`
+[mini_detour_arm.h](src/mini_detour_arm.h)
+`S = rel_addr >> 31` is -1 (0xFFFF on 16 bits) for a backward jump: `S << 10` and `J1`/`J2` set every bit of the instruction. Every Thumb hook whose jump slot was below the function jumped to a wrong address.
+
 ---
 
 ## Recommended order

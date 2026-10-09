@@ -135,13 +135,14 @@ struct RelJump
             else
             {
                 rel_addr -= 4; // -4 because ARM Instruction Pointer is always 2 instructions ahead
-                uint16_t S = rel_addr >> 31;
+                // Single bits: rel_addr >> 31 is -1 for a backward jump, which would set every bit of the opcode.
+                uint16_t S = (rel_addr >> 31) & 1;
                 uint16_t imm11 = (rel_addr >> 1) & 0x07ff;
                 uint16_t imm10 = (rel_addr >> 12) & 0x03ff;
                 uint16_t I1 = (rel_addr >> 23) & 1;
                 uint16_t I2 = (rel_addr >> 22) & 1;
-                uint16_t J1 = (!I1) ^ S;
-                uint16_t J2 = (!I2) ^ S;
+                uint16_t J1 = (I1 ^ 1) ^ S;
+                uint16_t J2 = (I2 ^ 1) ^ S;
                 
                 /*
                  * -------------------------------------------------
