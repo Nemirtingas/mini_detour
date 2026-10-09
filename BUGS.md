@@ -356,7 +356,7 @@ if (max_sym < hash_table->symndx)
 else { while (...) ++max_sym; *dynamicSymbolsEnd = *dynamicSymbolsStart + max_sym + 1; }
 ```
 
-### 🟠 31. `_GetExportAddress` accepts imported symbols (`SHN_UNDEF`)
+### ✅ 31. `_GetExportAddress` accepts imported symbols (`SHN_UNDEF`) — fixed in `fix/linux-export-skip-undefined`
 [mini_detour_linux.h:552](src/mini_detour_linux.h:552)
 A module that *imports* `foo` has a `foo` entry in `.dynsym` with `st_shndx == SHN_UNDEF`. `ReplaceModuleExports` then modifies that entry, which changes the symbol resolution of the module.
 

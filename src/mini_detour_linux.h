@@ -565,7 +565,11 @@ namespace Implementation {
             if ((symbol->st_name + 1) > dynamicSymbolsNamesSize)
                 continue;
 
-            if ((symbolBind != STB_GLOBAL && symbolBind != STB_WEAK) || (symbolType != STT_FUNC && symbolType != STT_OBJECT) || strcmp(dynamicSymbolsNames + symbol->st_name, symbolName) != 0)
+            // Undefined symbols are the module imports, not its exports.
+            if ((symbolBind != STB_GLOBAL && symbolBind != STB_WEAK) || (symbolType != STT_FUNC && symbolType != STT_OBJECT) || symbol->st_shndx == SHN_UNDEF || symbol->st_value == 0)
+                continue;
+
+            if (strcmp(dynamicSymbolsNames + symbol->st_name, symbolName) != 0)
                 continue;
 
             return &symbol->st_value;
