@@ -475,7 +475,7 @@ write_basic_package_version_file(
   COMPATIBILITY SameMajorVersion)
 ```
 
-### 🟠 43. Global changes leaking into the parent project
+### ✅ 43. Global changes leaking into the parent project — fixed in `build/dont-clear-parent-standard-libraries`
 [CMakeLists.txt:10](CMakeLists.txt:10), [:13-14](CMakeLists.txt:13)
 `CMAKE_C/CXX_STANDARD_LIBRARIES` is **forced to empty in the cache** (removes `kernel32.lib`, `user32.lib`… for any project doing `add_subdirectory(mini_detour)`), and `-stdlib=libc++` is added to the global `CMAKE_CXX_FLAGS`.
 
