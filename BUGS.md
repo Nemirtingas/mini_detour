@@ -67,7 +67,7 @@ if (_OriginalFuncAddress != nullptr)
     return nullptr; // or RestoreFunc() first
 ```
 
-### 🟠 5. `GetOriginalFunction()` returns a stale pointer after restoring
+### ✅ 5. `GetOriginalFunction()` returns a stale pointer after restoring — fixed in `fix/clear-hook-state-on-restore`
 [mini_detour.cpp:579-596](src/mini_detour.cpp:579)
 `Reset()` doesn't clear `_OriginalTrampolineCallAddress`, `_DetourCallFunc`, `_DetourFunc`. After `RestoreFunction()`, `GetOriginalFunction()` returns a **freed** trampoline, which can be given to another hook → the wrong function is called.
 
