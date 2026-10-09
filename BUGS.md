@@ -167,7 +167,7 @@ else if (pCode[0] == 0xEB)
 ```
 Also add an iteration limit (infinite loop on a cyclic thunk).
 
-### 🟠 14. x64 `CpuPush`: sign extension of `push imm32`
+### ✅ 14. x64 `CpuPush`: sign extension of `push imm32` — fixed in `fix/x64-push-sign-extension`
 [mini_detour_x64.h:157](src/mini_detour_x64.h:157)
 `push imm32` sign-extends to 64 bits. If the return address is for example `0x00000000_8xxxxxxx`, the high part is zero so the `mov [rsp+4], high` is skipped → the pushed address becomes `0xFFFFFFFF_8xxxxxxx`.
 
