@@ -4,12 +4,15 @@ Instructions for AI coding agents (and humans) working on **mini_detour**, a min
 
 ## Git workflow
 
+### Never push to a remote
+- All git work stays **local**. Never run `git push` (to any remote, any branch), never open pull requests on a remote, never change remote configuration.
+- Branches are created, committed and merged locally only. Publishing is done by the maintainer.
+
 ### Every change goes through a branch
 - Never commit directly to `master`.
-- Before modifying any file, create a dedicated branch from an up-to-date `master`:
+- Before modifying any file, create a dedicated branch from the local `master`:
   ```bash
   git checkout master
-  git pull
   git checkout -b <type>/<short-description>
   ```
 - Branch name prefixes:
@@ -18,11 +21,11 @@ Instructions for AI coding agents (and humans) working on **mini_detour**, a min
   - `refactor/` — no behavior change
   - `build/` — CMake / CI changes
   - `docs/` — documentation only
-- Merge back into `master` through a pull request.
+- Each branch is reviewed by the maintainer before being merged into `master` (locally).
 
-### Keep pull requests small: one branch = one bug or one feature
+### Keep branches small: one branch = one bug or one feature
 - One branch fixes **one** bug or adds **one** feature. Do not bundle unrelated changes.
-- No "giga PRs": if a task touches several independent problems (for example several entries of `BUGS.md`), open one branch and one PR per problem.
+- No "giga PRs": if a task touches several independent problems (for example several entries of `BUGS.md`), use one branch per problem.
 - Do not mix reformatting, renaming or opportunistic cleanups with a fix. If a cleanup is needed, do it in its own branch.
 - If a fix depends on another one, land the dependency first, then branch the next fix from the updated `master`.
 - Commit messages: short imperative summary line (≤ 72 chars), then a body explaining *why*. Reference the bug (e.g. `BUGS.md #1`) when relevant.
@@ -50,7 +53,7 @@ Instructions for AI coding agents (and humans) working on **mini_detour**, a min
   - The C++ API (`MiniDetour::...` namespaces, `Hook_t`) is a thin `inline` wrapper over the C functions. Keep the two in sync.
   - Do not break the ABI/API without an explicit request.
 - Platform code goes in `src/mini_detour_<os>.h` (`windows`, `linux`, `macos`); architecture code in `src/mini_detour_<arch>.h` (`x86`, `x64`, `arm`, `arm64`). Keep `#if defined(MINIDETOUR_OS_*)` / `MINIDETOUR_ARCH_*` checks out of shared code when a per-platform header can hold the logic.
-- When changing behavior shared by several platforms or architectures, update **all** of them, or state clearly in the PR which ones are not covered.
+- When changing behavior shared by several platforms or architectures, update **all** of them, or state clearly in the commit message which ones are not covered.
 
 ### Naming
 - Types and public functions: `PascalCase` (`HookFunc`, `MemoryProtect`, `RegionInfos_t`).
@@ -71,6 +74,6 @@ cmake --build build
 ```
 Then run the `tests` executable from the build output directory (`build/Debug/tests.exe` with MSVC, `build/tests` elsewhere). It needs `export_hook_test_library` in the working directory.
 
-- A branch must build and pass the tests on the platforms it touches before the PR is opened.
+- A branch must build and pass the tests on the platforms it touches before it is handed over for review.
 - Every bug fix should come with a test in `tests/test.cpp` that fails without the fix, when it is testable.
 - CI is defined in `.github/workflows/main.yml` (Windows x86/x64, Linux x86/x64/ARM/ARM64 under QEMU, macOS).
