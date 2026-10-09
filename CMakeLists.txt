@@ -201,6 +201,20 @@ if(MINIDETOUR_BUILD_TESTS)
     PREFIX ""
   )
 
+  if(UNIX AND NOT APPLE)
+    # Shared library without any exported symbol: its GNU hash table has no hashed symbol.
+    add_library(
+      no_export_test_library SHARED
+      tests/no_export_test_library.c
+    )
+
+    set_target_properties(no_export_test_library PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+      C_VISIBILITY_PRESET hidden
+      PREFIX ""
+    )
+  endif()
+
   add_library(
     mini_detour_test
     src/mini_detour.cpp

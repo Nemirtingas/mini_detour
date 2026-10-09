@@ -345,7 +345,7 @@ The `dlopen` handle is a `struct link_map*` whose first field is `l_addr` = **lo
 
 **Fix:** use `dlinfo(handle, RTLD_DI_LINKMAP, &lm)` then `lm->l_ld` (dynamic table directly) and `lm->l_addr` as the base; or `dl_iterate_phdr` comparing `dlpi_addr`/`dlpi_name`. For the `d_ptr`s, add `l_addr` if the value is below the base.
 
-### 🟠 30. GNU hash: index underflow
+### ✅ 30. GNU hash: index underflow — fixed in `fix/linux-gnu-hash-empty`
 [mini_detour_linux.h:400-410](src/mini_detour_linux.h:400)
 If every bucket is 0 (no hashed symbol), `max_sym == 0` and `chains[max_sym - symndx]` reads out of the table.
 
