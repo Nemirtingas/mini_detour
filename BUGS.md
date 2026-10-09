@@ -390,7 +390,7 @@ If no `dlopen(imageFilePath)` matches the handle (e.g. the `dlopen(NULL)` handle
 
 **Fix:** `if (foundModuleBase == nullptr) return false;` before the magic test. Use `RTLD_NOLOAD` in the lookup `dlopen` so no new image is loaded.
 
-### 🔴 36. `GetRegionInfos` leaves `Rights` uninitialized
+### ✅ 36. `GetRegionInfos` leaves `Rights` uninitialized — fixed in `fix/macos-region-infos-init`
 [mini_detour_macos.h:219](src/mini_detour_macos.h:219)
 The local variable `rights = mem_unset` is never assigned to `regionInfos->Rights`. If the address is free, `Rights`/`Start`/`End` hold indeterminate values (read by `RestoreFunc` and `MemoryProtect(..., &oldRights)`).
 
