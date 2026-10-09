@@ -7,6 +7,10 @@
 #include <errno.h>
 #include <elf.h>
 
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0x100000
+#endif
+
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
     using ElfHeader_t = Elf64_Ehdr;
     using ElfSectionHeader_t = Elf64_Shdr;
@@ -262,8 +266,24 @@ namespace Implementation {
 
     static inline bool MemoryAllocWithProtection(void** address, size_t size, MemoryRights rights, int flags)
     {
-        *address = mmap(*address, size, _MemoryProtectRightsToNative(rights), flags, -1, 0);
-        return *address != nullptr;
+        void* hint = *address;
+        void* result = mmap(hint, size, _MemoryProtectRightsToNative(rights), flags, -1, 0);
+        if (result == MAP_FAILED)
+        {
+            *address = nullptr;
+            return false;
+        }
+
+        // Kernels older than 4.17 ignore MAP_FIXED_NOREPLACE and treat the address as a hint.
+        if ((flags & MAP_FIXED_NOREPLACE) && result != hint)
+        {
+            munmap(result, size);
+            *address = nullptr;
+            return false;
+        }
+
+        *address = result;
+        return true;
     }
 
     static inline void* MemoryAllocNear(uintptr_t addressHint, size_t size, MemoryRights rights, size_t pageSize)
@@ -293,7 +313,8 @@ namespace Implementation {
                     break;
 
                 address = (void*)allocAddress;
-                MemoryAllocWithProtection(&address, size, rights, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS);
+                // MAP_FIXED would silently replace a mapping created after the free regions were listed.
+                MemoryAllocWithProtection(&address, size, rights, MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS);
                 if (address != nullptr)
                     return address;
             }

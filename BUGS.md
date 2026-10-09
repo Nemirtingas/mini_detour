@@ -315,7 +315,7 @@ Some binaries (old linkers, bound imports) have `OriginalFirstThunk == 0` → `m
 
 ## Linux (`src/mini_detour_linux.h`)
 
-### 🔴 28. `mmap`: undetected failure and destructive `MAP_FIXED`
+### ✅ 28. `mmap`: undetected failure and destructive `MAP_FIXED` — fixed in `fix/linux-mmap-failure`
 [mini_detour_linux.h:263-267](src/mini_detour_linux.h:263), [:296](src/mini_detour_linux.h:296)
 - `mmap` returns `MAP_FAILED` (`(void*)-1`), not `nullptr` → a failure is taken for a success and `(void*)-1` is used as memory.
 - `MAP_FIXED` **silently replaces** any existing mapping. The free regions list comes from a `/proc/self/maps` snapshot: if another thread mapped something in the meantime, it is destroyed.
