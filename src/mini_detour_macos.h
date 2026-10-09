@@ -316,18 +316,26 @@ namespace Implementation {
 
         for (auto const& region : freeRegions)
         {
-            auto start = region.Start > addressHint ? region.Start : (region.End - pageSize);
-            auto increment = static_cast<int32_t>(region.Start > addressHint ? pageSize : -pageSize);
+            // Range of the allocation start address. Computed from the region size so a huge size can't wrap around,
+            // and the downward search starts at the highest address where the whole allocation fits.
+            if (size > region.End - region.Start)
+                continue;
 
-            for (auto allocAddress = start; allocAddress >= region.Start && (allocAddress + size) <= region.End; allocAddress += increment)
+            const uintptr_t lowest = region.Start;
+            const uintptr_t highest = std::min<uintptr_t>(region.End - size, (uintptr_t)max_user_address);
+            if (highest < lowest)
+                continue;
+
+            const bool upward = region.Start > addressHint;
+            for (uintptr_t allocAddress = upward ? lowest : highest;; allocAddress = upward ? allocAddress + pageSize : allocAddress - pageSize)
             {
-                if (allocAddress > (uintptr_t)max_user_address)
-                    break;
-
                 address = (void*)allocAddress;
                 MemoryAllocWithProtection(task, &address, (mach_vm_size_t)size, rights, VM_FLAGS_FIXED);
                 if (address != nullptr)
                     return address;
+
+                if (upward ? highest - allocAddress < pageSize : allocAddress - lowest < pageSize)
+                    break;
             }
         }
 
