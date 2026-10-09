@@ -184,6 +184,29 @@ struct RelJump
 
 // Follows PLT entries to the function they jump to, read from their GOT entry:
 //   [bti c]; adrp x16, page; ldr x17, [x16, #offset]; add x16, x16, #offset; br x17
+// The code mode is carried by the address on ARM (Thumb bit): ARM64 has a single mode.
+static inline int _GetCodeMode(void* /*address*/)
+{
+    return 0;
+}
+
+// Address of the code bytes, without the mode.
+static inline void* _GetCodeAddress(void* address)
+{
+    return address;
+}
+
+// Address to call code written in the given mode.
+static inline void* _GetCallAddress(void* code, int /*mode*/)
+{
+    return code;
+}
+
+static inline cs_err _InitDisasm(CodeDisasm& disasm, int /*mode*/)
+{
+    return disasm.Init(cs_arch::CS_ARCH_ARM64, (cs_mode)(cs_mode::CS_MODE_ARM | CodeDisasm::RuntimeEndianness()));
+}
+
 void _EnterRecursiveThunk(void*& _pCode)
 {
     // A longer chain is most likely a loop.
