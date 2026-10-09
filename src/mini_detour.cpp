@@ -424,7 +424,7 @@ public:
         uint8_t* res = nullptr;
         for (auto memory : trampolines_regions)
         {
-            memory_t* end = memory + _RegionSize() / sizeof(memory_t) + 1;
+            memory_t* end = memory + _RegionSize() / sizeof(memory_t);
             for (; memory != end; ++memory)
             {
                 if (!memory->used)
