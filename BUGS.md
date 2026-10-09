@@ -452,7 +452,7 @@ typedef struct MiniDetourMemoryManipulationRegionInfos_t { ... } MiniDetourMemor
 ```
 and prefix the enumerators (`MINIDETOUR_MEM_R`…) while keeping C++ aliases in `MiniDetour::MemoryManipulation`.
 
-### 🟡 41. Wrong documentation
+### ✅ 41. Wrong documentation — fixed in `docs/fix-api-comments`
 - [mini_detour.h:209](include/mini_detour/mini_detour.h:209): `PageRound` rounds **down** (the comment says "upper value").
 - [mini_detour.h:268](include/mini_detour/mini_detour.h:268): `FlushInstructionCache` is implemented on Linux too.
 - `WriteAbsoluteJump(nullptr, nullptr)` underestimates the size on ARM64 (the size depends on the destination): document that the real destination must be passed, or return `GetMaxOpcodeSize()` when `address == nullptr`.
