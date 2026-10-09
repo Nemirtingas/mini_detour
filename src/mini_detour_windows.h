@@ -91,13 +91,16 @@ DWORD _MemoryProtectRightsToNative(MemoryRights rights)
 
 MemoryRights _MemoryNativeToProtectRights(DWORD rights)
 {
-    switch (rights)
+    // Ignore the modifiers (PAGE_GUARD, PAGE_NOCACHE, PAGE_WRITECOMBINE...).
+    switch (rights & 0xFF)
     {
         case PAGE_READONLY: return MemoryRights::mem_r;
         case PAGE_READWRITE: return MemoryRights::mem_rw;
+        case PAGE_WRITECOPY: return MemoryRights::mem_rw;
         case PAGE_EXECUTE: return MemoryRights::mem_x;
         case PAGE_EXECUTE_READ: return MemoryRights::mem_rx;
         case PAGE_EXECUTE_READWRITE: return MemoryRights::mem_rwx;
+        case PAGE_EXECUTE_WRITECOPY: return MemoryRights::mem_rwx;
         default: return MemoryRights::mem_none;
     }
 }
@@ -280,7 +283,7 @@ void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *re
     {
         regionInfos->Start  = reinterpret_cast<uintptr_t>(infos.BaseAddress);
         regionInfos->End    = regionInfos->Start + infos.RegionSize;
-        regionInfos->Rights = _MemoryNativeToProtectRights(infos.Protect & 0xFF);
+        regionInfos->Rights = _MemoryNativeToProtectRights(infos.Protect);
         _GetRegionName(
             regionNameBuffer,
             infos.BaseAddress,
@@ -307,7 +310,7 @@ bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights
     bool res = VirtualProtect(address, size, _MemoryProtectRightsToNative(rights), &oldProtect) != FALSE;
 
     if (old_rights != nullptr)
-        *old_rights = _MemoryNativeToProtectRights(oldProtect & 0xFF);
+        *old_rights = _MemoryNativeToProtectRights(oldProtect);
 
     return res;
 }

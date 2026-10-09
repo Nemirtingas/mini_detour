@@ -301,7 +301,7 @@ If the name fits exactly in `regionNameSize` bytes, `WideCharToMultiByte` return
 
 **Fix:** pass `regionNameSize - 1` to `WideCharToMultiByte`.
 
-### 🟡 26. Incomplete rights conversion
+### ✅ 26. Incomplete rights conversion — fixed in `fix/windows-protection-mapping`
 [mini_detour_windows.h:92-103](src/mini_detour_windows.h:92), [:241](src/mini_detour_windows.h:241)
 `PAGE_WRITECOPY` and `PAGE_EXECUTE_WRITECOPY` give `mem_none` (but `RestoreFunc` takes `mem_none` as "freed memory" and gives up restoring). And in `_GetRegions`, `Protect` isn't masked with `0xFF` (PAGE_GUARD/NOCACHE → `mem_none`).
 
