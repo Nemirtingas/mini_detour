@@ -194,6 +194,29 @@ struct RelJump
 
 #pragma pack(pop)
 
+// The lowest address bit selects the code mode: 1 for Thumb, 0 for ARM.
+static inline int _GetCodeMode(void* address)
+{
+    return reinterpret_cast<uintptr_t>(address) & 1;
+}
+
+// Address of the code bytes, without the Thumb bit.
+static inline void* _GetCodeAddress(void* address)
+{
+    return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(address) & ~uintptr_t(1));
+}
+
+// Address to call code written in the given mode.
+static inline void* _GetCallAddress(void* code, int mode)
+{
+    return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(code) | (mode ? 1 : 0));
+}
+
+static inline cs_err _InitDisasm(CodeDisasm& disasm, int mode)
+{
+    return disasm.Init(cs_arch::CS_ARCH_ARM, (cs_mode)((mode ? cs_mode::CS_MODE_THUMB : cs_mode::CS_MODE_ARM) | CodeDisasm::RuntimeEndianness()));
+}
+
 // Immediate of an ARM data processing instruction: imm8 rotated right by twice the 4 bits rotation.
 static uint32_t _ArmImmediate(uint32_t instruction)
 {
