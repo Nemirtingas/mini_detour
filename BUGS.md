@@ -493,7 +493,7 @@ write_basic_package_version_file(
 [tests/test.cpp:43-46](tests/test.cpp:43)
 It decodes `FF 25` as an absolute address (x86 form), while on x64 it is `[rip + disp32]`. Reuse the `mini_detour_x64.h` version under an architecture `#if`.
 
-### 🟡 45. A string literal is modified
+### ✅ 45. A string literal is modified — fixed in `fix/test-string-literal`
 [tests/test.cpp:638](tests/test.cpp:638), [:663](tests/test.cpp:663)
 The test executable code is a `const` literal in `.rodata`, modified after `MemoryProtect`. Undefined behavior; prefer a buffer allocated with `MemoryAlloc(..., mem_rwx)`.
 
