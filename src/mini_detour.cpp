@@ -739,6 +739,13 @@ public:
 
     void* HookFunc(void* functionToHook, void* newFunction)
     {
+        // Already hooking a function: hooking another one would lose the state needed to restore the first one.
+        if (_OriginalFuncAddress != nullptr)
+        {
+            SPDLOG_ERROR("This hook is already in use, restore it first.");
+            return nullptr;
+        }
+
         int func_mode;
         int hook_mode;
         CodeDisasm disasm;
