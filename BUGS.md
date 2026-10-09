@@ -222,7 +222,7 @@ AbsJump::WriteOpcodes(pTrampolineCode, originalCodeTarget, func_mode, func_mode)
 relativeJumpSize = RelJump::GetMaxOpcodeSize();
 ```
 
-### 🔴 19. PC relative instructions not detected
+### ✅ 19. PC relative instructions not detected — fixed in `fix/arm-pc-relative-detection`
 - ARM: [mini_detour_arm.h:209-218](src/mini_detour_arm.h:209) — `_UsesInstructionPointer` only looks at **register** operands. `ldr r0, [pc, #8]` (very common in prologues to load literals) has a **memory** operand with a `PC` base → copied as is → wrong value.
   ```cpp
   if (op.type == ARM_OP_MEM && op.mem.base == ARM_REG_PC) return true;
