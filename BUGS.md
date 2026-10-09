@@ -278,7 +278,7 @@ if (imageNTHeaders->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC ||
 
 **Fix:** after `GetFreeJump`, check `_AddressIsRepresentableAsRva(moduleBase, exportJump)` (otherwise `FreeJump` + failure); ideally add an "above the address" search to `MemoryManager`.
 
-### 🟠 24. `MemoryAllocNear`: the downward search never works
+### ✅ 24. `MemoryAllocNear`: the downward search never works — fixed in `fix/alloc-near-overflow` and `fix/windows-alloc-near-granularity`
 [mini_detour_windows.h:345-348](src/mini_detour_windows.h:345)
 `start = region.End - pageSize` then the condition `(allocAddress + size) < region.End` with `size == pageSize` is false from the first iteration. Moreover `VirtualAlloc` rounds reservations to `dwAllocationGranularity` (64 KB), not to the page.
 

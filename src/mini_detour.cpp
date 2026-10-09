@@ -283,6 +283,55 @@ static size_t _ReadCode(const void* pCode, uint8_t* buffer, size_t size)
     return size;
 }
 
+// Distance between an address and a free region (0 if the region contains it), to try the closest regions first.
+static uintptr_t _DistanceToRegion(uintptr_t address, MiniDetour::MemoryManipulation::RegionInfos_t const& region)
+{
+    if (address < region.Start)
+        return region.Start - address;
+
+    if (address >= region.End)
+        return address - region.End;
+
+    return 0;
+}
+
+// Tries to allocate size bytes in a free region, at a multiple of step (the allocation granularity), starting from the
+// address closest to addressHint: upward from there, then downward. tryAlloc(address) returns the allocation or nullptr.
+template <typename TryAlloc>
+static void* _AllocInFreeRegion(MiniDetour::MemoryManipulation::RegionInfos_t const& region, uintptr_t addressHint, size_t size, size_t step, uintptr_t maxAddress, TryAlloc tryAlloc)
+{
+    // Computed from the region size so a huge size can't wrap around.
+    if (size > region.End - region.Start)
+        return nullptr;
+
+    const uintptr_t lowest = (region.Start + step - 1) / step * step;
+    uintptr_t highest = std::min<uintptr_t>(region.End - size, maxAddress);
+    highest -= highest % step;
+    if (highest < lowest)
+        return nullptr;
+
+    const uintptr_t first = std::min(std::max(addressHint - addressHint % step, lowest), highest);
+    for (uintptr_t allocAddress = first;; allocAddress += step)
+    {
+        void* address = tryAlloc(allocAddress);
+        if (address != nullptr)
+            return address;
+
+        if (highest - allocAddress < step)
+            break;
+    }
+
+    for (uintptr_t allocAddress = first; allocAddress - lowest >= step;)
+    {
+        allocAddress -= step;
+        void* address = tryAlloc(allocAddress);
+        if (address != nullptr)
+            return address;
+    }
+
+    return nullptr;
+}
+
 #if defined(MINIDETOUR_ARCH_X64)
 #include "mini_detour_x64.h"
 
@@ -354,12 +403,57 @@ public:
         //    MemoryManipulation::MemoryFree(v, _RegionSize());
     }
 
+    // Allocates near hint_addr. When the closest free memory isn't usable from reference (for example below a module
+    // that needs a positive RVA), the other free regions are tried, closest first.
+    void* _AllocUsableJumpsRegion(void* hint_addr, void* reference, bool (*isUsable)(void*, void*))
+    {
+        const size_t regionSize = _RegionSize();
+        void* jump_table = MiniDetour::MemoryManipulation::MemoryAlloc(hint_addr, regionSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
+        if (jump_table == nullptr || isUsable(reference, jump_table))
+            return jump_table;
+
+        MiniDetour::MemoryManipulation::MemoryFree(jump_table, regionSize);
+
+        auto freeRegionCount = MiniDetour::MemoryManipulation::GetFreeRegions(nullptr, 0);
+        std::vector<MiniDetour::MemoryManipulation::RegionInfos_t> freeRegions((size_t)(freeRegionCount * 1.5));
+        freeRegionCount = MiniDetour::MemoryManipulation::GetFreeRegions(freeRegions.data(), freeRegions.size());
+        if (freeRegionCount < freeRegions.size())
+            freeRegions.resize(freeRegionCount);
+
+        const uintptr_t hint = reinterpret_cast<uintptr_t>(hint_addr);
+        std::sort(freeRegions.begin(), freeRegions.end(), [hint](MiniDetour::MemoryManipulation::RegionInfos_t const& l, MiniDetour::MemoryManipulation::RegionInfos_t const& r)
+        {
+            return _DistanceToRegion(hint, l) < _DistanceToRegion(hint, r);
+        });
+
+        for (auto const& region : freeRegions)
+        {
+            if (region.End - region.Start < regionSize)
+                continue;
+
+            // Both ends of the region: the closest one to the reference depends on which side of it the region is.
+            const uintptr_t candidates[] = { region.Start, region.End - regionSize };
+            for (auto candidate : candidates)
+            {
+                if (!isUsable(reference, reinterpret_cast<void*>(candidate)))
+                    continue;
+
+                jump_table = MiniDetour::MemoryManipulation::MemoryAlloc(reinterpret_cast<void*>(candidate), regionSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
+                if (jump_table != nullptr && isUsable(reference, jump_table))
+                    return jump_table;
+
+                if (jump_table != nullptr)
+                    MiniDetour::MemoryManipulation::MemoryFree(jump_table, regionSize);
+            }
+        }
+
+        return nullptr;
+    }
+
     // isUsable(reference, jump) tells if a jump slot can be used from reference.
     void* AllocJumpsRegion(void* hint_addr, void* reference, bool (*isUsable)(void*, void*))
     {
-        void* jump_table = nullptr;
-
-        jump_table = MiniDetour::MemoryManipulation::MemoryAlloc(hint_addr, _RegionSize(), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
+        void* jump_table = _AllocUsableJumpsRegion(hint_addr, reference, isUsable);
         SPDLOG_INFO("Jumps region allocated can hold {} jumps", _JumpsInRegion());
 
         if (jump_table != nullptr)
