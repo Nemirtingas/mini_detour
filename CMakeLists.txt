@@ -276,6 +276,22 @@ if(MINIDETOUR_BUILD_TESTS)
     $<INSTALL_INTERFACE:include>
   )
 
+  if(UNIX AND NOT APPLE)
+    # Imports reached through GOT entries (GLOB_DAT relocations) instead of PLT stubs.
+    add_library(
+      no_plt_test_library SHARED
+      tests/no_plt_test_library.c
+    )
+
+    set_target_properties(no_plt_test_library PROPERTIES
+      POSITION_INDEPENDENT_CODE ON
+      C_VISIBILITY_PRESET hidden
+      PREFIX ""
+    )
+
+    target_compile_options(no_plt_test_library PRIVATE -fno-plt)
+  endif()
+
   # Each fix can add its own tests/test_*.cpp file without touching this list.
   file(GLOB MINIDETOUR_TEST_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_LIST_DIR}/tests/test.cpp
