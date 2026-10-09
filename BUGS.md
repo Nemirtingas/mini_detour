@@ -201,7 +201,7 @@ In 32-bit mode, `mod=00 rm=101` means an absolute `[disp32]` address, which **do
 
 ## ARM / ARM64 (`src/mini_detour_arm.h`, `src/mini_detour_arm64.h`)
 
-### 🔴 17. Thumb: the trampoline jump back is always written in ARM mode
+### ✅ 17. Thumb: the trampoline jump back is always written in ARM mode — fixed in `fix/thumb-trampoline-mode`
 [mini_detour_arm.h:279-280](src/mini_detour_arm.h:279), [:308-312](src/mini_detour_arm.h:308)
 `func_mode = pCode & 1` and `hook_mode = pTrampoline & 1`, but the address was already cleaned (`& ~1`) in `_InitializeHookState`, and the trampoline is aligned: both are always 0. For a Thumb function, the trampoline (run in Thumb) ends with an ARM encoded `ldr pc, [pc, #-4]` → crash.
 
