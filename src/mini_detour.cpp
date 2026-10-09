@@ -828,7 +828,9 @@ public:
 
         _EnterRecursiveThunk(functionToHook);
 
-        relativeJumpSize = RelJump::GetOpcodeSize(functionToHook, newFunction, func_mode, hook_mode);
+        // The relative jump goes to a jump slot that isn't allocated yet, not to newFunction: its size can't be known here
+        // (Thumb has 2 and 4 bytes encodings), so the bytes of the longest encoding are relocated.
+        relativeJumpSize = RelJump::GetMaxOpcodeSize();
         absoluteJumpSize = AbsJump::GetOpcodeSize(newFunction, func_mode, hook_mode);
         relocatableSize = _GetRelocatableSize(functionToHook, relocatedOriginalCodeSize, ignoreRelocations, disasm, absoluteJumpSize);
 
@@ -995,8 +997,9 @@ public:
             }
 #endif
 
-            // Relative jump shoud have the same mode as the hooked function
-            _HookCode.resize(relativeJumpSize);
+            // Relative jump shoud have the same mode as the hooked function.
+            // A shorter encoding than relativeJumpSize keeps the original bytes after it.
+            _HookCode.assign(_SavedCode.begin(), _SavedCode.begin() + relativeJumpSize);
             RelJump::WriteOpcodes(_HookCode.data(), functionToHook, jump_mem, func_mode, func_mode);
             memcpy(functionToHook, _HookCode.data(), _HookCode.size());
 
