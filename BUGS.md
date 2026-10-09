@@ -242,7 +242,7 @@ relativeJumpSize = RelJump::GetMaxOpcodeSize();
 
 **Fix:** add the mode as a parameter, or use the smallest one: `(max_addr - min_addr) <= 0xFFFFFC`.
 
-### 🟡 21. Thumb absolute jump: writes below `sp` without reserving the stack
+### ✅ 21. Thumb absolute jump: writes below `sp` without reserving the stack — fixed in `fix/thumb-absolute-jump-stack`
 [mini_detour_arm.h:58-73](src/mini_detour_arm.h:58)
 `str r0, [sp, #-8]` then `push {r0}`: a signal arriving in between overwrites the saved value of `r0`. Prefer the literal form:
 ```
