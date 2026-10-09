@@ -339,7 +339,7 @@ MemoryAllocWithProtection(&address, size, rights, MAP_FIXED_NOREPLACE | MAP_PRIV
 ```
 (On kernels < 4.17, `MAP_FIXED_NOREPLACE` is ignored and behaves like a hint; the `res != hint` test covers that case.)
 
-### 🔴 29. `_LoadModuleDynamicTable` assumes `l_addr` points to the ELF header
+### ✅ 29. `_LoadModuleDynamicTable` assumes `l_addr` points to the ELF header — fixed in `fix/linux-link-map-base`
 [mini_detour_linux.h:428](src/mini_detour_linux.h:428)
 The `dlopen` handle is a `struct link_map*` whose first field is `l_addr` = **load bias**, not the header address. For a non-PIE executable (`dlopen(nullptr)`), `l_addr == 0` → null dereference. Moreover, on musl/bionic the `.dynamic` `d_ptr`s aren't relocated.
 
