@@ -504,6 +504,10 @@ Add tests for: hooking a function whose prologue holds a `jcc` (#11), a `mov reg
 [mini_detour_linux.h](src/mini_detour_linux.h), [mini_detour_windows.h](src/mini_detour_windows.h), [mini_detour_macos.h](src/mini_detour_macos.h)
 With a huge size, `allocAddress + size` wraps around: the loop condition stays true and the search tries every page of the address space (hours long hang on x64). The bounds are now computed from the region size (`End - size`), which also fixes the start of the downward search (#24).
 
+### ✅ 48. macOS: `__PAGEZERO` listed as free memory — fixed in `fix/macos-pagezero-not-free`
+[mini_detour_macos.h](src/mini_detour_macos.h)
+`__PAGEZERO` is reserved from 0 up to the main executable (its end follows the ASLR slide), but `mach_vm_region` doesn't report it: `GetFreeRegions` listed it as free, and `MemoryAllocNear` tried (in vain) every page of it before going elsewhere. The executable is found by its `MH_EXECUTE` type: with `DYLD_INSERT_LIBRARIES`, image 0 is the inserted library.
+
 ---
 
 ## Recommended order
