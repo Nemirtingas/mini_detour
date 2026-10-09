@@ -236,7 +236,7 @@ relativeJumpSize = RelJump::GetMaxOpcodeSize();
   ```
   (same test to duplicate in `_RelocateCode`).
 
-### 🟠 20. Thumb `B.W`: ±16 MB range but the check accepts ±32 MB
+### ✅ 20. Thumb `B.W`: ±16 MB range but the check accepts ±32 MB — fixed in `fix/thumb-jump-range`
 [mini_detour_arm.h:16-21](src/mini_detour_arm.h:16)
 `_AddressesAreRelativeJumpable` uses the ARM range (`0x1FFFFFC`). For a Thumb source, a jump between 16 and 32 MB is truncated when encoded → jump to a random address.
 
