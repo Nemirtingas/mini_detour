@@ -518,7 +518,8 @@ namespace Implementation {
     }
     */
 
-    static bool _LoadModuleExportDetails(void* moduleHandle, void** moduleBase, NList_t** dynamicSymbols, const char** dynamicSymbolsNames, uint32_t* dynamicSymbolsCount)
+    // slide: what the image was moved by from its link address, to add to symbol values.
+    static bool _LoadModuleExportDetails(void* moduleHandle, uintptr_t* slide, NList_t** dynamicSymbols, const char** dynamicSymbolsNames, uint32_t* dynamicSymbolsCount)
     {
         task_dyld_info dyld_info;
         mach_msg_type_number_t count = TASK_DYLD_INFO_COUNT;
@@ -562,29 +563,58 @@ namespace Implementation {
         LoadCommand_t* loadCommandStart = (LoadCommand_t*)(((uintptr_t)foundModuleBase) + sizeof(*machHeader));
         LoadCommand_t* loadCommandEnd = (LoadCommand_t*)(((uintptr_t)loadCommandStart) + machHeader->sizeofcmds);
 
-        SymTabCommand_t* symTabCommand = nullptr;       
-        uintptr_t linkEditBase = 0;
+        SymTabCommand_t* symTabCommand = nullptr;
+        bool hasText = false;
+        bool hasLinkEdit = false;
+        uintptr_t textVmAddr = 0;
+        uintptr_t linkEditVmAddr = 0;
+        uintptr_t linkEditFileOffset = 0;
 
-        for (auto* loadCommand = loadCommandStart; loadCommand < loadCommandEnd && (symTabCommand == nullptr || linkEditBase == 0); loadCommand = (LoadCommand_t*)((uintptr_t)loadCommand + loadCommand->cmdsize))
+        for (auto* loadCommand = loadCommandStart; loadCommand < loadCommandEnd; loadCommand = (LoadCommand_t*)((uintptr_t)loadCommand + loadCommand->cmdsize))
         {
+            const char* segmentName = nullptr;
+            uintptr_t vmAddr = 0;
+            uintptr_t fileOffset = 0;
             if (loadCommand->cmd == LC_SYMTAB)
             {
                 symTabCommand = (SymTabCommand_t*)loadCommand;
             }
-            else if (loadCommand->cmd == LC_SEGMENT && strncmp(((segment_command*)loadCommand)->segname, SEG_LINKEDIT, sizeof(((segment_command*)loadCommand)->segname)) == 0)
+            else if (loadCommand->cmd == LC_SEGMENT)
             {
-                linkEditBase = (uintptr_t)foundModuleBase + ((segment_command*)loadCommand)->vmaddr - ((segment_command*)loadCommand)->fileoff;
+                segmentName = ((segment_command*)loadCommand)->segname;
+                vmAddr = ((segment_command*)loadCommand)->vmaddr;
+                fileOffset = ((segment_command*)loadCommand)->fileoff;
             }
-            else if (loadCommand->cmd == LC_SEGMENT_64 && strncmp(((segment_command_64*)loadCommand)->segname, SEG_LINKEDIT, sizeof(((segment_command_64*)loadCommand)->segname)) == 0)
+            else if (loadCommand->cmd == LC_SEGMENT_64)
             {
-                linkEditBase = (uintptr_t)foundModuleBase + ((segment_command_64*)loadCommand)->vmaddr - ((segment_command_64*)loadCommand)->fileoff;
+                segmentName = ((segment_command_64*)loadCommand)->segname;
+                vmAddr = ((segment_command_64*)loadCommand)->vmaddr;
+                fileOffset = ((segment_command_64*)loadCommand)->fileoff;
+            }
+
+            if (segmentName == nullptr)
+                continue;
+
+            if (strncmp(segmentName, SEG_TEXT, 16) == 0)
+            {
+                hasText = true;
+                textVmAddr = vmAddr;
+            }
+            else if (strncmp(segmentName, SEG_LINKEDIT, 16) == 0)
+            {
+                hasLinkEdit = true;
+                linkEditVmAddr = vmAddr;
+                linkEditFileOffset = fileOffset;
             }
         }
 
-        if (symTabCommand == nullptr || linkEditBase == 0)
+        if (symTabCommand == nullptr || !hasText || !hasLinkEdit)
             return false;
 
-        *moduleBase = foundModuleBase;
+        // The header is at the start of __TEXT. Its link address is 0 for a dylib, but not for an executable (0x100000000).
+        *slide = (uintptr_t)foundModuleBase - textVmAddr;
+        const uintptr_t linkEditBase = *slide + linkEditVmAddr - linkEditFileOffset;
+
         *dynamicSymbols = (NList_t*)(linkEditBase + symTabCommand->symoff);
         *dynamicSymbolsNames = (const char*)(linkEditBase + symTabCommand->stroff);
         *dynamicSymbolsCount = symTabCommand->nsyms;
@@ -594,13 +624,13 @@ namespace Implementation {
 
     size_t GetAllExportedSymbols(void* moduleHandle, ExportDetails_t* exportDetails, size_t exportDetailsCount)
     {
-        void* moduleBase;
+        uintptr_t slide;
         NList_t* dynamicSymbols;
         uint32_t dynamicSymbolsCount;
         const char* dynamicSymbolsNames;
         size_t result = 0;
         
-        if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbols, &dynamicSymbolsNames, &dynamicSymbolsCount))
+        if (!_LoadModuleExportDetails(moduleHandle, &slide, &dynamicSymbols, &dynamicSymbolsNames, &dynamicSymbolsCount))
             return result;
 
         if (exportDetails == nullptr)
@@ -612,7 +642,7 @@ namespace Implementation {
             return result;
         }
 
-        SPDLOG_INFO("{} - {}", moduleHandle, moduleBase);
+        SPDLOG_INFO("{} - slide {:x}", moduleHandle, slide);
         for (uint32_t i = 0; i < dynamicSymbolsCount && result < exportDetailsCount; ++i)
         {
             if (!(dynamicSymbols[i].n_type & N_EXT))
@@ -625,8 +655,10 @@ namespace Implementation {
             if ((dynamicSymbols[i].n_type & N_TYPE) == N_UNDF)
                 continue;
 
-            exportDetails[result].ExportName = dynamicSymbolsNames + dynamicSymbols[i].n_un.n_strx + 1; // NOTE: on macos, export starts with '_'.
-            exportDetails[result].ExportCallAddress = (void*)((uintptr_t)moduleBase + dynamicSymbols[i].n_value);
+            // C symbols start with '_' on macOS.
+            const char* symbolName = dynamicSymbolsNames + dynamicSymbols[i].n_un.n_strx;
+            exportDetails[result].ExportName = symbolName[0] == '_' ? symbolName + 1 : symbolName;
+            exportDetails[result].ExportCallAddress = (void*)(slide + dynamicSymbols[i].n_value);
             exportDetails[result++].ExportOrdinal = i;
         }
 
