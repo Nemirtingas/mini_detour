@@ -668,12 +668,12 @@ namespace Implementation {
             if (segmentName == nullptr)
                 continue;
 
-            if (strncmp(segmentName, SEG_TEXT, 16) == 0)
+            if (strncmp(segmentName, SEG_TEXT, sizeof(segment_command::segname)) == 0)
             {
                 hasText = true;
                 textVmAddr = vmAddr;
             }
-            else if (strncmp(segmentName, SEG_LINKEDIT, 16) == 0)
+            else if (strncmp(segmentName, SEG_LINKEDIT, sizeof(segment_command::segname)) == 0)
             {
                 hasLinkEdit = true;
                 linkEditVmAddr = vmAddr;
