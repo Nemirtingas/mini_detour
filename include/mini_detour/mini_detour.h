@@ -479,9 +479,13 @@ public:
 
     inline Hook_t& operator=(Hook_t&& other) noexcept
     {
-        auto hookHandle = other._hookHandle;
-        other._hookHandle = nullptr;
-        _hookHandle = hookHandle;
+        if (this != &other)
+        {
+            // Free our current hook (restored if RestoreOnDestroy is set) before taking the other one.
+            MiniDetourHookTFree(_hookHandle);
+            _hookHandle = other._hookHandle;
+            other._hookHandle = nullptr;
+        }
         return *this;
     }
 
