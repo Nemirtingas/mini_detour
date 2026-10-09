@@ -29,6 +29,7 @@ Instructions for AI coding agents (and humans) working on **mini_detour**, a min
 - Do not mix reformatting, renaming or opportunistic cleanups with a fix. If a cleanup is needed, do it in its own branch.
 - If a fix depends on another one, land the dependency first, then branch the next fix from the updated `master`.
 - Commit messages: short imperative summary line (≤ 72 chars), then a body explaining *why*. Reference the bug (e.g. `BUGS.md #1`) when relevant.
+- Never add co-author trailers (`Co-Authored-By:` or similar attribution lines) to commit messages.
 - Update `BUGS.md` in the same branch when a listed bug is fixed (remove the entry or mark it fixed).
 
 ## Coding rules
