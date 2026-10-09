@@ -79,7 +79,7 @@ _DetourFunc = nullptr;
 ```
 (For `Reset(false)`, keep `_TrampolineAddress` elsewhere if needed, but don't expose it through the API anymore.)
 
-### 🟠 6. Return value of `_RelocateCode` ignored
+### ✅ 6. Return value of `_RelocateCode` ignored — fixed in `fix/check-relocate-code-result`
 [mini_detour.cpp:786](src/mini_detour.cpp:786)
 `_RelocateCode` can return 0 **without writing the jump back** ([mini_detour_x64.h:369](src/mini_detour_x64.h:369), [mini_detour_x86.h:318](src/mini_detour_x86.h:318)). The trampoline is then incomplete and `GetOriginalFunction()` runs zeroed memory.
 
