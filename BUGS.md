@@ -57,7 +57,7 @@ MemoryManipulation::MemoryProtect(_TrampolineAddress, jumpSize, MemoryManipulati
 MemoryManipulation::FlushInstructionCache(_TrampolineAddress, jumpSize);
 ```
 
-### 🟠 4. `HookFunc` doesn't check whether the object is already in use
+### ✅ 4. `HookFunc` doesn't check whether the object is already in use — fixed in `fix/refuse-hook-when-already-hooked`
 [mini_detour.cpp:730](src/mini_detour.cpp:730)
 `CanHook` refuses if `_OriginalFuncAddress != nullptr`, but `HookFunc` doesn't. Calling `HookFunction` twice on the same `Hook_t` overwrites the state: the first hook can't be restored anymore, and its trampoline/jump leak.
 
