@@ -106,7 +106,7 @@ On `goto error` after `MemoryProtect(functionToHook, rwx)`, the function page st
 [mini_detour.cpp:892-893](src/mini_detour.cpp:892)
 Returns `nullptr` without `Reset()`: the jump and the trampoline leak, and the destructor will try again. Call `Reset(true)` (the `mm` regions are still valid) before returning.
 
-### 🟡 10. No synchronization in `MemoryManager`
+### ✅ 10. No synchronization in `MemoryManager` — fixed in `fix/memory-manager-lock`
 `jumps_regions` / `trampolines_regions` and the bitmaps are modified without a lock. Two threads hooking at the same time can get the same slot. Add a `std::mutex` to `MemoryManager` (locked in `GetFreeJump`, `FreeJump`, `GetFreeTrampoline`, `FreeTrampoline`).
 
 ---
