@@ -489,7 +489,7 @@ write_basic_package_version_file(
 
 ## Tests (`tests/test.cpp`)
 
-### 🟡 44. Wrong test `_EnterRecursiveThunk` on x64
+### ✅ 44. Wrong test `_EnterRecursiveThunk` on x64 — fixed in `fix/test-recursive-thunk`
 [tests/test.cpp:43-46](tests/test.cpp:43)
 It decodes `FF 25` as an absolute address (x86 form), while on x64 it is `[rip + disp32]`. Reuse the `mini_detour_x64.h` version under an architecture `#if`.
 
