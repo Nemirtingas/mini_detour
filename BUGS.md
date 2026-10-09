@@ -457,7 +457,7 @@ and prefix the enumerators (`MINIDETOUR_MEM_R`…) while keeping C++ aliases in 
 
 ## Build (`CMakeLists.txt`)
 
-### 🟠 42. The installed package can't be used with `find_package`
+### ✅ 42. The installed package can't be used with `find_package` — fixed in `build/fix-installed-package`
 [CMakeLists.txt:329](CMakeLists.txt:329), [:345](CMakeLists.txt:345)
 - `install(EXPORT ... FILE MiniDetourConfig.cmake)` then `configure_package_config_file` installs **another** `MiniDetourConfig.cmake` at the same place, which includes `MiniDetourTargets.cmake`… never generated.
 - `write_basic_package_version_file(VERSION 0.0.0)` while the project is 1.1.4 → `find_package(MiniDetour 1.1)` fails.

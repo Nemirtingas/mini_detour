@@ -333,7 +333,7 @@ install(FILES ${MINIDETOUR_HEADERS}
 # Export targets
 install(
   EXPORT MiniDetourTargets
-  FILE MiniDetourConfig.cmake
+  FILE MiniDetourTargets.cmake
   NAMESPACE Nemirtingas::
   DESTINATION lib/cmake/MiniDetour
 )
@@ -349,7 +349,7 @@ configure_package_config_file(
   
 write_basic_package_version_file(
   ${CMAKE_CURRENT_BINARY_DIR}/MiniDetourConfigVersion.cmake
-  VERSION 0.0.0
+  VERSION ${PROJECT_VERSION}
   COMPATIBILITY SameMajorVersion)
   
 install(FILES
