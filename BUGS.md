@@ -414,7 +414,7 @@ sys_icache_invalidate(address, size);
 
 ## Public API (`include/mini_detour/mini_detour.h`)
 
-### 🟠 39. `Hook_t::operator=(Hook_t&&)` leaks the current handle
+### ✅ 39. `Hook_t::operator=(Hook_t&&)` leaks the current handle — fixed in `fix/hook-move-assignment`
 [mini_detour.h:480-486](include/mini_detour/mini_detour.h:480)
 The existing handle is overwritten without `MiniDetourHookTFree`; no protection against self-assignment.
 ```cpp
