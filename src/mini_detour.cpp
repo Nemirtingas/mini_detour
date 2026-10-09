@@ -975,6 +975,10 @@ MINIDETOUR_EXPORT(size_t) MiniDetourMemoryManipulationGetFreeRegions(MiniDetourM
 
 MINIDETOUR_EXPORT(bool) MiniDetourMemoryManipulationMemoryProtect(void* address, size_t size, MiniDetourMemoryManipulationMemoryRights rights, MiniDetourMemoryManipulationMemoryRights* old_rights)
 {
+    // mem_unset is what GetRegionInfos reports for an unknown region: restoring it would make the pages inaccessible.
+    if (rights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
+        return false;
+
     return MiniDetour::MemoryManipulation::Implementation::MemoryProtect(address, size, rights, old_rights);
 }
 
