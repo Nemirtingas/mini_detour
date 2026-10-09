@@ -178,7 +178,7 @@ if (!fitsSignExtended) { /* write the 13 bytes */ }
 ```
 (same in `GetOpcodeSize`), or always write the 13 bytes version.
 
-### 🟠 15. Fixed 80 bytes read after the function start
+### ✅ 15. Fixed 80 bytes read after the function start — fixed in `fix/bounded-code-read`
 [mini_detour_x64.h:228](src/mini_detour_x64.h:228), [:305](src/mini_detour_x64.h:305), x86 [:179](src/mini_detour_x86.h:179), [:256](src/mini_detour_x86.h:256), same on ARM/ARM64
 `memcpy(code_buffer, pCode, 80)` can go past the end of the mapped region (small function at the end of `.text`) → segfault.
 

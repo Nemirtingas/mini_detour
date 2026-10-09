@@ -263,6 +263,25 @@ public:
     }
 };
 
+// Copies up to size bytes of code starting at pCode. The page holding pCode is readable, but the next one may not be
+// (small function at the end of a mapping), so it is read safely and the result is shortened if it isn't readable.
+static size_t _ReadCode(const void* pCode, uint8_t* buffer, size_t size)
+{
+    const size_t pageSize = MiniDetour::MemoryManipulation::PageSize();
+    const size_t inPageSize = pageSize - (reinterpret_cast<uintptr_t>(pCode) % pageSize);
+    if (size <= inPageSize)
+    {
+        memcpy(buffer, pCode, size);
+        return size;
+    }
+
+    memcpy(buffer, pCode, inPageSize);
+    if (!MiniDetour::MemoryManipulation::SafeMemoryRead(const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(pCode)) + inPageSize, buffer + inPageSize, size - inPageSize))
+        return inPageSize;
+
+    return size;
+}
+
 #if defined(MINIDETOUR_ARCH_X64)
 #include "mini_detour_x64.h"
 
