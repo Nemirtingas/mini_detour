@@ -347,35 +347,27 @@ static inline void *MemoryAllocNear(HANDLE hProcess, uintptr_t addressHint, size
     if (freeRegionCount < freeRegions.size())
         freeRegions.resize(freeRegionCount);
 
-    std::sort(
-        freeRegions.begin(),
-        freeRegions.end(),
-        [addressHint](MemoryManipulation::RegionInfos_t const &l, MemoryManipulation::RegionInfos_t const &r)
-        { return std::max(addressHint, l.Start) - std::min(addressHint, l.Start) < std::max(addressHint, r.Start) - std::min(addressHint, r.Start); });
-
-    for (auto const &region : freeRegions)
+    std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](RegionInfos_t const& l, RegionInfos_t const& r)
     {
-        // Range of the allocation start address. Computed from the region size so a huge size can't wrap around,
-        // and the downward search starts at the highest address where the whole allocation fits.
-        if (size > region.End - region.Start)
-            continue;
+        return _DistanceToRegion(addressHint, l) < _DistanceToRegion(addressHint, r);
+    });
 
-        const uintptr_t lowest = region.Start;
-        const uintptr_t highest = std::min<uintptr_t>(region.End - size, (uintptr_t)max_user_address);
-        if (highest < lowest)
-            continue;
+    // VirtualAlloc rounds the reserved address down to the allocation granularity (64 KB), not to a page.
+    SYSTEM_INFO systemInfo;
+    GetSystemInfo(&systemInfo);
+    const size_t allocationGranularity = systemInfo.dwAllocationGranularity;
 
-        const bool upward = region.Start > addressHint;
-        for (uintptr_t allocAddress = upward ? lowest : highest;; allocAddress = upward ? allocAddress + pageSize : allocAddress - pageSize)
+    for (auto const& region : freeRegions)
+    {
+        address = _AllocInFreeRegion(region, addressHint, size, allocationGranularity, (uintptr_t)max_user_address, [&](uintptr_t allocAddress)
         {
-            address = (void *)allocAddress;
-            MemoryAllocWithProtection(hProcess, &address, size, rights);
-            if (address != nullptr)
-                return address;
+            void* allocated = (void*)allocAddress;
+            MemoryAllocWithProtection(hProcess, &allocated, size, rights);
+            return allocated;
+        });
 
-            if (upward ? highest - allocAddress < pageSize : allocAddress - lowest < pageSize)
-                break;
-        }
+        if (address != nullptr)
+            return address;
     }
 
     // Fallback to anywhere alloc
