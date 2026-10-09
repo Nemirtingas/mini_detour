@@ -265,9 +265,16 @@ if(MINIDETOUR_BUILD_TESTS)
     $<INSTALL_INTERFACE:include>
   )
 
+  # Each fix can add its own tests/test_*.cpp file without touching this list.
+  file(GLOB MINIDETOUR_TEST_SOURCES CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_LIST_DIR}/tests/test.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tests/test_*.cpp
+  )
+
   add_executable(
     tests
-    tests/test.cpp
+    ${MINIDETOUR_TEST_SOURCES}
+    tests/test_utils.h
   )
   
   set_target_properties(tests PROPERTIES
