@@ -255,7 +255,7 @@ ldr.w pc, [pc, #0]   ; f8df f000
 
 ## Windows (`src/mini_detour_windows.h`)
 
-### 🔴 22. Missing export / import directories not detected
+### ✅ 22. Missing export / import directories not detected — fixed in `fix/windows-missing-pe-directories`
 - [mini_detour_windows.h:435-438](src/mini_detour_windows.h:435): `moduleHandle + RVA` is never `nullptr`. If the module has no exports (RVA = 0), the DOS header is read as an `IMAGE_EXPORT_DIRECTORY`.
 - [mini_detour_windows.h:457](src/mini_detour_windows.h:457): `&&` instead of `||`; same problem for a module without imports (the `MZ...` DOS header is walked as a descriptor list → crash).
 

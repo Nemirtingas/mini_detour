@@ -429,13 +429,15 @@ static bool _LoadModuleExportDetails(
 
     PIMAGE_NT_HEADERS imageNTHeaders = (PIMAGE_NT_HEADERS)((DWORD_PTR)moduleHandle + imageDosHeader->e_lfanew);
 
-    if (imageNTHeaders->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC)
+    if (imageNTHeaders->Signature != IMAGE_NT_SIGNATURE || imageNTHeaders->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC)
         return false;
 
-    *imageExportDirectory = (PIMAGE_EXPORT_DIRECTORY)((LPBYTE)moduleHandle + imageNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress);
-
-    if (*imageExportDirectory == nullptr)
+    // An RVA of 0 means the module has no export directory.
+    auto const &exportDataDirectory = imageNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (imageNTHeaders->OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_EXPORT || exportDataDirectory.VirtualAddress == 0 || exportDataDirectory.Size == 0)
         return false;
+
+    *imageExportDirectory = (PIMAGE_EXPORT_DIRECTORY)((LPBYTE)moduleHandle + exportDataDirectory.VirtualAddress);
 
     *moduleBase           = moduleHandle;
     *functionAddressesRVA = (PDWORD)((LPBYTE)moduleHandle + (*imageExportDirectory)->AddressOfFunctions);
@@ -454,11 +456,16 @@ static bool _LoadModuleIATDetails(void *moduleHandle, void **moduleBase, PIMAGE_
 
     PIMAGE_NT_HEADERS imageNTHeaders = (PIMAGE_NT_HEADERS)((DWORD_PTR)moduleHandle + imageDosHeader->e_lfanew);
 
-    if (imageNTHeaders->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC && imageNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size == 0)
+    if (imageNTHeaders->Signature != IMAGE_NT_SIGNATURE || imageNTHeaders->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC)
+        return false;
+
+    // An RVA of 0 means the module has no import directory.
+    auto const &importDataDirectory = imageNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (imageNTHeaders->OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_IMPORT || importDataDirectory.VirtualAddress == 0 || importDataDirectory.Size == 0)
         return false;
 
     *moduleBase            = moduleHandle;
-    *imageImportDescriptor = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)imageDosHeader + imageNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    *imageImportDescriptor = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)imageDosHeader + importDataDirectory.VirtualAddress);
 
     return true;
 }
