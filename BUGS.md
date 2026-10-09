@@ -376,6 +376,8 @@ If `GetRegionInfos` doesn't find the address, `oldRights == mem_unset`, and the 
 [mini_detour_linux.h:853](src/mini_detour_linux.h:853), [:897](src/mini_detour_linux.h:897) (same on Windows [:769](src/mini_detour_windows.h:769), [:806](src/mini_detour_windows.h:806))
 The GOT/IAT is data: `mem_rw` is enough, RWX is needlessly permissive. `R_GLOBAL_DATA` relocations (code built with `-fno-plt`) aren't handled.
 
+- ✅ RWX rights — fixed in `fix/iat-write-without-exec` (the page keeps its rights, only write access is added).
+
 ---
 
 ## macOS (`src/mini_detour_macos.h`)
