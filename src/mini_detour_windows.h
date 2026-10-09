@@ -340,8 +340,19 @@ static inline BOOL MemoryAllocWithProtection(HANDLE hProcess, LPVOID *address, S
 // Allocates at this exact address, fails if it isn't free.
 static inline void *_MemoryAllocAt(void *address, size_t size, MemoryRights rights)
 {
-    MemoryAllocWithProtection(GetCurrentProcess(), &address, size, rights);
-    return address;
+    // VirtualAlloc treats NULL as "anywhere".
+    if (address == nullptr)
+        return nullptr;
+
+    void *allocated = address;
+    MemoryAllocWithProtection(GetCurrentProcess(), &allocated, size, rights);
+    if (allocated != nullptr && allocated != address)
+    {
+        MemoryFree(allocated, size);
+        return nullptr;
+    }
+
+    return allocated;
 }
 
 static inline void *_MemoryAllocAnywhere(size_t size, MemoryRights rights)
