@@ -309,7 +309,7 @@ If the name fits exactly in `regionNameSize` bytes, `WideCharToMultiByte` return
 
 **Fix:** add `case PAGE_WRITECOPY: return mem_rw;` and `case PAGE_EXECUTE_WRITECOPY: return mem_rwx;`, and mask `Protect & 0xFF` everywhere.
 
-### 🟡 27. Imports without `OriginalFirstThunk`
+### ✅ 27. Imports without `OriginalFirstThunk` — fixed in `fix/windows-imports-without-original-thunk`
 [mini_detour_windows.h:540](src/mini_detour_windows.h:540), [:619](src/mini_detour_windows.h:619), [:633](src/mini_detour_windows.h:633)
 Some binaries (old linkers, bound imports) have `OriginalFirstThunk == 0` → `moduleBase` is read. Use `FirstThunk` as a fallback. `stricmp` → `_stricmp` for MSVC.
 
