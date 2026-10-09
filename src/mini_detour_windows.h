@@ -337,65 +337,26 @@ static inline BOOL MemoryAllocWithProtection(HANDLE hProcess, LPVOID *address, S
     return *address != nullptr;
 }
 
-static inline void *MemoryAllocNear(HANDLE hProcess, uintptr_t addressHint, size_t size, MemoryRights rights, size_t pageSize)
+// Allocates at this exact address, fails if it isn't free.
+static inline void *_MemoryAllocAt(void *address, size_t size, MemoryRights rights)
 {
-    void *address;
-
-    auto freeRegionCount = GetFreeRegions(nullptr, 0);
-    std::vector<RegionInfos_t> freeRegions((size_t)(freeRegionCount * 1.5));
-    freeRegionCount = GetFreeRegions(freeRegions.data(), freeRegions.size());
-    if (freeRegionCount < freeRegions.size())
-        freeRegions.resize(freeRegionCount);
-
-    std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](RegionInfos_t const& l, RegionInfos_t const& r)
-    {
-        return _DistanceToRegion(addressHint, l) < _DistanceToRegion(addressHint, r);
-    });
-
-    // VirtualAlloc rounds the reserved address down to the allocation granularity (64 KB), not to a page.
-    SYSTEM_INFO systemInfo;
-    GetSystemInfo(&systemInfo);
-    const size_t allocationGranularity = systemInfo.dwAllocationGranularity;
-
-    for (auto const& region : freeRegions)
-    {
-        address = _AllocInFreeRegion(region, addressHint, size, allocationGranularity, (uintptr_t)max_user_address, [&](uintptr_t allocAddress)
-        {
-            void* allocated = (void*)allocAddress;
-            MemoryAllocWithProtection(hProcess, &allocated, size, rights);
-            return allocated;
-        });
-
-        if (address != nullptr)
-            return address;
-    }
-
-    // Fallback to anywhere alloc
-    address = nullptr;
-    MemoryAllocWithProtection(hProcess, &address, size, rights);
-
+    MemoryAllocWithProtection(GetCurrentProcess(), &address, size, rights);
     return address;
 }
 
-void *MemoryAlloc(void *_addressHint, size_t size, MemoryRights rights)
+static inline void *_MemoryAllocAnywhere(size_t size, MemoryRights rights)
 {
-    if (_addressHint > max_user_address)
-        _addressHint = (void *)max_user_address;
+    LPVOID address = nullptr;
+    MemoryAllocWithProtection(GetCurrentProcess(), &address, size, rights);
+    return (void *)address;
+}
 
-    auto pageSize    = PageSize();
-    auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
-    size             = _PageAddrSize((void *)addressHint, size, pageSize);
-
-    HANDLE hProcess = GetCurrentProcess();
-
-    if (_addressHint == nullptr)
-    {
-        LPVOID address = nullptr;
-        MemoryAllocWithProtection(hProcess, &address, size, rights);
-        return (void *)address;
-    }
-
-    return MemoryAllocNear(hProcess, addressHint, size, rights, pageSize);
+// VirtualAlloc rounds the reserved address down to the allocation granularity (64 KB), not to a page.
+static inline size_t _AllocationGranularity()
+{
+    SYSTEM_INFO systemInfo;
+    GetSystemInfo(&systemInfo);
+    return systemInfo.dwAllocationGranularity;
 }
 
 bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
