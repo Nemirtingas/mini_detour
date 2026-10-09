@@ -213,7 +213,7 @@ AbsJump::WriteOpcodes(pTrampolineCode, originalCodeTarget, func_mode, func_mode)
 ```
 (and adapt the signature of the other archs, or use a default parameter).
 
-### 🔴 18. Relative jump size computed to the wrong destination → `_HookCode` overflow
+### ✅ 18. Relative jump size computed to the wrong destination → `_HookCode` overflow — fixed in `fix/relative-jump-size`
 [mini_detour.cpp:670](src/mini_detour.cpp:670), [:826-827](src/mini_detour.cpp:826)
 `relativeJumpSize` is computed to `newFunction`, but the written jump goes to `jump_mem` (allocated later). In Thumb, the size can be 2 while the real jump takes 4: `RelJump::WriteOpcodes` writes 4 bytes into a 2 bytes `std::vector` (heap overflow) and only 2 bytes were saved/relocated.
 
