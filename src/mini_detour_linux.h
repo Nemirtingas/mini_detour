@@ -468,7 +468,7 @@ namespace Implementation {
 
         *dynamicSymbolsNamesSize = dynamicEntry->d_un.d_val;
 
-        return *dynamicSymbolsNames != nullptr && dynamicSymbolsNamesSize != 0;
+        return *dynamicSymbolsNames != nullptr && *dynamicSymbolsNamesSize != 0;
     }
 
     static bool _LoadModuleExportDetails(void* moduleHandle, void** moduleBase, ElfSymbol_t** dynamicSymbolsStart, ElfSymbol_t** dynamicSymbolsEnd, size_t* dynamicSymbolsSize, const char** dynamicSymbolsNames, size_t* dynamicSymbolsNamesSize)

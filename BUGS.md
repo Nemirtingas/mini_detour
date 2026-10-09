@@ -368,7 +368,7 @@ If `GetRegionInfos` doesn't find the address, `oldRights == mem_unset`, and the 
 
 **Fix:** in `MemoryProtect` (every platform), refuse `rights == mem_unset` (return `false` without doing anything).
 
-### 🟡 33. `_LoadModuleCommonDetails` tests the pointer instead of the value
+### ✅ 33. `_LoadModuleCommonDetails` tests the pointer instead of the value — fixed in `fix/linux-strsz-check`
 [mini_detour_linux.h:471](src/mini_detour_linux.h:471)
 `dynamicSymbolsNamesSize != 0` → always true. Replace with `*dynamicSymbolsNamesSize != 0`.
 
