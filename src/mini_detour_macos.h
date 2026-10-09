@@ -5,6 +5,7 @@
 #include <mach/mach_vm.h>
 #include <mach/vm_prot.h>
 #include <mach/vm_map.h>
+#include <mach/vm_param.h>
 #include <mach-o/loader.h>
 #include <mach-o/dyld.h>
 #include <mach-o/dyld_images.h>
@@ -108,13 +109,6 @@ std::string kern_return_t_2_str(kern_return_t v)
 namespace MiniDetour {
 namespace MemoryManipulation {
 namespace Implementation {
-#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
-    const void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
-#elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
-    // 32 bits process on 64 bits kernel gets the whole 4GB
-    const void* max_user_address = reinterpret_cast<void*>(0xfffff000);
-#endif
-
     size_t _MemoryProtectRightsToNative(MemoryRights rights)
     {
         switch (rights)
@@ -372,6 +366,18 @@ namespace Implementation {
         void* address = nullptr;
         MemoryAllocWithProtection(mach_task_self(), &address, size, rights, VM_FLAGS_ANYWHERE);
         return address;
+    }
+
+    // Nothing can be allocated in __PAGEZERO.
+    static inline uintptr_t _MinUserAddress()
+    {
+        return static_cast<uintptr_t>(_PageZeroEnd());
+    }
+
+    // End of the user address space.
+    static inline uintptr_t _MaxUserAddress()
+    {
+        return static_cast<uintptr_t>(MACH_VM_MAX_ADDRESS);
     }
 
     // mach_vm_allocate places a mapping at any page.
