@@ -6,8 +6,6 @@
 #include <limits>
 #include <mutex>
 #include <new>
-#include <utility>
-#include <type_traits> // std::move
 #include <fstream>
 #include <string>
 #include <vector>
@@ -661,39 +659,9 @@ class Hook_t
     {
     }
 
-    Hook_t(Hook_t &&other) noexcept
-        : _OriginalFuncAddress(std::move(other._OriginalFuncAddress))
-        , _SavedCode(std::move(other._SavedCode))
-        , _HookCode(std::move(other._HookCode))
-        , _OriginalTrampolineAddress(std::move(other._OriginalTrampolineAddress))
-        , _DetourFunc(std::move(other._DetourFunc))
-        , _TrampolineAddress(std::move(other._TrampolineAddress))
-        , _RestoreOnDestroy(std::move(other._RestoreOnDestroy))
-        , _DetourCallFunc(std::move(other._DetourCallFunc))
-        , _OriginalTrampolineCallAddress(std::move(other._OriginalTrampolineCallAddress))
-    {
-        other._RestoreOnDestroy = false;
-    }
-
-    Hook_t &operator=(Hook_t &&other) noexcept
-    {
-        if (this != &other)
-        {
-            _OriginalFuncAddress           = std::move(other._OriginalFuncAddress);
-            _SavedCode                     = std::move(other._SavedCode);
-            _HookCode                      = std::move(other._HookCode);
-            _OriginalTrampolineAddress     = std::move(other._OriginalTrampolineAddress);
-            _DetourFunc                    = std::move(other._DetourFunc);
-            _TrampolineAddress             = std::move(other._TrampolineAddress);
-            _RestoreOnDestroy              = std::move(other._RestoreOnDestroy);
-            _DetourCallFunc                = std::move(other._DetourCallFunc);
-            _OriginalTrampolineCallAddress = std::move(other._OriginalTrampolineCallAddress);
-
-            other._RestoreOnDestroy = false;
-        }
-
-        return *this;
-    }
+    // Only used through a handle: never copied nor moved.
+    Hook_t(Hook_t const &)            = delete;
+    Hook_t &operator=(Hook_t const &) = delete;
 
     ~Hook_t()
     {
