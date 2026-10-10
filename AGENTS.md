@@ -81,4 +81,4 @@ Then run the `tests` executable from the build output directory (`build/Debug/te
 
 - A branch must build and pass the tests on the platforms it touches before it is handed over for review.
 - Every bug fix should come with a test in `tests/test.cpp` that fails without the fix, when it is testable.
-- CI is defined in `.github/workflows/main.yml` (Windows x86/x64, Linux x86/x64/ARM/ARM64 under QEMU, macOS).
+- CI is defined in `.github/workflows/main.yml` (Windows x86/x64, Linux x86/x64/ARM/ARM64 under QEMU, macOS ARM64). macOS x64 is tested locally by the maintainer.
