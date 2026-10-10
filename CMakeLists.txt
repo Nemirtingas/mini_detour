@@ -158,6 +158,9 @@ target_compile_options(
   $<$<BOOL:${MSVC}>:/utf-8>
 )
 
+# The C++ part of the public header (noexcept, deleted functions) needs C++11 in the projects using it too.
+target_compile_features(mini_detour PUBLIC cxx_std_11)
+
 target_include_directories(
   mini_detour
   PUBLIC
