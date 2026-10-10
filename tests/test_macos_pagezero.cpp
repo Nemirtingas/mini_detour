@@ -27,7 +27,7 @@ TEST_CASE("__PAGEZERO is not free memory", "[macos_pagezero]")
     freeRegions.resize(MiniDetour::MemoryManipulation::GetFreeRegions(freeRegions.data(), freeRegions.size()));
 
     bool listedAsFree = false;
-    for (auto const& region : freeRegions)
+    for (auto const &region : freeRegions)
         listedAsFree |= region.Start <= belowExecutable && belowExecutable < region.End;
 
     CHECK_FALSE(listedAsFree);

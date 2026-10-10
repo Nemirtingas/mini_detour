@@ -7,14 +7,14 @@
 TEST_CASE("Region infos of a free address", "[region_infos_free]")
 {
     const size_t size = MiniDetour::MemoryManipulation::PageSize();
-    void* address = MiniDetour::MemoryManipulation::MemoryAlloc(nullptr, size, MiniDetour::MemoryManipulation::MemoryRights::mem_rw);
+    void *address     = MiniDetour::MemoryManipulation::MemoryAlloc(nullptr, size, MiniDetour::MemoryManipulation::MemoryRights::mem_rw);
     REQUIRE(address != nullptr);
     MiniDetour::MemoryManipulation::MemoryFree(address, size);
 
     MiniDetour::MemoryManipulation::RegionInfos_t infos;
     infos.Rights = MiniDetour::MemoryManipulation::MemoryRights::mem_rwx;
-    infos.Start = 1;
-    infos.End = 2;
+    infos.Start  = 1;
+    infos.End    = 2;
     MiniDetour::MemoryManipulation::GetRegionInfos(address, &infos);
 
     // Windows reports free memory as mem_none, Linux and macOS as mem_unset.

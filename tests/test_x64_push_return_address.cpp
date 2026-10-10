@@ -62,10 +62,16 @@ TEST_CASE("Relocated call pushes a return address between 2 and 4 GB", "[x64_pus
 
     const size_t calleeOffset = 32;
     const uint8_t function[]  = {
-        0x90,                            // 0: nop (so the function isn't taken for a thunk)
-        0xE8, calleeOffset - 6, 0, 0, 0, // 1: call callee
-        0x83, 0xC0, 0x01,                // 6: add eax, 1
-        0xC3,                            // 9: ret
+        0x90, // 0: nop (so the function isn't taken for a thunk)
+        0xE8,
+        calleeOffset - 6,
+        0,
+        0,
+        0, // 1: call callee
+        0x83,
+        0xC0,
+        0x01, // 6: add eax, 1
+        0xC3, // 9: ret
     };
     const uint8_t callee[] = {0xB8, 41, 0, 0, 0, 0xC3}; // mov eax, 41 ; ret
     memcpy(code, function, sizeof(function));

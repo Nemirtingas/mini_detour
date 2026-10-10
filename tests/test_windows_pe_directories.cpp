@@ -22,9 +22,9 @@ static std::vector<uint8_t> MakePeWithoutDirectories()
     dosHeader->e_lfarlc = 0x40;
     dosHeader->e_lfanew = 0x80;
 
-    auto *ntHeaders                  = reinterpret_cast<IMAGE_NT_HEADERS *>(image.data() + dosHeader->e_lfanew);
-    ntHeaders->Signature             = IMAGE_NT_SIGNATURE;
-    ntHeaders->OptionalHeader.Magic  = IMAGE_NT_OPTIONAL_HDR_MAGIC;
+    auto *ntHeaders                               = reinterpret_cast<IMAGE_NT_HEADERS *>(image.data() + dosHeader->e_lfanew);
+    ntHeaders->Signature                          = IMAGE_NT_SIGNATURE;
+    ntHeaders->OptionalHeader.Magic               = IMAGE_NT_OPTIONAL_HDR_MAGIC;
     ntHeaders->OptionalHeader.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
 
     return image;

@@ -20,16 +20,16 @@ TEST_CASE("Hook a function at the end of a readable page", "[page_end]")
 
     // nop; mov eax, 42; ret -- ends exactly at the end of the first page.
     const size_t functionOffset = pageSize - 7;
-    code.Write(functionOffset, { 0x90, 0xB8, 42, 0, 0, 0, 0xC3 });
+    code.Write(functionOffset, {0x90, 0xB8, 42, 0, 0, 0, 0xC3});
 
     // The next page can't be read.
     REQUIRE(MiniDetour::MemoryManipulation::MemoryProtect(code.Data(pageSize), pageSize, MiniDetour::MemoryManipulation::MemoryRights::mem_none));
 
-    auto function = code.As<int(TEST_CALL*)()>(functionOffset);
+    auto function = code.As<int(TEST_CALL *)()>(functionOffset);
     REQUIRE(function() == 42);
 
     MiniDetour::Hook_t hook;
-    auto original = reinterpret_cast<int(TEST_CALL*)()>(hook.HookFunction((void*)function, (void*)&PageEndDetour));
+    auto original = reinterpret_cast<int(TEST_CALL *)()>(hook.HookFunction((void *)function, (void *)&PageEndDetour));
     REQUIRE(original != nullptr);
 
     CHECK(function() == 7);

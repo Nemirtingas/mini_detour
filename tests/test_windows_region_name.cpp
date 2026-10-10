@@ -31,10 +31,10 @@ TEST_CASE("Region name exactly filling the buffer doesn't overflow", "[region_na
     const std::string modulePath = GetCurrentModulePathUtf8();
     REQUIRE(!modulePath.empty());
 
-    const size_t nameOffset  = offsetof(MiniDetourMemoryManipulationRegionInfos_t, ModuleName);
-    const size_t nameSize    = modulePath.size();
-    const uint8_t canary     = 0xAB;
-    const size_t canarySize  = 16;
+    const size_t nameOffset = offsetof(MiniDetourMemoryManipulationRegionInfos_t, ModuleName);
+    const size_t nameSize   = modulePath.size();
+    const uint8_t canary    = 0xAB;
+    const size_t canarySize = 16;
     std::vector<uint8_t> buffer(nameOffset + nameSize + canarySize + sizeof(MiniDetourMemoryManipulationRegionInfos_t), canary);
 
     auto *regionInfos = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t *>(buffer.data());

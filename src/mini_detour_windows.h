@@ -132,10 +132,7 @@ class _OtherThreadsFreezer_t
     }
 
   public:
-    ~_OtherThreadsFreezer_t()
-    {
-        Unfreeze();
-    }
+    ~_OtherThreadsFreezer_t() { Unfreeze(); }
 
     // Retries a few times when a thread is inside the code: it is most likely only passing through.
     bool Freeze(void *code, size_t size)
@@ -711,7 +708,8 @@ static inline void **_FindBoundIATSlot(void **addressTable, const char *libraryN
 }
 
 // boundAddress: current value of the slot if known (used only for modules without OriginalFirstThunk).
-static inline void **_GetIATAddress(void *moduleBase, PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor, const char *moduleName, const char *symbolName, DWORD ordinal, void *boundAddress = nullptr)
+static inline void **
+_GetIATAddress(void *moduleBase, PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor, const char *moduleName, const char *symbolName, DWORD ordinal, void *boundAddress = nullptr)
 {
     void **addressTable         = nullptr;
     PIMAGE_THUNK_DATA thunkData = nullptr;
@@ -1018,7 +1016,13 @@ static size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatRe
 
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
     {
-        auto iatAddress = _GetIATAddress(moduleBase, imageImportDescriptor, iatReplaceDetails[i].IATModuleName, iatReplaceDetails[i].IATName, iatReplaceDetails[i].IATOrdinal, replacedAddresses[i]);
+        auto iatAddress = _GetIATAddress(
+            moduleBase,
+            imageImportDescriptor,
+            iatReplaceDetails[i].IATModuleName,
+            iatReplaceDetails[i].IATName,
+            iatReplaceDetails[i].IATOrdinal,
+            replacedAddresses[i]);
         if (iatAddress == nullptr)
         {
             iatReplaceDetails[i].NewIATAddress = nullptr;

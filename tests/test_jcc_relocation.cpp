@@ -38,15 +38,27 @@ TEST_CASE("Relocate a short conditional jump", "[jcc_relocation]")
     CodeBuffer code;
     REQUIRE(code.IsValid());
 
-    code.Write(0, {
-        0x90,                         // 0:  nop (the relocated prologue must be at least 5 bytes)
-        0x85, TEST_ARG0_TEST_SELF,    // 1:  test arg0, arg0
-        0x75, 0x06,                   // 3:  jne 11
-        0xB8, 0x02, 0x00, 0x00, 0x00, // 5:  mov eax, 2
-        0xC3,                         // 10: ret
-        0xB8, 0x01, 0x00, 0x00, 0x00, // 11: mov eax, 1
-        0xC3,                         // 16: ret
-    });
+    code.Write(
+        0,
+        {
+            0x90, // 0:  nop (the relocated prologue must be at least 5 bytes)
+            0x85,
+            TEST_ARG0_TEST_SELF, // 1:  test arg0, arg0
+            0x75,
+            0x06, // 3:  jne 11
+            0xB8,
+            0x02,
+            0x00,
+            0x00,
+            0x00, // 5:  mov eax, 2
+            0xC3, // 10: ret
+            0xB8,
+            0x01,
+            0x00,
+            0x00,
+            0x00, // 11: mov eax, 1
+            0xC3, // 16: ret
+        });
 
     CheckJccFunction(code);
 }
@@ -56,14 +68,22 @@ TEST_CASE("Relocate a near conditional jump", "[jcc_relocation]")
     CodeBuffer code;
     REQUIRE(code.IsValid());
 
-    code.Write(0, {
-        0x85, TEST_ARG0_TEST_SELF,          // 0:  test arg0, arg0
-        0x0F, 0x85, 0x06, 0x00, 0x00, 0x00, // 2:  jne 14
-        0xB8, 0x02, 0x00, 0x00, 0x00,       // 8:  mov eax, 2
-        0xC3,                               // 13: ret
-        0xB8, 0x01, 0x00, 0x00, 0x00,       // 14: mov eax, 1
-        0xC3,                               // 19: ret
-    });
+    code.Write(
+        0,
+        {
+            0x85, TEST_ARG0_TEST_SELF, // 0:  test arg0, arg0
+            0x0F, 0x85,
+            0x06, 0x00,
+            0x00, 0x00, // 2:  jne 14
+            0xB8, 0x02,
+            0x00, 0x00,
+            0x00, // 8:  mov eax, 2
+            0xC3, // 13: ret
+            0xB8, 0x01,
+            0x00, 0x00,
+            0x00, // 14: mov eax, 1
+            0xC3, // 19: ret
+        });
 
     CheckJccFunction(code);
 }
