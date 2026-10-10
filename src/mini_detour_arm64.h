@@ -4,9 +4,9 @@
 // AArch64 // Need to align code on 4 bytes address (opcode are 4bytes fixed length)
 
 // Registers 	Description
-// X0 – X7     argumentsand return value
-// X8 – X18    temporary registers
-// X19 – X28   callee - saved registers
+// X0 - X7     arguments and return value
+// X8 - X18    temporary registers
+// X19 - X28   callee - saved registers
 // X29         frame pointer
 // X30         link register
 // SP          stack pointer
@@ -162,8 +162,6 @@ struct RelJump
 
 #pragma pack(pop)
 
-// Follows PLT entries to the function they jump to, read from their GOT entry:
-//   [bti c]; adrp x16, page; ldr x17, [x16, #offset]; add x16, x16, #offset; br x17
 // The code mode is carried by the address on ARM (Thumb bit): ARM64 has a single mode.
 static inline int _GetCodeMode(void * /*address*/)
 {
@@ -187,6 +185,8 @@ static inline cs_err _InitDisasm(CodeDisasm &disasm, int /*mode*/)
     return disasm.Init(cs_arch::CS_ARCH_ARM64, (cs_mode)(cs_mode::CS_MODE_ARM | CodeDisasm::RuntimeEndianness()));
 }
 
+// Follows PLT entries to the function they jump to, read from their GOT entry:
+//   [bti c]; adrp x16, page; ldr x17, [x16, #offset]; add x16, x16, #offset; br x17
 static void _EnterRecursiveThunk(void *&_pCode)
 {
     // A longer chain is most likely a loop.
