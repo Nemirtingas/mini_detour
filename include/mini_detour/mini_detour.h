@@ -4,9 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// The C API doesn't use bool: it isn't a C89 type and needs stdbool.h, which some compilers and projects don't have or
-// define differently. Booleans are int: 0 is false, any other value is true, and functions return 1 for true.
-
 #if defined(WIN64) || defined(_WIN64) || defined(__MINGW64__) || defined(WIN32) || defined(_WIN32) || defined(__MINGW32__)
     #define MINIDETOUR_OS_WINDOWS
 
