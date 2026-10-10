@@ -573,17 +573,14 @@ static bool _ReplaceModuleExportWithTrampoline(void *moduleBase, ElfAddr_t *expo
     if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::MemoryRights::mem_rw, &oldRights))
         goto ErrorFree;
 
-    if (!MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rwx, nullptr))
+    if (!_WriteJumpSlot(exportJump, newExportAddress, _GetCodeMode(exportJump), _GetCodeMode(newExportAddress)))
         goto ErrorFree;
-
-    MemoryManipulation::WriteAbsoluteJump(exportJump, newExportAddress);
 
     if (exportCallAddress != nullptr)
         *exportCallAddress = (void *)((char *)moduleBase + *exportAddress);
 
     *exportAddress = (uintptr_t)exportJump - (uintptr_t)moduleBase;
 
-    MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rx, nullptr);
     MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
 
     return true;
