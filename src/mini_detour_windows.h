@@ -440,8 +440,9 @@ static bool MemoryProtect(void *address, size_t size, MemoryRights rights, Memor
     DWORD oldProtect;
     bool res = VirtualProtect(address, size, _MemoryProtectRightsToNative(rights), &oldProtect) != FALSE;
 
+    // oldProtect isn't set when VirtualProtect fails.
     if (old_rights != nullptr)
-        *old_rights = _MemoryNativeToProtectRights(oldProtect);
+        *old_rights = res ? _MemoryNativeToProtectRights(oldProtect) : MemoryRights::mem_unset;
 
     return res;
 }
