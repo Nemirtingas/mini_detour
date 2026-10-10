@@ -882,10 +882,9 @@ class Hook_t
             goto error;
         }
 
-        _SavedCode.resize(relocatableSize);
-
-        // Save the original code
-        memcpy(&_SavedCode[0], functionToHook, _SavedCode.size());
+        // Only the bytes overwritten by the jump are saved and restored: the next ones may be changed by someone else
+        // while the hook is set.
+        _SavedCode.assign(reinterpret_cast<uint8_t *>(functionToHook), reinterpret_cast<uint8_t *>(functionToHook) + relativeJumpSize);
 
         // Upper bound of the trampoline code: the relocated code + the jump back to the function (its size can depend
         // on its destination). Used to check the slot size, and to protect and flush the whole trampoline.
@@ -963,7 +962,7 @@ class Hook_t
 
             // Relative jump shoud have the same mode as the hooked function.
             // A shorter encoding than relativeJumpSize keeps the original bytes after it.
-            _HookCode.assign(_SavedCode.begin(), _SavedCode.begin() + relativeJumpSize);
+            _HookCode = _SavedCode;
             RelJump::WriteOpcodes(_HookCode.data(), functionToHook, jump_mem, func_mode, func_mode);
             {
                 // Nothing can be logged while the other threads are suspended: it would allocate.
@@ -997,8 +996,8 @@ class Hook_t
         MemoryManipulation::MemoryProtect(_OriginalTrampolineAddress, totalOriginalTrampolineSize, MemoryManipulation::MemoryRights::mem_rx);
         MemoryManipulation::FlushInstructionCache(_OriginalTrampolineAddress, totalOriginalTrampolineSize);
 
-        _RestoreCodeRights(functionToHook, relocatableSize, functionOldRights);
-        MemoryManipulation::FlushInstructionCache(functionToHook, relocatableSize);
+        _RestoreCodeRights(functionToHook, _SavedCode.size(), functionOldRights);
+        MemoryManipulation::FlushInstructionCache(functionToHook, _SavedCode.size());
 
         _OriginalFuncAddress = functionToHook;
         _DetourFunc          = newFunction;
@@ -1010,7 +1009,7 @@ class Hook_t
     error:
         // The function code wasn't modified yet: only its rights.
         if (functionRightsChanged)
-            _RestoreCodeRights(functionToHook, relocatableSize, functionOldRights);
+            _RestoreCodeRights(functionToHook, _SavedCode.size(), functionOldRights);
 
         _SavedCode.clear();
         _HookCode.clear();
