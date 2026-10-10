@@ -72,6 +72,21 @@
     #endif
 #endif
 
+// Other threads aren't suspended while hooked code is written: a process can't suspend its own threads
+// without ptrace or signal handlers.
+class _OtherThreadsFreezer_t
+{
+  public:
+    bool Freeze(void* /*code*/, size_t /*size*/)
+    {
+        return true;
+    }
+
+    void Unfreeze()
+    {
+    }
+};
+
 struct GnuHashHeader_t
 {
   uint32_t nbuckets;
