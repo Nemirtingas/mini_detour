@@ -105,6 +105,8 @@ set(CAPSTONE_HEADERS
   ${CMAKE_CURRENT_LIST_DIR}/deps/capstone/arch/X86/X86Mapping.h
 )
 
+set(MINIDETOUR_MSVC_RUNTIME "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:${MINIDETOUR_DYNAMIC_RUNTIME}>:DLL>")
+
 # The library and its test build (mini_detour_test, built with logs) share the same sources and settings.
 function(minidetour_add_library name)
   add_library(
@@ -124,7 +126,7 @@ function(minidetour_add_library name)
   )
 
   set_target_properties(${name} PROPERTIES
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:${MINIDETOUR_DYNAMIC_RUNTIME}>:DLL>"
+    MSVC_RUNTIME_LIBRARY ${MINIDETOUR_MSVC_RUNTIME}
     POSITION_INDEPENDENT_CODE ON
     C_VISIBILITY_PRESET hidden
     CXX_VISIBILITY_PRESET hidden
@@ -190,32 +192,25 @@ if(APPLE)
 endif()
 
 if(MINIDETOUR_BUILD_TESTS)
-  add_library(
-    export_hook_test_library SHARED
-    tests/dll_test.c
-  )
+  # Shared library the tests load from their directory: no "lib" prefix, only the symbols marked for export.
+  function(minidetour_add_test_library name source)
+    add_library(${name} SHARED ${source})
 
-  set_target_properties(export_hook_test_library PROPERTIES
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:${MINIDETOUR_DYNAMIC_RUNTIME}>:DLL>"
-    POSITION_INDEPENDENT_CODE ON
-    C_VISIBILITY_PRESET hidden
-    CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN ON
-    PREFIX ""
-  )
+    set_target_properties(${name} PROPERTIES
+      MSVC_RUNTIME_LIBRARY ${MINIDETOUR_MSVC_RUNTIME}
+      POSITION_INDEPENDENT_CODE ON
+      C_VISIBILITY_PRESET hidden
+      CXX_VISIBILITY_PRESET hidden
+      VISIBILITY_INLINES_HIDDEN ON
+      PREFIX ""
+    )
+  endfunction()
+
+  minidetour_add_test_library(export_hook_test_library tests/dll_test.c)
 
   if(UNIX AND NOT APPLE)
     # Shared library without any exported symbol: its GNU hash table has no hashed symbol.
-    add_library(
-      no_export_test_library SHARED
-      tests/no_export_test_library.c
-    )
-
-    set_target_properties(no_export_test_library PROPERTIES
-      POSITION_INDEPENDENT_CODE ON
-      C_VISIBILITY_PRESET hidden
-      PREFIX ""
-    )
+    minidetour_add_test_library(no_export_test_library tests/no_export_test_library.c)
   endif()
 
   # Same library, with logs.
@@ -242,17 +237,7 @@ if(MINIDETOUR_BUILD_TESTS)
 
   if(UNIX AND NOT APPLE)
     # Imports reached through GOT entries (GLOB_DAT relocations) instead of PLT stubs.
-    add_library(
-      no_plt_test_library SHARED
-      tests/no_plt_test_library.c
-    )
-
-    set_target_properties(no_plt_test_library PROPERTIES
-      POSITION_INDEPENDENT_CODE ON
-      C_VISIBILITY_PRESET hidden
-      PREFIX ""
-    )
-
+    minidetour_add_test_library(no_plt_test_library tests/no_plt_test_library.c)
     target_compile_options(no_plt_test_library PRIVATE -fno-plt)
   endif()
 
@@ -264,16 +249,7 @@ if(MINIDETOUR_BUILD_TESTS)
       list(GET binding 0 bindingName)
       list(GET binding 1 bindingMacosVersion)
 
-      add_library(
-        macos_${bindingName}_import_test_library SHARED
-        tests/macos_import_test_library.c
-      )
-
-      set_target_properties(macos_${bindingName}_import_test_library PROPERTIES
-        C_VISIBILITY_PRESET hidden
-        PREFIX ""
-      )
-
+      minidetour_add_test_library(macos_${bindingName}_import_test_library tests/macos_import_test_library.c)
       target_compile_options(macos_${bindingName}_import_test_library PRIVATE -mmacosx-version-min=${bindingMacosVersion})
       target_link_options(macos_${bindingName}_import_test_library PRIVATE -mmacosx-version-min=${bindingMacosVersion})
     endforeach()
@@ -293,26 +269,18 @@ if(MINIDETOUR_BUILD_TESTS)
   )
   
   set_target_properties(tests PROPERTIES
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:${MINIDETOUR_DYNAMIC_RUNTIME}>:DLL>"
+    MSVC_RUNTIME_LIBRARY ${MINIDETOUR_MSVC_RUNTIME}
     C_VISIBILITY_PRESET hidden
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
     CXX_STANDARD 14
   )
 
+  # The include directories and dl come from mini_detour_test.
   target_link_libraries(
     tests
     PRIVATE
     mini_detour_test
-    # For library UNIX loading
-    $<$<NOT:$<BOOL:${WIN32}>>:dl>
-  )
-
-  target_include_directories(
-    tests
-    PRIVATE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
-    $<INSTALL_INTERFACE:include>
   )
   
   target_compile_definitions(
