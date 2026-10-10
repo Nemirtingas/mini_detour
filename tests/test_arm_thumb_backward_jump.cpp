@@ -7,11 +7,6 @@
 
 #if defined(MINIDETOUR_ARCH_ARM)
 
-static void *ThumbAddress(void *address)
-{
-    return reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(address) | 1);
-}
-
 // Destination of the Thumb B.W at address, 0 if there is none.
 // B.W: 11110 S imm10, then 10 J1 1 J2 imm11. I1 = !(J1 ^ S), I2 = !(J2 ^ S), offset = S:I1:I2:imm10:imm11:0 from pc + 4.
 static uintptr_t ThumbWideJumpTarget(const void *address)

@@ -4,11 +4,6 @@
 
 #if defined(MINIDETOUR_ARCH_ARM)
 
-static void *ThumbAddress(void *address)
-{
-    return reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(address) | 1);
-}
-
 // BUGS.md #17: the mode of the trampoline jump back to the function was read from addresses whose mode bit was
 // already cleared: a Thumb function trampoline ended with an ARM jump, run in Thumb mode.
 TEST_CASE("Call the original of a hooked Thumb function", "[arm_thumb_original]")
