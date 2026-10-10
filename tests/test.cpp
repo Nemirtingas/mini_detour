@@ -549,7 +549,7 @@ static bool SafeMemoryAccessUnsupported()
     uint8_t value = 0;
     uint8_t copy = 0;
     errno = 0;
-    return !MiniDetour::MemoryManipulation::SafeMemoryRead(&value, &copy, 1) && errno == ENOSYS;
+    return MiniDetour::MemoryManipulation::SafeMemoryRead(&value, &copy, 1) == 0 && errno == ENOSYS;
 #else
     return false;
 #endif
@@ -563,10 +563,11 @@ static bool TestMemoryAccess(void* address, size_t size, MiniDetour::MemoryManip
         reinterpret_cast<uintptr_t>(address) + size <= infos.End;
 }
 
+// True when the whole buffer was copied.
 static bool TestSafeMemoryRead(void* address, uint8_t* buffer, size_t size)
 {
     if (!SafeMemoryAccessUnsupported())
-        return MiniDetour::MemoryManipulation::SafeMemoryRead(address, buffer, size);
+        return MiniDetour::MemoryManipulation::SafeMemoryRead(address, buffer, size) == size;
 
     if (!TestMemoryAccess(address, size, MiniDetour::MemoryManipulation::MemoryRights::mem_r))
         return false;
@@ -578,7 +579,7 @@ static bool TestSafeMemoryRead(void* address, uint8_t* buffer, size_t size)
 static bool TestSafeMemoryWrite(void* address, const uint8_t* buffer, size_t size)
 {
     if (!SafeMemoryAccessUnsupported())
-        return MiniDetour::MemoryManipulation::SafeMemoryWrite(address, buffer, size);
+        return MiniDetour::MemoryManipulation::SafeMemoryWrite(address, buffer, size) == size;
 
     if (!TestMemoryAccess(address, size, MiniDetour::MemoryManipulation::MemoryRights::mem_w))
         return false;
