@@ -19,7 +19,7 @@
 // C3                            RET
 
 // Safe 14 Bytes absolute x64 jmp
-// FF 25 00 00 00 00       JMP [RIP+6]
+// FF 25 00 00 00 00       JMP [RIP+0]
 // XX XX XX XX XX XX XX XX Address to jump to
 
 inline void *relative_addr_to_absolute(void *source_addr, int32_t rel_addr)
