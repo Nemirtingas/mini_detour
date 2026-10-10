@@ -120,13 +120,13 @@ namespace Implementation {
 
         ++mapLineStart;
         if (mapLineStart[0] == 'r')
-            (int&)region.Rights |= (int)MemoryRights::mem_r;
+            region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_r);
 
         if (mapLineStart[1] == 'w')
-            (int&)region.Rights |= (int)MemoryRights::mem_w;
+            region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_w);
 
         if (mapLineStart[2] == 'x')
-            (int&)region.Rights |= (int)MemoryRights::mem_x;
+            region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_x);
 
         //  Skip 4 fields from here \/, TODO find latest field instead
         // 7d3b3fa1d000-7d3b3fa1e000 r--p 00000000 fc:01 38300752                   /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
@@ -376,7 +376,7 @@ namespace Implementation {
         remote.iov_base = (void*)address;
         remote.iov_len = size;
 
-        if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != size)
+        if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != static_cast<ssize_t>(size))
             return false;
 
         return true;
@@ -392,7 +392,7 @@ namespace Implementation {
         remote.iov_base = (void*)address;
         remote.iov_len = size;
 
-        if (process_vm_writev(getpid(), &local, 1, &remote, 1, 0) != size)
+        if (process_vm_writev(getpid(), &local, 1, &remote, 1, 0) != static_cast<ssize_t>(size))
             return false;
 
         return true;

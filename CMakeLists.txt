@@ -161,6 +161,9 @@ function(minidetour_add_library name)
     PRIVATE
     $<$<BOOL:${MSVC}>:/MP>
     $<$<BOOL:${MSVC}>:/utf-8>
+    # Warnings for our code only: Capstone (C) is vendored.
+    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:${MSVC}>>:/W4>
+    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<BOOL:${MSVC}>>>:-Wall;-Wextra>"
   )
 
   # The C++ part of the public header (noexcept, deleted functions) needs C++11 in the projects using it too.
@@ -231,6 +234,14 @@ if(MINIDETOUR_BUILD_TESTS)
     PRIVATE
     USE_SPDLOG
     $<$<BOOL:${WIN32}>:_SILENCE_ALL_MS_EXT_DEPRECATION_WARNINGS>
+  )
+
+  # The vendored spdlog (included with <>) isn't warning free with /W4.
+  target_compile_options(
+    mini_detour_test
+    PRIVATE
+    $<$<BOOL:${MSVC}>:/external:anglebrackets>
+    $<$<BOOL:${MSVC}>:/external:W0>
   )
 
   if(UNIX AND NOT APPLE)

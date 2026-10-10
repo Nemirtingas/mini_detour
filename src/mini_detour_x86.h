@@ -37,7 +37,7 @@ struct memory_t
 
 struct AbsJump
 {
-    static inline size_t WriteOpcodes(void *buffer, void *jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void *buffer, void *jump_destination, int /*source_mode*/, int /*dest_mode*/)
     {
         uint8_t _code[6]{
             0x68, // PUSH
@@ -53,7 +53,7 @@ struct AbsJump
         return GetMaxOpcodeSize();
     }
 
-    static constexpr size_t GetOpcodeSize(void *jump_destination, int source_mode, int dest_mode)
+    static constexpr size_t GetOpcodeSize(void */*jump_destination*/, int /*source_mode*/, int /*dest_mode*/)
     {
         // PUSH
         // ABS ADDR
@@ -72,7 +72,7 @@ struct AbsJump
 
 struct RelJump
 {
-    static inline size_t WriteOpcodes(void *buffer, void *source, void *jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void *buffer, void *source, void *jump_destination, int /*source_mode*/, int /*dest_mode*/)
     {
         uint8_t code[5] = {
             0xE9, // JMP
@@ -88,7 +88,7 @@ struct RelJump
         return GetMaxOpcodeSize();
     }
 
-    static constexpr size_t GetOpcodeSize(void *source, void *jump_destination, int source_mode, int dest_mode)
+    static constexpr size_t GetOpcodeSize(void */*source*/, void */*jump_destination*/, int /*source_mode*/, int /*dest_mode*/)
     {
         // E9          | JMP
         // XX XX XX XX | REL ADDR
@@ -121,7 +121,7 @@ struct CpuPush
         return 5;
     }
 
-    static constexpr size_t GetOpcodeSize(uint32_t value)
+    static constexpr size_t GetOpcodeSize(uint32_t /*value*/)
     {
         // 68          | PUSH
         // XX XX XX XX | IMM32
@@ -310,7 +310,7 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
                 relocatedSize += disasm.GetInstruction().size;
                 pTrampolineCode += CpuPush::WriteOpcodes(
                     reinterpret_cast<void *>(pTrampolineCode),
-                    code_addr // Where to return
+                    static_cast<uint32_t>(code_addr) // Where to return
                 );
                 originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().detail->x86.operands[0].imm);
                 break;

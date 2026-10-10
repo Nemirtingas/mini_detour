@@ -104,7 +104,7 @@ struct AbsJump
     }
 
     // Variable jump size
-    static inline size_t GetOpcodeSize(void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t GetOpcodeSize(void* jump_destination, int /*source_mode*/, int /*dest_mode*/)
     {
         uintptr_t i_addr = (uintptr_t)jump_destination;
         // Need 4 instructions to fill 64bits
@@ -136,7 +136,7 @@ struct AbsJump
 
 struct RelJump
 {
-    static inline size_t WriteOpcodes(void* buffer, void* source, void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void* buffer, void* source, void* jump_destination, int /*source_mode*/, int /*dest_mode*/)
     {
         union
         {
@@ -154,7 +154,7 @@ struct RelJump
         return 4;
     }
 
-    static constexpr size_t GetOpcodeSize(void* source, void* jump_destination, int source_mode, int dest_mode)
+    static constexpr size_t GetOpcodeSize(void* /*source*/, void* /*jump_destination*/, int /*source_mode*/, int /*dest_mode*/)
     {
         return 4;
     }
