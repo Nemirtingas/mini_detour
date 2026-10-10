@@ -35,6 +35,7 @@ Instructions for AI coding agents (and humans) working on **mini_detour**, a min
 - Do not mix reformatting, renaming or opportunistic cleanups with a fix. If a cleanup is needed, do it in its own branch.
 - If a fix depends on another one, land the dependency first, then branch the next fix from the updated `master`.
 - Commit messages: short imperative summary line (≤ 72 chars), then a body explaining *why*. Reference the bug (e.g. `BUGS.md #1`) when relevant.
+- Pull request descriptions say what changes and why. Leave out figures that only hold when they are written: numbers of files, lines added or removed, commits or branches.
 - Update `BUGS.md` in the same branch when a listed bug is fixed (remove the entry or mark it fixed).
 
 ### Everything committed is in English
