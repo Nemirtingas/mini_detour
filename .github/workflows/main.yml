@@ -8,11 +8,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
         platform: [x32, x64]
-        exclude:
+        include:
+        # macos-latest runs on Apple Silicon. macOS x64 is tested on a local machine.
         - os: macos-latest
-          platform: x32
+          platform: arm64
             
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +63,7 @@ jobs:
           cd ${{ github.workspace }}/build/linux_x64/
           ./tests
 
-      - name: MacOS tests
+      - name: MacOS tests (arm64)
         if: matrix.os == 'macos-latest'
         shell: bash
         run: |
