@@ -532,6 +532,12 @@ With a huge size, `allocAddress + size` wraps around: the loop condition stays t
 
 Each platform now gives `_MinUserAddress` and `_MaxUserAddress`: `GetSystemInfo` on Windows, `__PAGEZERO` and `MACH_VM_MAX_ADDRESS` on macOS, `vm.mmap_min_addr` and a search of the end of the user address space with `mmap` on Linux (the kernel doesn't expose it). The free regions are clipped to these bounds.
 
+### ✅ 52. x64: relocated `call` killed by shadow stacks (CET) — fixed in `fix/x64-relocated-call`
+[mini_detour_x64.h](src/mini_detour_x64.h)
+A `call rel32` in the relocated bytes was turned into `push return address ; jmp target`. The callee's `ret` then went back to an address no `call` had pushed: with shadow stacks enabled (Windows with `/CETCOMPAT` executables on CPUs that have CET, Linux user shadow stacks), the process was killed (`0xC0000409` on Windows).
+
+The trampoline now makes a real call (`call [rip + 2] ; jmp +8 ; dq target`), and its jump back goes to the instruction after the call. The tests are linked with `/CETCOMPAT` on Windows x64. x86 keeps the `push`: it has no shadow stacks, and `__x86.get_pc_thunk` needs the return address to be in the original function.
+
 ---
 
 ## Recommended order

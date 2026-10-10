@@ -328,6 +328,11 @@ if(MINIDETOUR_BUILD_TESTS)
 	$<$<BOOL:${MSVC}>:/utf-8>
   )
 
+  # The tests run with shadow stacks (CET) on the CPUs that have them, like the programs built with /CETCOMPAT.
+  if(MSVC AND CMAKE_CXX_COMPILER_ARCHITECTURE_ID STREQUAL "x64")
+    target_link_options(tests PRIVATE /CETCOMPAT)
+  endif()
+
 endif()
 
 add_library(Nemirtingas::MiniDetour ALIAS mini_detour)

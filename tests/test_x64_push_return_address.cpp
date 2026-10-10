@@ -48,9 +48,9 @@ static void FreeBetween2And4GB(uint8_t *memory, size_t size)
 #endif
 }
 
-// BUGS.md #14: "push imm32" sign-extends its operand, so a return address like 0x00000000_9xxxxxxx
-// pushed by a relocated call became 0xFFFFFFFF_9xxxxxxx.
-TEST_CASE("Relocated call pushes a return address between 2 and 4 GB", "[x64_push]")
+// BUGS.md #14: a relocated call used to push its return address with "push imm32", which sign-extends its operand: a
+// return address like 0x00000000_9xxxxxxx became 0xFFFFFFFF_9xxxxxxx. It is now a real call, kept as a regression test.
+TEST_CASE("Relocated call returns to an address between 2 and 4 GB", "[x64_push]")
 {
     const size_t size = 4096;
     uint8_t *code     = AllocBetween2And4GB(size);
