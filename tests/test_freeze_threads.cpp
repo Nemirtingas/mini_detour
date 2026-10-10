@@ -1,11 +1,17 @@
 #include "catch.hpp"
 #include "test_utils.h"
 
-#if defined(MINIDETOUR_OS_WINDOWS) && (defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64))
+// The other threads are suspended while hooks are written on Windows and macOS (not on Linux).
+#if (defined(MINIDETOUR_OS_WINDOWS) || defined(MINIDETOUR_OS_APPLE)) && (defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64))
 
+#if defined(MINIDETOUR_OS_WINDOWS)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#else
+#include <pthread.h>
+#include <unistd.h>
+#endif
 
 using FreezeFunc_t = int (*)();
 
@@ -21,12 +27,17 @@ class SpinningThread
 {
     CodeBuffer &_Code;
     size_t _JumpOffset;
+    bool _Running;
+#if defined(MINIDETOUR_OS_WINDOWS)
     HANDLE _Thread;
+#else
+    pthread_t _Thread;
+#endif
 
   public:
     SpinningThread(CodeBuffer &code, size_t offset, bool spinInside)
         : _Code(code)
-        , _Thread(nullptr)
+        , _Running(false)
     {
         if (spinInside)
         {
@@ -45,18 +56,24 @@ class SpinningThread
         code.Write(_JumpOffset + 2, {0xC3}); // ret
 #endif
 
-        _Thread = CreateThread(nullptr, 0, code.As<LPTHREAD_START_ROUTINE>(offset), nullptr, 0, nullptr);
+#if defined(MINIDETOUR_OS_WINDOWS)
+        _Thread  = CreateThread(nullptr, 0, code.As<LPTHREAD_START_ROUTINE>(offset), nullptr, 0, nullptr);
+        _Running = _Thread != nullptr;
         // Leaves time for the thread to reach its loop.
         Sleep(100);
+#else
+        _Running = pthread_create(&_Thread, nullptr, code.As<void *(*)(void *)>(offset), nullptr) == 0;
+        usleep(100 * 1000);
+#endif
     }
 
     ~SpinningThread() { StopSpinning(); }
 
-    bool IsValid() const { return _Thread != nullptr; }
+    bool IsValid() const { return _Running; }
 
     void StopSpinning()
     {
-        if (_Thread == nullptr)
+        if (!_Running)
             return;
 
         // A single byte write: the jump displacement now goes to the ret.
@@ -65,15 +82,19 @@ class SpinningThread
         MiniDetour::MemoryManipulation::MemoryProtect(displacement, 1, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
         *displacement = 0x00;
         MiniDetour::MemoryManipulation::FlushInstructionCache(displacement, 1);
+#if defined(MINIDETOUR_OS_WINDOWS)
         WaitForSingleObject(_Thread, INFINITE);
         CloseHandle(_Thread);
-        _Thread = nullptr;
+#else
+        pthread_join(_Thread, nullptr);
+#endif
+        _Running = false;
     }
 };
 
 // Hooks were written while other threads could run the bytes being replaced: a thread in the middle of them then
 // executed a part of the new jump.
-TEST_CASE("A function can't be hooked while a thread runs its first bytes", "[windows_freeze_threads]")
+TEST_CASE("A function can't be hooked while a thread runs its first bytes", "[freeze_threads]")
 {
     CodeBuffer code;
     REQUIRE(code.IsValid());
@@ -97,7 +118,7 @@ TEST_CASE("A function can't be hooked while a thread runs its first bytes", "[wi
     CHECK(hook.RestoreFunction() != nullptr);
 }
 
-TEST_CASE("A function can be hooked while a thread runs other code", "[windows_freeze_threads]")
+TEST_CASE("A function can be hooked while a thread runs other code", "[freeze_threads]")
 {
     CodeBuffer code;
     REQUIRE(code.IsValid());
