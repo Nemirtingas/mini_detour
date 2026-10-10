@@ -29,12 +29,16 @@ Instructions for AI coding agents (and humans) working on **mini_detour**, a min
 - Do not mix reformatting, renaming or opportunistic cleanups with a fix. If a cleanup is needed, do it in its own branch.
 - If a fix depends on another one, land the dependency first, then branch the next fix from the updated `master`.
 - Commit messages: short imperative summary line (≤ 72 chars), then a body explaining *why*. Reference the bug (e.g. `BUGS.md #1`) when relevant.
-- Never add co-author trailers (`Co-Authored-By:` or similar attribution lines) to commit messages.
 - Update `BUGS.md` in the same branch when a listed bug is fixed (remove the entry or mark it fixed).
 
 ### Everything committed is in English
 - All code and everything that goes into a commit **must** be written in English: identifiers, comments, log messages, test names, documentation (`README.md`, `BUGS.md`, `AGENTS.md`, ...) and commit messages.
 - This applies whatever language is used to discuss the task: translate before committing.
+
+### No reference to AI tools
+- Nothing that is committed or published may mention an AI, an LLM or a coding agent, or that one was used: commit messages, branch names, pull request titles and descriptions, review comments, issues, code, comments, tests and documentation.
+- In particular, never add co-author trailers (`Co-Authored-By:`), "Generated with ..." lines or any similar attribution, even if the agent's tool adds them by default.
+- The only exception is the agent instruction files themselves (`AGENTS.md`, `CLAUDE.md`), which are written for agents.
 
 ## Coding rules
 
