@@ -143,7 +143,14 @@ TEST_CASE("Imports of a shared cache library can be replaced", "[macos_imports]"
     REQUIRE(libcxx != nullptr);
 
     auto imports = GetImports(libcxx);
-    REQUIRE(!imports.empty());
+    if (imports.empty())
+    {
+        // Seen on macOS 26: the shared cache libraries have no symbol pointers of their own anymore (most likely merged
+        // in a GOT shared by the cache). Their imports can't be replaced, see README.md.
+        WARN("No import found in the shared cache libc++, test skipped.");
+        dlclose(libcxx);
+        return;
+    }
 
     // Nothing destroys a std::invalid_argument while it is replaced.
     const char *name    = "_ZNSt16invalid_argumentD1Ev";
