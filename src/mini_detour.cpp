@@ -1,6 +1,5 @@
 #include <mini_detour/mini_detour.h>
 
-#include <assert.h>
 #include <string.h>
 
 #include <algorithm>
@@ -574,8 +573,13 @@ public:
     {
         std::lock_guard<std::recursive_mutex> lock(_Mutex);
 
-        assert(mem_size <= sizeof(memory_t::data));
-        uint8_t* res = nullptr;
+        // A larger trampoline would be written over the next slot.
+        if (mem_size > sizeof(memory_t::data))
+        {
+            SPDLOG_ERROR("Trampoline of {} bytes doesn't fit in a {} bytes slot.", mem_size, sizeof(memory_t::data));
+            return nullptr;
+        }
+
         for (auto memory : trampolines_regions)
         {
             memory_t* end = memory + _RegionSize() / sizeof(memory_t);
@@ -973,8 +977,9 @@ public:
         // Save the original code
         memcpy(&_SavedCode[0], functionToHook, _SavedCode.size());
 
-        // The total number of bytes to copy from the original function + abs jump for trampoline
-        totalOriginalTrampolineSize = relocatedOriginalCodeSize + AbsJump::GetOpcodeSize(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(functionToHook) + relocatedOriginalCodeSize), func_mode, hook_mode);
+        // Upper bound of the trampoline code: the relocated code + the jump back to the function (its size can depend
+        // on its destination). Used to check the slot size, and to protect and flush the whole trampoline.
+        totalOriginalTrampolineSize = relocatedOriginalCodeSize + AbsJump::GetMaxOpcodeSize();
             
         _OriginalTrampolineAddress = GetMemoryManager().GetFreeTrampoline(totalOriginalTrampolineSize);
         if (_OriginalTrampolineAddress == nullptr)
