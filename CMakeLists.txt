@@ -105,6 +105,13 @@ set(CAPSTONE_HEADERS
   ${CMAKE_CURRENT_LIST_DIR}/deps/capstone/arch/X86/X86Mapping.h
 )
 
+# Capstone only builds the disassembler of the architecture being compiled: see src/capstone_arch.h.
+if(MSVC)
+  set_source_files_properties(${CAPSTONE_SOURCES} PROPERTIES COMPILE_OPTIONS "/FI${CMAKE_CURRENT_LIST_DIR}/src/capstone_arch.h")
+else()
+  set_source_files_properties(${CAPSTONE_SOURCES} PROPERTIES COMPILE_OPTIONS "-include;${CMAKE_CURRENT_LIST_DIR}/src/capstone_arch.h")
+endif()
+
 set(MINIDETOUR_MSVC_RUNTIME "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:${MINIDETOUR_DYNAMIC_RUNTIME}>:DLL>")
 
 # The library and its test build (mini_detour_test, built with logs) share the same sources and settings.
@@ -112,6 +119,7 @@ function(minidetour_add_library name)
   add_library(
     ${name}
     src/mini_detour.cpp
+    src/capstone_arch.h
     src/mini_detour_arm.h
     src/mini_detour_arm64.h
     src/mini_detour_x86.h
@@ -147,9 +155,6 @@ function(minidetour_add_library name)
     PRIVATE
     $<BUILD_INTERFACE:MINIDETOUR_BUILD>
     -DCAPSTONE_USE_SYS_DYN_MEM
-    -DCAPSTONE_HAS_X86
-    -DCAPSTONE_HAS_ARM64
-    -DCAPSTONE_HAS_ARM
     PUBLIC
     $<$<BOOL:${BUILD_SHARED_LIBS}>:MINIDETOUR_SHARED>
   )
