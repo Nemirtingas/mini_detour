@@ -2,6 +2,12 @@
 
 Instructions for AI coding agents (and humans) working on **mini_detour**, a minimalistic cross-platform function hooking library (Windows / Linux / macOS, x86 / x64 / ARM / ARM64).
 
+## Developer specific instructions
+- Each developer can keep their own instructions in `AGENTS_custom.md`, at the root of the repository: personal preferences, local paths, test machines, ...
+- When it exists, read it before starting and follow it along with this file.
+- It is personal: it is listed in `.gitignore` and must never be committed.
+- It adds to this file, it doesn't relax its rules for what is committed or published: on those, `AGENTS.md` wins.
+
 ## Git workflow
 
 ### Never push to a remote
