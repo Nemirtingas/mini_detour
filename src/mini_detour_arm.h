@@ -1,18 +1,6 @@
 #ifndef MINI_DETOUR_ARM_H
 #define MINI_DETOUR_ARM_H
 
-inline uint8_t* relative_addr_to_absolute(int32_t rel_addr, uint8_t* source_addr)
-{
-    // TODO
-    return source_addr + rel_addr;
-}
-
-inline int32_t absolute_addr_to_relative(void* opcode_addr, void* destination_addr)
-{
-    SPDLOG_INFO("opcode addr: {}, destination addr: {}", opcode_addr, destination_addr);
-    return reinterpret_cast<uint8_t*>(destination_addr) - reinterpret_cast<uint8_t*>(opcode_addr);
-}
-
 bool _AddressesAreRelativeJumpable(void* source, void* dest)
 {
     uintptr_t min_addr = reinterpret_cast<uintptr_t>(std::min(source, dest));
@@ -30,20 +18,6 @@ struct memory_t
     uint8_t padding[3]; // arm is aligned on 4 bytes
     uint8_t data[40]; // Max absolute jump size is 20 bytes
 };
-
-//uint32_t arm_get_cpsr()
-//{
-//    uint32_t res;
-//    __asm ("MRS %[result], CPSR"
-//        : [result] "=r" (res)
-//    );
-//    return res;
-//}
-//
-//bool is_thumb_mode()
-//{
-//    return arm_get_cpsr() & 0x10;
-//}
 
 struct AbsJump
 {
@@ -294,9 +268,6 @@ size_t _GetRelocatableSize(void* pCode, size_t& relocatedOriginalCodeSize, bool 
                 relocatedOriginalCodeSize += disasm.GetInstruction().size;
                 relocatableSize += disasm.GetInstruction().size;
             }
-            else if (disasm.GetJumpType() == 3)
-            {// Don't handle arm jump/call relocation.
-            }
 
 #ifdef USE_SPDLOG
             SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
@@ -317,13 +288,6 @@ size_t _GetRelocatableSize(void* pCode, size_t& relocatedOriginalCodeSize, bool 
 // func_mode: 1 for Thumb code. pCode has no mode bit, it was cleared by the caller.
 size_t _RelocateCode(void* pCode, void* pTrampoline, CodeDisasm& disasm, size_t wanted_relocatableSize, int func_mode)
 {
-    // MOD-REG-R/M Byte
-    //  7 6    5 4 3    2 1 0 - bits
-    //[ MOD ][  REG  ][  R/M  ]
-    static constexpr auto mod_mask = 0xC0;
-    static constexpr auto rm_mask = 0x07; // Register or memory mask
-    static constexpr auto modrm_mask = mod_mask | rm_mask;
-
     uint8_t code_buffer[80];
     const uint8_t* code_iterator = code_buffer;
     size_t code_size = 0;
@@ -333,7 +297,6 @@ size_t _RelocateCode(void* pCode, void* pTrampoline, CodeDisasm& disasm, size_t 
     code_size = _ReadCode(pCode, code_buffer, sizeof(code_buffer));
 
     size_t relocatedSize = 0;
-    void* originalCodeTarget = nullptr;
     while (relocatedSize < wanted_relocatableSize)
     {
         if (!disasm.Disasm(&code_iterator, &code_size, &code_addr))
@@ -355,15 +318,8 @@ size_t _RelocateCode(void* pCode, void* pTrampoline, CodeDisasm& disasm, size_t 
         pTrampolineCode += disasm.GetInstruction().size;
     }
 
-    if (originalCodeTarget == nullptr)
-        originalCodeTarget = reinterpret_cast<void*>(code_addr);
-
     // The trampoline runs the relocated code in the function mode, and goes back to the function in that mode.
-    AbsJump::WriteOpcodes(
-        reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(pTrampolineCode)),
-        originalCodeTarget,
-        func_mode,
-        func_mode);
+    AbsJump::WriteOpcodes(pTrampolineCode, reinterpret_cast<void*>(code_addr), func_mode, func_mode);
 
     return relocatedSize;
 }
