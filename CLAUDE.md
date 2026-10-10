@@ -4,6 +4,10 @@ All project instructions live in `AGENTS.md` and apply to Claude Code as well:
 
 @AGENTS.md
 
+Developer specific instructions, when the file exists (it is never committed):
+
+@AGENTS_custom.md
+
 Key rules, in short:
 - Never push to a remote. All git work stays local.
 - Never add `Co-Authored-By:` (or any other attribution) lines to commit messages.
