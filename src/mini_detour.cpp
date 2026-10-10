@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <limits>
 #include <mutex>
+#include <new>
 #include <utility>
 #include <type_traits> // std::move
 #include <fstream>
@@ -1191,6 +1192,19 @@ MINIDETOUR_EXPORT(size_t) MiniDetourUtilsPageSize()
 // MiniDetour MemoryManipulation C functions
 MINIDETOUR_EXPORT(void) MiniDetourMemoryManipulationGetRegionInfos(void* address, MiniDetourMemoryManipulationRegionInfos_t* regionInfos)
 {
+    if (regionInfos == nullptr)
+        return;
+
+    // The ModuleName size is computed from StructSize: a smaller value (not initialized by a C caller) would make it
+    // wrap around. The other fields are always there.
+    if (regionInfos->StructSize < sizeof(*regionInfos))
+    {
+        regionInfos->Rights = MiniDetour::MemoryManipulation::MemoryRights::mem_unset;
+        regionInfos->Start = 0;
+        regionInfos->End = 0;
+        return;
+    }
+
     MiniDetour::MemoryManipulation::Implementation::GetRegionInfos(address, regionInfos);
 }
 
@@ -1267,24 +1281,36 @@ MINIDETOUR_EXPORT(size_t) MiniDetourModuleManipulationGetAllIATSymbols(void* mod
 
 MINIDETOUR_EXPORT(size_t) MiniDetourModuleManipulationReplaceModuleExports(void* moduleHandle, MiniDetourModuleManipulationExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
 {
+    if (exportReplaceDetails == nullptr && exportReplaceDetailsCount != 0)
+        return 0;
+
     std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
     return MiniDetour::ModuleManipulation::Implementation::ReplaceModuleExports(moduleHandle, exportReplaceDetails, exportReplaceDetailsCount);
 }
 
 MINIDETOUR_EXPORT(size_t) MiniDetourModuleManipulationRestoreModuleExports(void* moduleHandle, MiniDetourModuleManipulationExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
 {
+    if (exportReplaceDetails == nullptr && exportReplaceDetailsCount != 0)
+        return 0;
+
     std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
     return MiniDetour::ModuleManipulation::Implementation::RestoreModuleExports(moduleHandle, exportReplaceDetails, exportReplaceDetailsCount);
 }
 
 MINIDETOUR_EXPORT(size_t) MiniDetourModuleManipulationReplaceModuleIATs(void* moduleHandle, MiniDetourModuleManipulationIATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
+    if (iatReplaceDetails == nullptr && iatReplaceDetailsCount != 0)
+        return 0;
+
     std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
     return MiniDetour::ModuleManipulation::Implementation::ReplaceModuleIATs(moduleHandle, iatReplaceDetails, iatReplaceDetailsCount);
 }
 
 MINIDETOUR_EXPORT(size_t) MiniDetourModuleManipulationRestoreModuleIATs(void* moduleHandle, MiniDetourModuleManipulationIATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
+    if (iatReplaceDetails == nullptr && iatReplaceDetailsCount != 0)
+        return 0;
+
     std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
     return MiniDetour::ModuleManipulation::Implementation::RestoreModuleIATs(moduleHandle, iatReplaceDetails, iatReplaceDetailsCount);
 }
@@ -1293,7 +1319,8 @@ MINIDETOUR_EXPORT(size_t) MiniDetourModuleManipulationRestoreModuleIATs(void* mo
 
 MINIDETOUR_EXPORT(minidetour_hook_handle_t) MiniDetourHookTAlloc()
 {
-    return reinterpret_cast<minidetour_hook_handle_t>(new MiniDetour::Implementation::Hook_t());
+    // An exception must not go through the C API.
+    return reinterpret_cast<minidetour_hook_handle_t>(new (std::nothrow) MiniDetour::Implementation::Hook_t());
 }
 
 MINIDETOUR_EXPORT(void) MiniDetourHookTFree(minidetour_hook_handle_t handle)
@@ -1306,19 +1333,23 @@ MINIDETOUR_EXPORT(void) MiniDetourHookTFree(minidetour_hook_handle_t handle)
 MINIDETOUR_EXPORT(void) MiniDetourHookTRestoreOnDestroy(minidetour_hook_handle_t handle, int restore)
 {
     auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t*>(handle);
-    hook->_RestoreOnDestroy = restore != 0;
+    if (hook != nullptr)
+        hook->_RestoreOnDestroy = restore != 0;
 }
 
 MINIDETOUR_EXPORT(int) MiniDetourHookTCanHook(minidetour_hook_handle_t handle, void* function)
 {
     auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t*>(handle);
-    return hook->CanHook(function) ? 1 : 0;
+    return (hook != nullptr && function != nullptr && hook->CanHook(function)) ? 1 : 0;
 }
 
 MINIDETOUR_EXPORT(void*) MiniDetourHookTHookFunction(minidetour_hook_handle_t handle, void* function_to_hook, void* new_function)
 {
     std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
     auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t*>(handle);
+    if (hook == nullptr || function_to_hook == nullptr || new_function == nullptr)
+        return nullptr;
+
     return hook->HookFunc(function_to_hook, new_function);
 }
 
@@ -1326,23 +1357,26 @@ MINIDETOUR_EXPORT(void*) MiniDetourHookTRestoreFunction(minidetour_hook_handle_t
 {
     std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
     auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t*>(handle);
-    return hook->RestoreFunc();
+    return hook != nullptr ? hook->RestoreFunc() : nullptr;
 }
 
 MINIDETOUR_EXPORT(void*) MiniDetourHookTGetHookFunction(minidetour_hook_handle_t handle)
 {
     auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t*>(handle);
-    return hook->_DetourCallFunc;
+    return hook != nullptr ? hook->_DetourCallFunc : nullptr;
 }
 
 MINIDETOUR_EXPORT(void*) MiniDetourHookTGetOriginalFunction(minidetour_hook_handle_t handle)
 {
     auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t*>(handle);
-    return hook->_OriginalTrampolineCallAddress;
+    return hook != nullptr ? hook->_OriginalTrampolineCallAddress : nullptr;
 }
 
 MINIDETOUR_EXPORT(int) MiniDetourHookTReplaceFunction(void* function_to_replace, void* new_function)
 {
+    if (function_to_replace == nullptr || new_function == nullptr)
+        return 0;
+
     std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
     return MiniDetour::Implementation::Hook_t::ReplaceFunction(function_to_replace, new_function) ? 1 : 0;
 }
