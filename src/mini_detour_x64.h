@@ -124,59 +124,42 @@ struct RelJump
     }
 };
 
-struct CpuPush
+// A real call through an absolute address: the callee's ret then matches the return address the CPU saved on the
+// shadow stack (CET). A "push return address ; jmp" got the process killed when shadow stacks are enabled.
+struct AbsCall
 {
-    // push imm32 sign-extends its operand to 64 bits.
-    static constexpr bool _FitsInSignExtendedImm32(uint64_t value) { return static_cast<int64_t>(static_cast<int32_t>(value)) == static_cast<int64_t>(value); }
-
-    static size_t WriteOpcodes(void *source, uint64_t value)
+    static inline size_t WriteOpcodes(void *buffer, void *call_destination)
     {
-        uint8_t code[13] = {
-            0x68, // PUSH
+        uint8_t code[16]{
+            0xFF,
+            0x15, // CALL
+            0x02,
+            0x00,
+            0x00,
+            0x00, // RIP OFFSET (RIP + 2)
+            0xEB,
+            0x08, // JMP over the address
             0x00,
             0x00,
             0x00,
-            0x00, // IMM32
-            0xC7,
-            0x44,
-            0x24,
-            0x04, // mov DWORD PTR [rsp + 4], HIGH IMM32
             0x00,
             0x00,
             0x00,
             0x00,
+            0x00, // ABS_ADDR
         };
 
-        *reinterpret_cast<uint32_t *>(&code[1]) = static_cast<uint32_t>(value);
-
-        if (!_FitsInSignExtendedImm32(value))
-        {
-            *reinterpret_cast<uint32_t *>(&code[9]) = static_cast<uint32_t>(value >> 32);
-            memcpy(source, code, 13);
-            return 13;
-        }
-
-        memcpy(source, code, 5);
-
-        return 5;
-    }
-
-    static constexpr size_t GetOpcodeSize(uint64_t value)
-    {
-        // 68          | PUSH
-        // LL LL LL LL | LOW IMM32
-        // C7 44 24 04 | MOV DWORD PTR [rsp + 4], HIGH IMM32
-        // HH HH HH HH
-        return (_FitsInSignExtendedImm32(value) ? 5 : 13);
+        *reinterpret_cast<void **>(&code[8]) = call_destination;
+        memcpy(buffer, code, GetMaxOpcodeSize());
+        return GetMaxOpcodeSize();
     }
 
     static constexpr size_t GetMaxOpcodeSize()
     {
-        // 68          | PUSH
-        // LL LL LL LL | LOW IMM32
-        // C7 44 24 04 | mov DWORD PTR [rsp + 4], HIGH IMM32
-        // HH HH HH HH
-        return 13;
+        // FF 15 02 00 00 00 | CALL [RIP + 2]
+        // EB 08             | JMP +8
+        // ABS_ADDR
+        return 16;
     }
 };
 
@@ -415,8 +398,8 @@ static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize
             }
             else if (disasm.GetJumpType() == 5)
             {
-                // Return address push (the call itself is the jump back)
-                relocatedOriginalCodeSize += CpuPush::GetMaxOpcodeSize();
+                // Absolute call (the jump back goes to the instruction after the call)
+                relocatedOriginalCodeSize += AbsCall::GetMaxOpcodeSize();
                 relocatable_size += disasm.GetInstruction().size;
             }
 
@@ -507,12 +490,10 @@ static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, 
             }
             else if (disasm.GetJumpType() == 5)
             {
+                // The callee returns into the trampoline, then the jump back goes to the instruction after the call.
                 relocatedSize += disasm.GetInstruction().size;
-                pTrampolineCode += CpuPush::WriteOpcodes(
-                    reinterpret_cast<void *>(pTrampolineCode),
-                    code_addr // Where to return
-                );
-                originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().detail->x86.operands[0].imm);
+                pTrampolineCode += AbsCall::WriteOpcodes(reinterpret_cast<void *>(pTrampolineCode), reinterpret_cast<void *>(disasm.GetInstruction().detail->x86.operands[0].imm));
+                originalCodeTarget = reinterpret_cast<void *>(code_addr);
                 break;
             }
 
