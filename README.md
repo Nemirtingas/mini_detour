@@ -140,8 +140,11 @@ Recent kernels may also lock the memory of a process and refuse to add execute r
 - Protection change refused: [vm_map.c](https://github.com/apple/darwin-xnu/blob/main/osfmk/vm/vm_map.c#L5961-L5967)
 
 Import replacement works on macOS, shared cache libraries included: the lazy and non lazy symbol pointers of an image
-are rebound. Calls between shared cache libraries may not go through these pointers. Export replacement is not
-implemented on macOS yet.
+are rebound. Calls between shared cache libraries may not go through these pointers.
+
+Export replacement changes the export trie of the image, which dyld reads for `dlsym` and the images loaded later. The
+address of an export must keep its encoded size, so the jump to the new function is written in the padding after the
+load commands, at the start of `__TEXT`.
 
 ## License
 
