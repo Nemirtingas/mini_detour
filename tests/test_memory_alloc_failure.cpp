@@ -9,7 +9,7 @@ TEST_CASE("Failed allocation returns nullptr", "[mem alloc failure]")
 {
     // Larger than any free range, even for a 32-bit process on a 64-bit kernel, but small enough
     // that the near allocation search doesn't wrap around when adding it to a 64-bit address.
-    const size_t size = sizeof(void*) == 8 ? (size_t)1 << 62 : (std::numeric_limits<size_t>::max() - 0x100000) & ~(size_t)0xFFFF;
+    const size_t size = sizeof(void*) == 8 ? (size_t)1 << (sizeof(size_t) * 8 - 2) : (std::numeric_limits<size_t>::max() - 0x100000) & ~(size_t)0xFFFF;
     void* const hint = (void*)0x10000;
 
     void* anywhere = MiniDetour::MemoryManipulation::MemoryAlloc(nullptr, size, MiniDetour::MemoryManipulation::MemoryRights::mem_rw);
