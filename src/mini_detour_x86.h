@@ -234,19 +234,20 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
                 uint8_t conditionCode;
                 if (disasm.GetInstruction().id == X86_INS_JMP)
                 {
-                    relocatedOriginalCodeSize += disasm.GetInstruction().size;
+                    // Not copied: the jump back of the trampoline goes to its target.
                     relocatable_size += disasm.GetInstruction().size;
                 }
                 else if (_GetJccConditionCode(disasm.GetInstruction(), conditionCode))
                 {
-                    // Jcc rel8 over the not taken jump + not taken jump + taken jump
-                    relocatedOriginalCodeSize += 2 + 2 * AbsJump::GetMaxOpcodeSize();
+                    // Jcc rel8 over the not taken jump + not taken jump (the taken jump is the jump back)
+                    relocatedOriginalCodeSize += 2 + AbsJump::GetMaxOpcodeSize();
                     relocatable_size += disasm.GetInstruction().size;
                 }
             }
             else if (disasm.GetJumpType() == 5)
             {
-                relocatedOriginalCodeSize += disasm.GetInstruction().size;
+                // Return address push (the call itself is the jump back)
+                relocatedOriginalCodeSize += CpuPush::GetMaxOpcodeSize();
                 relocatable_size += disasm.GetInstruction().size;
             }
 
@@ -262,6 +263,8 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
 #ifdef USE_SPDLOG
         SPDLOG_INFO("Can relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
 #endif
+        // Copied as is.
+        relocatedOriginalCodeSize += disasm.GetInstruction().size;
         relocatable_size += disasm.GetInstruction().size;
     }
 

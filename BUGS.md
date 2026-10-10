@@ -92,11 +92,13 @@ if (_RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, relativeJu
 }
 ```
 
-### 🟠 7. Underestimated trampoline size (`relocatedOriginalCodeSize`)
+### ✅ 7. Underestimated trampoline size (`relocatedOriginalCodeSize`) — fixed in `fix/trampoline-size`
 [mini_detour.cpp:759](src/mini_detour.cpp:759), [mini_detour_x64.h:214-288](src/mini_detour_x64.h:214), [mini_detour_x86.h:165-239](src/mini_detour_x86.h:165)
 On x86/x64, `relocatedOriginalCodeSize` is only increased for special instructions (jmp/call/RIP relative), not for the instructions copied as is. For a relocated `call`, 5 is added while the trampoline writes a `push` (13 bytes on x64). `totalOriginalTrampolineSize` is therefore wrong → `FlushInstructionCache` / `MemoryProtect` don't cover the whole trampoline (a real problem on ARM, latent on x86). It is also computed with `absoluteJumpSize` while the relocation stops at `relativeJumpSize`.
 
 **Fix:** make `_RelocateCode` return the number of bytes **written** in the trampoline (in addition to the bytes consumed), and use that value for protect/flush. Otherwise, protect/flush `sizeof(memory_t::data)`.
+
+`relocatedOriginalCodeSize` is now an upper bound of the code written in the trampoline on x86/x64 (copied instructions, `push` of the return address, not taken `jcc` path), the jump back is counted with `AbsJump::GetMaxOpcodeSize()`, and `GetFreeTrampoline` refuses a size larger than a slot instead of an `assert` that disappears in Release.
 
 ### ✅ 8. Intermediate states not restored on error — fixed in `fix/restore-protection-on-hook-error`
 [mini_detour.cpp:778-798](src/mini_detour.cpp:778)
