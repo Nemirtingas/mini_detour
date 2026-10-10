@@ -12,5 +12,5 @@ TEST_CASE("MemoryProtect refuses mem_unset", "[memprotect_unset]")
 
     MiniDetour::MemoryManipulation::RegionInfos_t infos;
     MiniDetour::MemoryManipulation::GetRegionInfos(buffer.Data(), &infos);
-    CHECK(infos.Rights == MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
+    CHECK(infos.Rights == MiniDetour::MemoryManipulation::MemoryRights::mem_rx);
 }

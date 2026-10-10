@@ -7,18 +7,35 @@
 #include <string.h>
 
 // Executable memory used to build small hand-written functions in tests.
+// The memory is never writable and executable at the same time: macOS on Apple Silicon refuses rwx pages. It is
+// readable and executable, and only made writable while bytes are written.
 class CodeBuffer
 {
     uint8_t *_Data;
     size_t _Size;
 
+    void _BeginWrite() { MiniDetour::MemoryManipulation::MemoryProtect(_Data, _Size, MiniDetour::MemoryManipulation::MemoryRights::mem_rw); }
+
+    void _EndWrite()
+    {
+        MiniDetour::MemoryManipulation::MemoryProtect(_Data, _Size, MiniDetour::MemoryManipulation::MemoryRights::mem_rx);
+        MiniDetour::MemoryManipulation::FlushInstructionCache(_Data, _Size);
+    }
+
   public:
     explicit CodeBuffer(size_t size = 4096, void *addressHint = nullptr)
-        : _Data(static_cast<uint8_t *>(MiniDetour::MemoryManipulation::MemoryAlloc(addressHint, size, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx)))
+        : _Data(static_cast<uint8_t *>(MiniDetour::MemoryManipulation::MemoryAlloc(addressHint, size, MiniDetour::MemoryManipulation::MemoryRights::mem_rw)))
         , _Size(size)
     {
-        if (_Data != nullptr)
-            memset(_Data, 0xCC, _Size);
+        if (_Data == nullptr)
+            return;
+
+        memset(_Data, 0xCC, _Size);
+        if (!MiniDetour::MemoryManipulation::MemoryProtect(_Data, _Size, MiniDetour::MemoryManipulation::MemoryRights::mem_rx))
+        {
+            MiniDetour::MemoryManipulation::MemoryFree(_Data, _Size);
+            _Data = nullptr;
+        }
     }
 
     ~CodeBuffer()
@@ -40,23 +57,23 @@ class CodeBuffer
         return reinterpret_cast<T>(_Data + offset);
     }
 
-    // Writes bytes at offset (hooks may have made the page read-only, so it is made writable first).
+    // Writes bytes at offset, then makes the whole buffer readable and executable again.
     void Write(size_t offset, std::initializer_list<uint8_t> bytes)
     {
-        MiniDetour::MemoryManipulation::MemoryProtect(_Data, _Size, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
+        _BeginWrite();
         size_t i = 0;
         for (auto b : bytes)
             _Data[offset + i++] = b;
 
-        MiniDetour::MemoryManipulation::FlushInstructionCache(_Data, _Size);
+        _EndWrite();
     }
 
     template <typename T>
     void WriteValue(size_t offset, T value)
     {
-        MiniDetour::MemoryManipulation::MemoryProtect(_Data, _Size, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
+        _BeginWrite();
         memcpy(_Data + offset, &value, sizeof(value));
-        MiniDetour::MemoryManipulation::FlushInstructionCache(_Data, _Size);
+        _EndWrite();
     }
 };
 
