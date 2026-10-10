@@ -239,7 +239,8 @@ static inline cs_err _InitDisasm(CodeDisasm &disasm, int /*mode*/)
 void _EnterRecursiveThunk(void *&_pCode)
 {
     uint8_t *pCode = reinterpret_cast<uint8_t *>(_pCode);
-    while (1)
+    // A longer chain is most likely a loop (a thunk jumping to itself would never end).
+    for (int i = 0; i < 8; ++i)
     {
         // If its an imported function.      CALL                JUMP
         if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
