@@ -724,7 +724,6 @@ namespace Implementation {
             {
                 auto symbolBind = ELF_ST_BIND(symbol->st_info);
                 auto symbolType = ELF_ST_TYPE(symbol->st_info);
-                //auto symbolVisiblity = ELF_ST_VISIBILITY(symbol->st_other);
 
                 if ((symbol->st_name + 1) > dynamicSymbolsNamesSize)
                     continue;
@@ -742,7 +741,6 @@ namespace Implementation {
         {
             auto symbolBind = ELF_ST_BIND(symbol->st_info);
             auto symbolType = ELF_ST_TYPE(symbol->st_info);
-            //auto symbolVisiblity = ELF_ST_VISIBILITY(symbol->st_other);
 
             if ((symbol->st_name + 1) > dynamicSymbolsNamesSize)
                 continue;
@@ -802,7 +800,6 @@ namespace Implementation {
     size_t ReplaceModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
     {
         void* moduleBase = nullptr;
-        int64_t relocationOffset = 0;
         ElfSymbol_t* dynamicSymbolsStart = nullptr;
         ElfSymbol_t* dynamicSymbolsEnd = nullptr;
         size_t dynamicSymbolsSize = 0;
@@ -845,7 +842,6 @@ namespace Implementation {
     size_t RestoreModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
     {
         void* moduleBase = nullptr;
-        int64_t relocationOffset = 0;
         ElfSymbol_t* dynamicSymbolsStart = nullptr;
         ElfSymbol_t* dynamicSymbolsEnd = nullptr;
         size_t dynamicSymbolsSize = 0;
@@ -938,7 +934,6 @@ namespace Implementation {
         const char* dynStr;
         size_t dynStrSize;
         _ImportRelocations_t relocations;
-        size_t iatEntrySize;
         size_t result = 0;
 
         for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
