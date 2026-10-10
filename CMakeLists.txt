@@ -256,6 +256,29 @@ if(MINIDETOUR_BUILD_TESTS)
     target_compile_options(no_plt_test_library PRIVATE -fno-plt)
   endif()
 
+  if(APPLE)
+    # The same library with the two kinds of import binding: built for an old macOS, its imports are lazy symbol
+    # pointers bound by dyld on the first call; built for macOS 12, they are non lazy pointers set by chained fixups.
+    foreach(binding lazy:10.15 chained:12.0)
+      string(REPLACE ":" ";" binding "${binding}")
+      list(GET binding 0 bindingName)
+      list(GET binding 1 bindingMacosVersion)
+
+      add_library(
+        macos_${bindingName}_import_test_library SHARED
+        tests/macos_import_test_library.c
+      )
+
+      set_target_properties(macos_${bindingName}_import_test_library PROPERTIES
+        C_VISIBILITY_PRESET hidden
+        PREFIX ""
+      )
+
+      target_compile_options(macos_${bindingName}_import_test_library PRIVATE -mmacosx-version-min=${bindingMacosVersion})
+      target_link_options(macos_${bindingName}_import_test_library PRIVATE -mmacosx-version-min=${bindingMacosVersion})
+    endforeach()
+  endif()
+
   # Each fix can add its own tests/test_*.cpp file without touching this list.
   file(GLOB MINIDETOUR_TEST_SOURCES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_LIST_DIR}/tests/test.cpp

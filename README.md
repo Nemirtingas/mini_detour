@@ -95,8 +95,9 @@ if (MiniDetour::ModuleManipulation::ReplaceModuleExports(module, &parameter, 1) 
 }
 ```
 
-`ReplaceModuleIATs` / `RestoreModuleIATs` do the same with the import table (IAT on Windows, GOT on Linux) of a module,
-and `GetAllExportedSymbols` / `GetAllIATSymbols` list them: pass `nullptr` to get the count first.
+`ReplaceModuleIATs` / `RestoreModuleIATs` do the same with the import table (IAT on Windows, GOT on Linux, symbol
+pointers on macOS) of a module, and `GetAllExportedSymbols` / `GetAllIATSymbols` list them: pass `nullptr` to get the
+count first.
 
 ### C API
 
@@ -138,7 +139,9 @@ Recent kernels may also lock the memory of a process and refuse to add execute r
 - Page lockdown: [vm_user.c](https://github.com/apple/darwin-xnu/blob/main/osfmk/vm/vm_user.c#L3287-L3300)
 - Protection change refused: [vm_map.c](https://github.com/apple/darwin-xnu/blob/main/osfmk/vm/vm_map.c#L5961-L5967)
 
-Export and import replacement are not implemented on macOS yet.
+Import replacement works on macOS, shared cache libraries included: the lazy and non lazy symbol pointers of an image
+are rebound. Calls between shared cache libraries may not go through these pointers. Export replacement is not
+implemented on macOS yet.
 
 ## License
 
