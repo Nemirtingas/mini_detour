@@ -5,9 +5,9 @@
 #if defined(MINIDETOUR_ARCH_ARM)
 
 // Thumb code written by hand, called with the Thumb bit set: the test works in ARM and Thumb builds.
-static void* ThumbAddress(void* address)
+static void *ThumbAddress(void *address)
 {
-    return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(address) | 1);
+    return reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(address) | 1);
 }
 
 // BUGS.md #18: the relative jump size was computed to the detour, but the jump goes to a jump slot allocated later.
@@ -19,15 +19,15 @@ TEST_CASE("Hook a Thumb function with a close detour", "[arm_thumb_hook]")
     CodeBuffer code(0x10000);
     REQUIRE(code.IsValid());
 
-    code.Write(0, { 0x00, 0xBF, 0x00, 0xBF, 0x2A, 0x20, 0x70, 0x47 }); // nop; nop; movs r0, #42; bx lr
-    code.Write(64, { 0x07, 0x20, 0x70, 0x47 });                        // movs r0, #7; bx lr
+    code.Write(0, {0x00, 0xBF, 0x00, 0xBF, 0x2A, 0x20, 0x70, 0x47}); // nop; nop; movs r0, #42; bx lr
+    code.Write(64, {0x07, 0x20, 0x70, 0x47});                        // movs r0, #7; bx lr
 
     auto function = reinterpret_cast<int (*)()>(ThumbAddress(code.Data()));
-    void* detour = ThumbAddress(code.Data(64));
+    void *detour  = ThumbAddress(code.Data(64));
     REQUIRE(function() == 42);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction((void*)function, detour) != nullptr);
+    REQUIRE(hook.HookFunction((void *)function, detour) != nullptr);
     CHECK(function() == 7);
 
     CHECK(hook.RestoreFunction() != nullptr);

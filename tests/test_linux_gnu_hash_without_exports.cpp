@@ -8,7 +8,7 @@
 // BUGS.md #30: with no hashed symbol every GNU hash bucket is 0, and the symbol count was computed from chains[0 - symndx].
 TEST_CASE("Module without exported symbols", "[gnu_hash_empty]")
 {
-    void* h = dlopen("./no_export_test_library.so", RTLD_NOW);
+    void *h = dlopen("./no_export_test_library.so", RTLD_NOW);
     REQUIRE(h != nullptr);
 
     CHECK(MiniDetour::ModuleManipulation::GetAllExportedSymbols(h, nullptr, 0) == 0);

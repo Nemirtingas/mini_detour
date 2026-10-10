@@ -35,7 +35,7 @@
 // movk x0, #0x89ab, lsl 32
 // movk x0, #0xcdef, lsl 48
 
-static bool _AddressesAreRelativeJumpable(void* source, void* dest)
+static bool _AddressesAreRelativeJumpable(void *source, void *dest)
 {
     uintptr_t min_addr = reinterpret_cast<uintptr_t>(std::min(source, dest));
     uintptr_t max_addr = reinterpret_cast<uintptr_t>(std::max(source, dest));
@@ -49,27 +49,27 @@ struct memory_t
 {
     uint8_t used;
     uint8_t padding[3]; // arm is aligned on 4 bytes
-    uint8_t data[48]; // Max absolute jump size is 20 bytes
+    uint8_t data[48];   // Max absolute jump size is 20 bytes
 };
 
 struct AbsJump
 {
-    static inline size_t WriteOpcodes(void* buffer, void* jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void *buffer, void *jump_destination, int source_mode, int dest_mode)
     {
-        uint32_t movz;     // movz x17, 0
-        uint32_t movk16;   // movk x17, 0, lsl 16
-        uint32_t movk32;   // movk x17, 0, lsl 32
-        uint32_t movk48;   // movk x17, 0, lsl 48
-        uint32_t br;       // br x17
+        uint32_t movz;   // movz x17, 0
+        uint32_t movk16; // movk x17, 0, lsl 16
+        uint32_t movk32; // movk x17, 0, lsl 32
+        uint32_t movk48; // movk x17, 0, lsl 48
+        uint32_t br;     // br x17
 
         uintptr_t i_addr = reinterpret_cast<uintptr_t>(jump_destination);
-        movz   = 0xd2800011 | uint32_t(i_addr & 0xffff) << 5;
-        movk16 = 0xf2a00011 | uint32_t((i_addr >> 16) & 0xffff) << 5;
-        movk32 = 0xf2c00011 | uint32_t((i_addr >> 32) & 0xffff) << 5;
-        movk48 = 0xf2e00011 | uint32_t((i_addr >> 48) & 0xffff) << 5;
-        br = 0xd61f0220;
+        movz             = 0xd2800011 | uint32_t(i_addr & 0xffff) << 5;
+        movk16           = 0xf2a00011 | uint32_t((i_addr >> 16) & 0xffff) << 5;
+        movk32           = 0xf2c00011 | uint32_t((i_addr >> 32) & 0xffff) << 5;
+        movk48           = 0xf2e00011 | uint32_t((i_addr >> 48) & 0xffff) << 5;
+        br               = 0xd61f0220;
 
-        uint32_t* opcode = reinterpret_cast<uint32_t*>(buffer);
+        uint32_t *opcode = reinterpret_cast<uint32_t *>(buffer);
 
         switch (GetOpcodeSize(jump_destination, source_mode, dest_mode))
         {
@@ -104,7 +104,7 @@ struct AbsJump
     }
 
     // Variable jump size
-    static inline size_t GetOpcodeSize(void* jump_destination, int /*source_mode*/, int /*dest_mode*/)
+    static inline size_t GetOpcodeSize(void *jump_destination, int /*source_mode*/, int /*dest_mode*/)
     {
         uintptr_t i_addr = (uintptr_t)jump_destination;
         // Need 4 instructions to fill 64bits
@@ -129,18 +129,19 @@ struct AbsJump
         // movk 16 bits << 16
         // movk 16 bits << 32
         // movk 16 bits << 48
-        // 
+        //
         return 20;
     }
 };
 
 struct RelJump
 {
-    static inline size_t WriteOpcodes(void* buffer, void* source, void* jump_destination, int /*source_mode*/, int /*dest_mode*/)
+    static inline size_t WriteOpcodes(void *buffer, void *source, void *jump_destination, int /*source_mode*/, int /*dest_mode*/)
     {
         union
         {
-            struct {
+            struct
+            {
                 int32_t rel_addr : 26;
                 int32_t pad : 6;
             };
@@ -149,56 +150,49 @@ struct RelJump
 
         v.rel_addr = (reinterpret_cast<uintptr_t>(jump_destination) - reinterpret_cast<uintptr_t>(source)) / 4;
 
-        *reinterpret_cast<uint32_t*>(buffer) = 0x14000000 | v.addr;
+        *reinterpret_cast<uint32_t *>(buffer) = 0x14000000 | v.addr;
 
         return 4;
     }
 
-    static constexpr size_t GetOpcodeSize(void* /*source*/, void* /*jump_destination*/, int /*source_mode*/, int /*dest_mode*/)
-    {
-        return 4;
-    }
+    static constexpr size_t GetOpcodeSize(void * /*source*/, void * /*jump_destination*/, int /*source_mode*/, int /*dest_mode*/) { return 4; }
 
-    static constexpr size_t GetMaxOpcodeSize()
-    {
-        return 4;
-    }
+    static constexpr size_t GetMaxOpcodeSize() { return 4; }
 };
 
 #pragma pack(pop)
 
-
 // Follows PLT entries to the function they jump to, read from their GOT entry:
 //   [bti c]; adrp x16, page; ldr x17, [x16, #offset]; add x16, x16, #offset; br x17
 // The code mode is carried by the address on ARM (Thumb bit): ARM64 has a single mode.
-static inline int _GetCodeMode(void* /*address*/)
+static inline int _GetCodeMode(void * /*address*/)
 {
     return 0;
 }
 
 // Address of the code bytes, without the mode.
-static inline void* _GetCodeAddress(void* address)
+static inline void *_GetCodeAddress(void *address)
 {
     return address;
 }
 
 // Address to call code written in the given mode.
-static inline void* _GetCallAddress(void* code, int /*mode*/)
+static inline void *_GetCallAddress(void *code, int /*mode*/)
 {
     return code;
 }
 
-static inline cs_err _InitDisasm(CodeDisasm& disasm, int /*mode*/)
+static inline cs_err _InitDisasm(CodeDisasm &disasm, int /*mode*/)
 {
     return disasm.Init(cs_arch::CS_ARCH_ARM64, (cs_mode)(cs_mode::CS_MODE_ARM | CodeDisasm::RuntimeEndianness()));
 }
 
-static void _EnterRecursiveThunk(void*& _pCode)
+static void _EnterRecursiveThunk(void *&_pCode)
 {
     // A longer chain is most likely a loop.
     for (int i = 0; i < 8; ++i)
     {
-        const uint32_t* code = reinterpret_cast<const uint32_t*>(_pCode);
+        const uint32_t *code = reinterpret_cast<const uint32_t *>(_pCode);
         if (code[0] == 0xD503245F) // bti c
             ++code;
 
@@ -210,28 +204,28 @@ static void _EnterRecursiveThunk(void*& _pCode)
         if (pages & (int64_t(1) << 20))
             pages -= int64_t(1) << 21;
 
-        const uintptr_t page = (reinterpret_cast<uintptr_t>(code) & ~uintptr_t(0xFFF)) + static_cast<uintptr_t>(pages * 0x1000);
+        const uintptr_t page     = (reinterpret_cast<uintptr_t>(code) & ~uintptr_t(0xFFF)) + static_cast<uintptr_t>(pages * 0x1000);
         const uintptr_t gotEntry = page + ((code[1] >> 10) & 0xFFF) * 8;
-        _pCode = *reinterpret_cast<void**>(gotEntry);
+        _pCode                   = *reinterpret_cast<void **>(gotEntry);
     }
 }
 
 // adr, adrp and the literal loads (LDR, LDRSW, PRFM, SIMD LDR) compute their address from pc.
-static bool _UsesInstructionPointer(cs_insn const& instruction)
+static bool _UsesInstructionPointer(cs_insn const &instruction)
 {
-    const uint32_t raw = *reinterpret_cast<const uint32_t*>(instruction.bytes);
+    const uint32_t raw = *reinterpret_cast<const uint32_t *>(instruction.bytes);
     const uint32_t adr = raw & 0x9F000000;
     return adr == 0x10000000 || adr == 0x90000000 || (raw & 0x3B000000) == 0x18000000;
 }
 
-static size_t _GetRelocatableSize(void* pCode, size_t& relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm& disasm, size_t wanted_relocatable_size)
+static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatable_size)
 {
     uint8_t code_buffer[80];
-    const uint8_t* code_iterator = code_buffer;
-    size_t code_size = 0;
-    uint64_t code_addr = reinterpret_cast<uint64_t>(pCode);
+    const uint8_t *code_iterator = code_buffer;
+    size_t code_size             = 0;
+    uint64_t code_addr           = reinterpret_cast<uint64_t>(pCode);
 
-    code_size = _ReadCode(reinterpret_cast<void*>(code_addr), code_buffer, sizeof(code_buffer));
+    code_size = _ReadCode(reinterpret_cast<void *>(code_addr), code_buffer, sizeof(code_buffer));
 
     size_t relocatable_size = 0;
     while (relocatable_size < wanted_relocatable_size)
@@ -280,13 +274,13 @@ static size_t _GetRelocatableSize(void* pCode, size_t& relocatedOriginalCodeSize
     return relocatable_size;
 }
 
-static size_t _RelocateCode(void* pCode, void* pTrampoline, CodeDisasm& disasm, size_t wanted_relocatableSize, int /*func_mode*/)
+static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize, int /*func_mode*/)
 {
     uint8_t code_buffer[80];
-    const uint8_t* code_iterator = code_buffer;
-    size_t code_size = 0;
-    uint64_t code_addr = reinterpret_cast<uint64_t>(pCode);
-    uint8_t* pTrampolineCode = reinterpret_cast<uint8_t*>(pTrampoline);
+    const uint8_t *code_iterator = code_buffer;
+    size_t code_size             = 0;
+    uint64_t code_addr           = reinterpret_cast<uint64_t>(pCode);
+    uint8_t *pTrampolineCode     = reinterpret_cast<uint8_t *>(pTrampoline);
 
     code_size = _ReadCode(pCode, code_buffer, sizeof(code_buffer));
 
@@ -316,14 +310,14 @@ static size_t _RelocateCode(void* pCode, void* pTrampoline, CodeDisasm& disasm, 
 #ifdef USE_SPDLOG
         SPDLOG_INFO("Can relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
 #endif
-        memcpy(pTrampolineCode, (void*)disasm.GetInstruction().address, disasm.GetInstruction().size);
+        memcpy(pTrampolineCode, (void *)disasm.GetInstruction().address, disasm.GetInstruction().size);
         relocatedSize += disasm.GetInstruction().size;
         pTrampolineCode += disasm.GetInstruction().size;
     }
 
-    AbsJump::WriteOpcodes(pTrampolineCode, reinterpret_cast<void*>(code_addr), 0, 0);
+    AbsJump::WriteOpcodes(pTrampolineCode, reinterpret_cast<void *>(code_addr), 0, 0);
 
     return relocatedSize;
 }
 
-#endif//MINI_DETOUR_ARM64_H
+#endif // MINI_DETOUR_ARM64_H

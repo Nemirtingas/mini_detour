@@ -45,7 +45,7 @@ struct AbsJump
         return GetMaxOpcodeSize();
     }
 
-    static constexpr size_t GetOpcodeSize(void */*jump_destination*/, int /*source_mode*/, int /*dest_mode*/)
+    static constexpr size_t GetOpcodeSize(void * /*jump_destination*/, int /*source_mode*/, int /*dest_mode*/)
     {
         // PUSH
         // ABS ADDR
@@ -80,7 +80,7 @@ struct RelJump
         return GetMaxOpcodeSize();
     }
 
-    static constexpr size_t GetOpcodeSize(void */*source*/, void */*jump_destination*/, int /*source_mode*/, int /*dest_mode*/)
+    static constexpr size_t GetOpcodeSize(void * /*source*/, void * /*jump_destination*/, int /*source_mode*/, int /*dest_mode*/)
     {
         // E9          | JMP
         // XX XX XX XX | REL ADDR
@@ -151,7 +151,7 @@ static bool _GetJccConditionCode(cs_insn const &instruction, uint8_t &conditionC
 }
 
 // The code mode is carried by the address on ARM (Thumb bit): x86 has a single mode.
-static inline int _GetCodeMode(void */*address*/)
+static inline int _GetCodeMode(void * /*address*/)
 {
     return 0;
 }

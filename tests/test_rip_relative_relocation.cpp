@@ -59,11 +59,21 @@ TEST_CASE("Relocate mov r11, (rip + x)", "[rip_relocation]")
 {
     CodeBuffer code;
     REQUIRE(code.IsValid());
-    code.Write(0, {
-        0x4C, 0x8B, 0x1D, 0, 0, 0, 0, // mov r11, [rip + x]
-        0x4C, 0x89, 0xD8,             // mov rax, r11
-        0xC3,                         // ret
-    });
+    code.Write(
+        0,
+        {
+            0x4C,
+            0x8B,
+            0x1D,
+            0,
+            0,
+            0,
+            0, // mov r11, [rip + x]
+            0x4C,
+            0x89,
+            0xD8, // mov rax, r11
+            0xC3, // ret
+        });
     code.WriteValue<int32_t>(3, RipDisp(7));
     CheckRipFunction(code, RipDataValue);
 }
@@ -72,13 +82,25 @@ TEST_CASE("Relocate mov r12, (rip + x) (SIB encoding)", "[rip_relocation]")
 {
     CodeBuffer code;
     REQUIRE(code.IsValid());
-    code.Write(0, {
-        0x41, 0x54,                   // push r12
-        0x4C, 0x8B, 0x25, 0, 0, 0, 0, // mov r12, [rip + x]
-        0x4C, 0x89, 0xE0,             // mov rax, r12
-        0x41, 0x5C,                   // pop r12
-        0xC3,                         // ret
-    });
+    code.Write(
+        0,
+        {
+            0x41,
+            0x54, // push r12
+            0x4C,
+            0x8B,
+            0x25,
+            0,
+            0,
+            0,
+            0, // mov r12, [rip + x]
+            0x4C,
+            0x89,
+            0xE0, // mov rax, r12
+            0x41,
+            0x5C, // pop r12
+            0xC3, // ret
+        });
     code.WriteValue<int32_t>(5, RipDisp(9));
     CheckRipFunction(code, RipDataValue);
 }
@@ -87,13 +109,25 @@ TEST_CASE("Relocate mov r13, (rip + x) (disp8 encoding)", "[rip_relocation]")
 {
     CodeBuffer code;
     REQUIRE(code.IsValid());
-    code.Write(0, {
-        0x41, 0x55,                   // push r13
-        0x4C, 0x8B, 0x2D, 0, 0, 0, 0, // mov r13, [rip + x]
-        0x4C, 0x89, 0xE8,             // mov rax, r13
-        0x41, 0x5D,                   // pop r13
-        0xC3,                         // ret
-    });
+    code.Write(
+        0,
+        {
+            0x41,
+            0x55, // push r13
+            0x4C,
+            0x8B,
+            0x2D,
+            0,
+            0,
+            0,
+            0, // mov r13, [rip + x]
+            0x4C,
+            0x89,
+            0xE8, // mov rax, r13
+            0x41,
+            0x5D, // pop r13
+            0xC3, // ret
+        });
     code.WriteValue<int32_t>(5, RipDisp(9));
     CheckRipFunction(code, RipDataValue);
 }

@@ -74,7 +74,7 @@ struct AbsJump
         return GetMaxOpcodeSize();
     }
 
-    static inline size_t GetOpcodeSize(void */*jump_destination*/, int /*source_mode*/, int /*dest_mode*/)
+    static inline size_t GetOpcodeSize(void * /*jump_destination*/, int /*source_mode*/, int /*dest_mode*/)
     {
         // JMP
         // RIP OFFSET (RIP + 0)
@@ -109,7 +109,7 @@ struct RelJump
         return GetMaxOpcodeSize();
     }
 
-    static inline size_t GetOpcodeSize(void */*source*/, void */*jump_destination*/, int /*source_mode*/, int /*dest_mode*/)
+    static inline size_t GetOpcodeSize(void * /*source*/, void * /*jump_destination*/, int /*source_mode*/, int /*dest_mode*/)
     {
         // E9          | JMP
         // XX XX XX XX | REL ADDR
@@ -127,10 +127,7 @@ struct RelJump
 struct CpuPush
 {
     // push imm32 sign-extends its operand to 64 bits.
-    static constexpr bool _FitsInSignExtendedImm32(uint64_t value)
-    {
-        return static_cast<int64_t>(static_cast<int32_t>(value)) == static_cast<int64_t>(value);
-    }
+    static constexpr bool _FitsInSignExtendedImm32(uint64_t value) { return static_cast<int64_t>(static_cast<int32_t>(value)) == static_cast<int64_t>(value); }
 
     static size_t WriteOpcodes(void *source, uint64_t value)
     {
@@ -206,7 +203,7 @@ static bool _GetJccConditionCode(cs_insn const &instruction, uint8_t &conditionC
 }
 
 // The code mode is carried by the address on ARM (Thumb bit): x64 has a single mode.
-static inline int _GetCodeMode(void */*address*/)
+static inline int _GetCodeMode(void * /*address*/)
 {
     return 0;
 }
@@ -257,12 +254,40 @@ static void _EnterRecursiveThunk(void *&_pCode)
 static bool _GetRegisterNumber(x86_reg reg, uint8_t &number, bool &is64)
 {
     static const x86_reg registers64[] = {
-        X86_REG_RAX, X86_REG_RCX, X86_REG_RDX, X86_REG_RBX, X86_REG_RSP, X86_REG_RBP, X86_REG_RSI, X86_REG_RDI,
-        X86_REG_R8,  X86_REG_R9,  X86_REG_R10, X86_REG_R11, X86_REG_R12, X86_REG_R13, X86_REG_R14, X86_REG_R15,
+        X86_REG_RAX,
+        X86_REG_RCX,
+        X86_REG_RDX,
+        X86_REG_RBX,
+        X86_REG_RSP,
+        X86_REG_RBP,
+        X86_REG_RSI,
+        X86_REG_RDI,
+        X86_REG_R8,
+        X86_REG_R9,
+        X86_REG_R10,
+        X86_REG_R11,
+        X86_REG_R12,
+        X86_REG_R13,
+        X86_REG_R14,
+        X86_REG_R15,
     };
     static const x86_reg registers32[] = {
-        X86_REG_EAX, X86_REG_ECX, X86_REG_EDX,  X86_REG_EBX,  X86_REG_ESP,  X86_REG_EBP,  X86_REG_ESI,  X86_REG_EDI,
-        X86_REG_R8D, X86_REG_R9D, X86_REG_R10D, X86_REG_R11D, X86_REG_R12D, X86_REG_R13D, X86_REG_R14D, X86_REG_R15D,
+        X86_REG_EAX,
+        X86_REG_ECX,
+        X86_REG_EDX,
+        X86_REG_EBX,
+        X86_REG_ESP,
+        X86_REG_EBP,
+        X86_REG_ESI,
+        X86_REG_EDI,
+        X86_REG_R8D,
+        X86_REG_R9D,
+        X86_REG_R10D,
+        X86_REG_R11D,
+        X86_REG_R12D,
+        X86_REG_R13D,
+        X86_REG_R14D,
+        X86_REG_R15D,
     };
 
     for (uint8_t i = 0; i < 16; ++i)
@@ -325,12 +350,12 @@ static size_t _WriteRipRelativeLoad(uint8_t *code, uint8_t reg, bool is64, bool 
 
         *code++ = 0x8B; // mov reg, [reg]
         if (lowReg == 5)
-        {// rbp/r13 base needs a displacement: [reg + 0]
+        { // rbp/r13 base needs a displacement: [reg + 0]
             *code++ = 0x40 | (lowReg << 3) | lowReg;
             *code++ = 0x00;
         }
         else if (lowReg == 4)
-        {// r12 base needs a SIB byte
+        { // r12 base needs a SIB byte
             *code++ = (lowReg << 3) | lowReg;
             *code++ = 0x24;
         }

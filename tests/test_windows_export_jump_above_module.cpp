@@ -21,26 +21,26 @@ TEST_CASE("Export jump is placed above the module base", "[export_jump_rva]")
 
     // Hooking a function 256 MB below the module creates a jump region below it, with free slots
     // close enough to the module for a relative jump.
-    uint8_t* belowModule = nullptr;
+    uint8_t *belowModule = nullptr;
     for (uintptr_t address = moduleBase - 0x10000000; belowModule == nullptr && address < moduleBase; address += 0x10000)
-        belowModule = static_cast<uint8_t*>(VirtualAlloc(reinterpret_cast<void*>(address), 4096, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE));
+        belowModule = static_cast<uint8_t *>(VirtualAlloc(reinterpret_cast<void *>(address), 4096, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE));
 
     REQUIRE(belowModule != nullptr);
 
     // nop; mov eax, 1; ret
-    const uint8_t function[] = { 0x90, 0xB8, 1, 0, 0, 0, 0xC3 };
+    const uint8_t function[] = {0x90, 0xB8, 1, 0, 0, 0, 0xC3};
     memcpy(belowModule, function, sizeof(function));
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction(belowModule, (void*)&BelowModuleDetour) != nullptr);
+    REQUIRE(hook.HookFunction(belowModule, (void *)&BelowModuleDetour) != nullptr);
 
     // A detour that isn't representable as an RVA (below the module) needs a jump slot.
     CodeBuffer detour(4096);
     REQUIRE(detour.IsValid());
     // mov eax, 2; ret
-    detour.Write(0, { 0xB8, 2, 0, 0, 0, 0xC3 });
+    detour.Write(0, {0xB8, 2, 0, 0, 0, 0xC3});
     REQUIRE(reinterpret_cast<uintptr_t>(detour.Data()) < moduleBase);
 
-    MiniDetour::ModuleManipulation::ExportReplaceParameter_t exportDetails{ "add", detour.Data(), nullptr };
+    MiniDetour::ModuleManipulation::ExportReplaceParameter_t exportDetails{"add", detour.Data(), nullptr};
     REQUIRE(MiniDetour::ModuleManipulation::ReplaceModuleExports(h, &exportDetails, 1) == 1);
 
     auto add = reinterpret_cast<int (*)(int, int)>(GetProcAddress(h, "add"));
