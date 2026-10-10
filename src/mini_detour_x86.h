@@ -11,19 +11,11 @@ inline intptr_t absolute_addr_to_relative(void *opcode_addr, void *destination_a
     return reinterpret_cast<uint8_t *>(destination_addr) - reinterpret_cast<uint8_t *>(opcode_addr) - 5;
 }
 
-bool _AddressesAreRelativeJumpable(void *source, void *dest)
+static bool _AddressesAreRelativeJumpable(void *source, void *dest)
 {
     uintptr_t min_addr = reinterpret_cast<uintptr_t>(std::min(source, dest));
     uintptr_t max_addr = reinterpret_cast<uintptr_t>(std::max(source, dest));
     return (max_addr - min_addr) <= 0x7FFFFFF0;
-}
-
-bool _AddressIsRepresentableAsRva(void *moduleBase, void *address)
-{
-    uintptr_t base = reinterpret_cast<uintptr_t>(moduleBase);
-    uintptr_t addr = reinterpret_cast<uintptr_t>(address);
-
-    return addr >= base && (addr - base) <= UINT32_MAX;
 }
 
 #pragma pack(push, 1)
@@ -181,7 +173,7 @@ static inline cs_err _InitDisasm(CodeDisasm &disasm, int /*mode*/)
     return disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_32 | CodeDisasm::RuntimeEndianness()));
 }
 
-void _EnterRecursiveThunk(void *&_pCode)
+static void _EnterRecursiveThunk(void *&_pCode)
 {
     uint8_t *pCode = reinterpret_cast<uint8_t *>(_pCode);
     // A longer chain is most likely a loop (a thunk jumping to itself would never end).
@@ -206,7 +198,7 @@ void _EnterRecursiveThunk(void *&_pCode)
     _pCode = pCode;
 }
 
-size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatable_size)
+static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatable_size)
 {
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
@@ -271,7 +263,7 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
     return relocatable_size;
 }
 
-size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatable_size, int /*func_mode*/)
+static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatable_size, int /*func_mode*/)
 {
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
