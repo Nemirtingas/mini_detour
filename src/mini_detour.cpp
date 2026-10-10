@@ -204,6 +204,29 @@ static uintptr_t _DistanceToRegion(uintptr_t address, MiniDetour::MemoryManipula
     return 0;
 }
 
+// The free regions of the process.
+static std::vector<MiniDetour::MemoryManipulation::RegionInfos_t> _GetFreeRegions()
+{
+    // Regions can appear between the two calls: room is left for them.
+    auto freeRegionCount = MiniDetour::MemoryManipulation::GetFreeRegions(nullptr, 0);
+    std::vector<MiniDetour::MemoryManipulation::RegionInfos_t> freeRegions((size_t)(freeRegionCount * 1.5));
+    freeRegionCount = MiniDetour::MemoryManipulation::GetFreeRegions(freeRegions.data(), freeRegions.size());
+    if (freeRegionCount < freeRegions.size())
+        freeRegions.resize(freeRegionCount);
+
+    return freeRegions;
+}
+
+// Sorts the regions, the closest to address first.
+static void _SortByDistance(std::vector<MiniDetour::MemoryManipulation::RegionInfos_t> &regions, uintptr_t address)
+{
+    std::sort(
+        regions.begin(),
+        regions.end(),
+        [address](MiniDetour::MemoryManipulation::RegionInfos_t const &l, MiniDetour::MemoryManipulation::RegionInfos_t const &r)
+        { return _DistanceToRegion(address, l) < _DistanceToRegion(address, r); });
+}
+
 // Tries to allocate size bytes in a free region, at a multiple of step (the allocation granularity), starting from the
 // address closest to addressHint: upward from there, then downward. tryAlloc(address) returns the allocation or nullptr.
 template <typename TryAlloc>
@@ -304,18 +327,8 @@ class MemoryManager
 
         MiniDetour::MemoryManipulation::MemoryFree(jump_table, regionSize);
 
-        auto freeRegionCount = MiniDetour::MemoryManipulation::GetFreeRegions(nullptr, 0);
-        std::vector<MiniDetour::MemoryManipulation::RegionInfos_t> freeRegions((size_t)(freeRegionCount * 1.5));
-        freeRegionCount = MiniDetour::MemoryManipulation::GetFreeRegions(freeRegions.data(), freeRegions.size());
-        if (freeRegionCount < freeRegions.size())
-            freeRegions.resize(freeRegionCount);
-
-        const uintptr_t hint = reinterpret_cast<uintptr_t>(hint_addr);
-        std::sort(
-            freeRegions.begin(),
-            freeRegions.end(),
-            [hint](MiniDetour::MemoryManipulation::RegionInfos_t const &l, MiniDetour::MemoryManipulation::RegionInfos_t const &r)
-            { return _DistanceToRegion(hint, l) < _DistanceToRegion(hint, r); });
+        auto freeRegions = _GetFreeRegions();
+        _SortByDistance(freeRegions, reinterpret_cast<uintptr_t>(hint_addr));
 
         for (auto const &region : freeRegions)
         {
@@ -347,30 +360,21 @@ class MemoryManager
         void *jump_table = _AllocUsableJumpsRegion(hint_addr, reference, isUsable);
         SPDLOG_INFO("Jumps region allocated can hold {} jumps", _JumpsInRegion());
 
+        // _AllocUsableJumpsRegion only returns a region usable from reference.
         if (jump_table != nullptr)
         {
-            if (isUsable(reference, jump_table))
-            {
-                SPDLOG_INFO("Jump region {} is usable from {}", jump_table, reference);
+            SPDLOG_INFO("Jump region {} is usable from {}", jump_table, reference);
 
-                memset(jump_table, 0xCC, _RegionSize());
+            memset(jump_table, 0xCC, _RegionSize());
 
-                // Protect trampoline region memory
-                MiniDetour::MemoryManipulation::MemoryProtect(jump_table, _RegionSize(), MiniDetour::MemoryManipulation::MemoryRights::mem_rx);
+            // Protect trampoline region memory
+            MiniDetour::MemoryManipulation::MemoryProtect(jump_table, _RegionSize(), MiniDetour::MemoryManipulation::MemoryRights::mem_rx);
 
-                jumps_regions.emplace_back();
-                auto &region = *jumps_regions.rbegin();
-                region.bitmap.resize(_JumpsInRegion(), false);
-                region.bitmap[0]  = true;
-                region.jump_table = (JumpRegion_t::jump_t *)jump_table;
-            }
-            else
-            {
-                SPDLOG_INFO("Jump region {} is not usable from {}", jump_table, reference);
-
-                MiniDetour::MemoryManipulation::MemoryFree(jump_table, _RegionSize());
-                jump_table = nullptr;
-            }
+            jumps_regions.emplace_back();
+            auto &region = *jumps_regions.rbegin();
+            region.bitmap.resize(_JumpsInRegion(), false);
+            region.bitmap[0]  = true;
+            region.jump_table = (JumpRegion_t::jump_t *)jump_table;
         }
 
         return jump_table;
@@ -580,11 +584,7 @@ void *MemoryAlloc(void *_addressHint, size_t size, MemoryRights rights)
     if (_addressHint == nullptr)
         return _MemoryAllocAnywhere(size, rights);
 
-    auto freeRegionCount = GetFreeRegions(nullptr, 0);
-    std::vector<RegionInfos_t> freeRegions((size_t)(freeRegionCount * 1.5));
-    freeRegionCount = GetFreeRegions(freeRegions.data(), freeRegions.size());
-    if (freeRegionCount < freeRegions.size())
-        freeRegions.resize(freeRegionCount);
+    auto freeRegions = _GetFreeRegions();
 
     // Only keep the part of the free regions the process can allocate.
     for (auto &region : freeRegions)
@@ -594,10 +594,7 @@ void *MemoryAlloc(void *_addressHint, size_t size, MemoryRights rights)
     }
     freeRegions.erase(std::remove_if(freeRegions.begin(), freeRegions.end(), [](RegionInfos_t const &region) { return region.Start >= region.End; }), freeRegions.end());
 
-    std::sort(
-        freeRegions.begin(),
-        freeRegions.end(),
-        [addressHint](RegionInfos_t const &l, RegionInfos_t const &r) { return _DistanceToRegion(addressHint, l) < _DistanceToRegion(addressHint, r); });
+    _SortByDistance(freeRegions, addressHint);
 
     const size_t granularity = _AllocationGranularity();
     for (auto const &region : freeRegions)
