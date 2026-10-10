@@ -653,9 +653,11 @@ int Myputs(const char* str)
     return puts_hook.GetOriginalFunction<decltype(puts)*>()(str);
 };
 
+// The volatile locals keep the hooked functions large enough to hold a jump once optimized: a + b alone is 4 bytes on x64.
 int do_something(int a, int b)
 {
-    return a + b;
+    volatile int result = a + b;
+    return result;
 }
 
 MiniDetour::Hook_t do_something_hook;
@@ -666,7 +668,8 @@ int Mydo_something(int a, int b)
 
 int do_something2(int a, int b)
 {
-    return a - b;
+    volatile int result = a - b;
+    return result;
 }
 
 MiniDetour::Hook_t do_something_hook2;
@@ -674,6 +677,11 @@ int Mydo_something2(int a, int b)
 {
     return a / b;
 }
+
+// Calls go through volatile pointers: optimized builds would otherwise inline or constant fold them, and never run the
+// hooked code.
+static int (*volatile do_something_ptr)(int, int)  = &do_something;
+static int (*volatile do_something2_ptr)(int, int) = &do_something2;
 
 TEST_CASE("Hook function", "[Hook function]") {
 
@@ -703,7 +711,7 @@ TEST_CASE("Hook function", "[Hook function]") {
     CHECK(Myputs_called == false);
     
     SPDLOG_INFO("Calling do_something...");
-    CHECK(do_something(5, 8) == 13);
+    CHECK(do_something_ptr(5, 8) == 13);
 
     SPDLOG_INFO("Hooking do_something...");
     CHECK(do_something_hook.HookFunction((void*)&do_something, (void*)Mydo_something) != nullptr);
@@ -716,18 +724,18 @@ TEST_CASE("Hook function", "[Hook function]") {
         CHECK(r == 13);
 
         SPDLOG_INFO("Calling do_something...");
-        r = do_something(5, 8);
+        r = do_something_ptr(5, 8);
         CHECK(r == 40);
 
         SPDLOG_INFO("Restoring do_something...");
         CHECK(do_something_hook.RestoreFunction() != nullptr);
 
         SPDLOG_INFO("Calling do_something...");
-        r = do_something(5, 8);
+        r = do_something_ptr(5, 8);
         CHECK(r == 13);
     }
 
-    CHECK(do_something2(8, 4) == 4);
+    CHECK(do_something2_ptr(8, 4) == 4);
     CHECK(do_something_hook2.HookFunction((void*)&do_something2, (void*)Mydo_something2) != nullptr);
 
     if (do_something_hook2.GetOriginalFunction<void*>() != nullptr)
@@ -739,14 +747,14 @@ TEST_CASE("Hook function", "[Hook function]") {
         CHECK(r == 4);
 
         SPDLOG_INFO("Calling do_something2...");
-        r = do_something2(8, 4);
+        r = do_something2_ptr(8, 4);
         CHECK(r == 2);
 
         SPDLOG_INFO("Restoring do_something2...");
         CHECK(do_something_hook2.RestoreFunction() != nullptr);
 
         SPDLOG_INFO("Calling do_something2...");
-        r = do_something2(8, 4);
+        r = do_something2_ptr(8, 4);
         CHECK(r == 4);
     }
 }
