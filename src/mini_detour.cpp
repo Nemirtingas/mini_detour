@@ -394,7 +394,7 @@ public:
 
         for (auto& region : jumps_regions)
         {
-            for (int i = 0; i < region.bitmap.size(); ++i)
+            for (size_t i = 0; i < region.bitmap.size(); ++i)
             {
                 if (!region.bitmap[i] && isUsable(reference, region.jump_table + i))
                 {
@@ -512,7 +512,8 @@ static MemoryManager& GetMemoryManager()
 
 // Makes an import table slot (IAT/GOT entry) writable. The other rights of its page are kept: the slot is data,
 // so execution is never added, but it may share a page with code that must stay executable.
-static bool _MakeImportSlotWritable(void* address, size_t size, MiniDetour::MemoryManipulation::MemoryRights* oldRights)
+// Not static: macOS doesn't replace imports yet, and an unused static function is a warning.
+inline bool _MakeImportSlotWritable(void* address, size_t size, MiniDetour::MemoryManipulation::MemoryRights* oldRights)
 {
     MiniDetour::MemoryManipulation::RegionInfos_t infos;
     MiniDetour::MemoryManipulation::GetRegionInfos(address, &infos);

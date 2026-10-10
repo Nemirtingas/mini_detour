@@ -58,7 +58,7 @@ struct memory_t
 
 struct AbsJump
 {
-    static inline size_t WriteOpcodes(void *buffer, void *jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void *buffer, void *jump_destination, int /*source_mode*/, int /*dest_mode*/)
     {
         uint8_t _code[14]{
             0xFF,
@@ -82,7 +82,7 @@ struct AbsJump
         return GetMaxOpcodeSize();
     }
 
-    static inline size_t GetOpcodeSize(void *jump_destination, int source_mode, int dest_mode)
+    static inline size_t GetOpcodeSize(void */*jump_destination*/, int /*source_mode*/, int /*dest_mode*/)
     {
         // JMP
         // RIP OFFSET (RIP + 0)
@@ -101,7 +101,7 @@ struct AbsJump
 
 struct RelJump
 {
-    static inline size_t WriteOpcodes(void *buffer, void *source, void *jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void *buffer, void *source, void *jump_destination, int /*source_mode*/, int /*dest_mode*/)
     {
         uint8_t code[5] = {
             0xE9, // JMP
@@ -111,13 +111,13 @@ struct RelJump
             0x00, // REL ADDR
         };
 
-        *reinterpret_cast<int32_t *>(&code[1]) = absolute_addr_to_relative(source, jump_destination);
+        *reinterpret_cast<int32_t *>(&code[1]) = static_cast<int32_t>(absolute_addr_to_relative(source, jump_destination));
         memcpy(buffer, code, GetMaxOpcodeSize());
 
         return GetMaxOpcodeSize();
     }
 
-    static inline size_t GetOpcodeSize(void *source, void *jump_destination, int source_mode, int dest_mode)
+    static inline size_t GetOpcodeSize(void */*source*/, void */*jump_destination*/, int /*source_mode*/, int /*dest_mode*/)
     {
         // E9          | JMP
         // XX XX XX XX | REL ADDR

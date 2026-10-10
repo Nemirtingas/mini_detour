@@ -248,7 +248,7 @@ static void _GetRegionName(std::wstring &wmodule_name, void *address, char *regi
     {
         while (wmodule_name_size != 0)
         {
-            wmodule_name_size = GetModuleFileNameW(moduleHandle, &wmodule_name[0], wmodule_name.size());
+            wmodule_name_size = GetModuleFileNameW(moduleHandle, &wmodule_name[0], static_cast<DWORD>(wmodule_name.size()));
             if (wmodule_name_size == wmodule_name.size())
             {
                 if (wmodule_name_size > 0x100000)
@@ -261,8 +261,9 @@ static void _GetRegionName(std::wstring &wmodule_name, void *address, char *regi
                 wmodule_name.resize(wmodule_name_size);
 
                 // Convert, then copy what fits in regionName with its terminating '\0'.
-                std::string utf8ModuleName(WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wmodule_name.length(), nullptr, 0, nullptr, nullptr), '\0');
-                WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wmodule_name.length(), &utf8ModuleName[0], utf8ModuleName.length(), nullptr, nullptr);
+                const int wideLength = static_cast<int>(wmodule_name.length());
+                std::string utf8ModuleName(WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wideLength, nullptr, 0, nullptr, nullptr), '\0');
+                WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wideLength, &utf8ModuleName[0], static_cast<int>(utf8ModuleName.length()), nullptr, nullptr);
 
                 size_t copySize = std::min(utf8ModuleName.length(), regionNameSize - 1);
                 memcpy(regionName, utf8ModuleName.data(), copySize);
@@ -279,8 +280,7 @@ static void _GetRegionName(std::wstring &wmodule_name, void *address, char *regi
     {
         if (address == heap)
         {
-            strncpy(regionName, "[heap]", regionNameSize);
-            regionName[regionNameSize - 1] = '\0';
+            snprintf(regionName, regionNameSize, "[heap]");
             return;
         }
     }
@@ -301,7 +301,7 @@ std::vector<void *> _GetProcessHeapAddresses()
     if (numberOfHeaps > 0)
     {
         heaps.resize(numberOfHeaps * 2);
-        numberOfHeaps = GetProcessHeaps(heaps.size(), heaps.data());
+        numberOfHeaps = GetProcessHeaps(static_cast<DWORD>(heaps.size()), heaps.data());
         heaps.resize(std::min<size_t>(numberOfHeaps, heaps.size()));
     }
     return heaps;
@@ -607,7 +607,7 @@ static bool _ReplaceModuleExportInPlace(void *moduleBase, PDWORD exportAddress, 
         goto Error;
 
     *exportCallAddress = (void *)((char *)moduleBase + *exportAddress);
-    *exportAddress     = (uintptr_t)newExportAddress - (uintptr_t)moduleBase;
+    *exportAddress     = static_cast<DWORD>((uintptr_t)newExportAddress - (uintptr_t)moduleBase);
 
     MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
 
@@ -641,7 +641,7 @@ static bool _ReplaceModuleExportWithTrampoline(void *moduleBase, PDWORD exportAd
     MemoryManipulation::WriteAbsoluteJump(exportJump, newExportAddress);
 
     *exportCallAddress = (void *)((char *)moduleBase + *exportAddress);
-    *exportAddress     = (uintptr_t)exportJump - (uintptr_t)moduleBase;
+    *exportAddress     = static_cast<DWORD>((uintptr_t)exportJump - (uintptr_t)moduleBase);
 
     MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rx, nullptr);
     MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
@@ -714,7 +714,7 @@ static inline void **_GetIATAddress(void *moduleBase, PIMAGE_IMPORT_DESCRIPTOR i
     for (auto *importDescriptor = imageImportDescriptor; !_IsLastImportDescriptor(importDescriptor); ++importDescriptor)
     {
         auto *libraryName = (const char *)((uintptr_t)moduleBase + importDescriptor->Name);
-        if (stricmp(moduleName, libraryName) == 0)
+        if (_stricmp(moduleName, libraryName) == 0)
         {
             addressTable = (void **)((uintptr_t)moduleBase + importDescriptor->FirstThunk);
             if (importDescriptor->OriginalFirstThunk == 0)
@@ -844,7 +844,7 @@ size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *iatDetails, size_t iat
         {
             if (thunkData[i].u1.AddressOfData & IMAGE_ORDINAL_FLAG)
             {
-                iatDetails[result].ImportOrdinal = thunkData[i].u1.Ordinal & (~IMAGE_ORDINAL_FLAG);
+                iatDetails[result].ImportOrdinal = static_cast<uint32_t>(thunkData[i].u1.Ordinal & (~IMAGE_ORDINAL_FLAG));
                 iatDetails[result].ImportName    = nullptr;
             }
             else
@@ -942,7 +942,7 @@ size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t *export
 
         exportReplaceDetails[i].NewExportAddress = (void *)((uintptr_t)*exportAddress + (uintptr_t)moduleBase);
         auto oldJumpAddress                      = (void *)((uintptr_t)moduleBase + *exportAddress);
-        *exportAddress                           = (uintptr_t)exportReplaceDetails[i].ExportCallAddress - (uintptr_t)moduleBase;
+        *exportAddress                           = static_cast<DWORD>((uintptr_t)exportReplaceDetails[i].ExportCallAddress - (uintptr_t)moduleBase);
 
         MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
 
