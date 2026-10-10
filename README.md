@@ -139,8 +139,9 @@ Recent kernels may also lock the memory of a process and refuse to add execute r
 - Page lockdown: [vm_user.c](https://github.com/apple/darwin-xnu/blob/main/osfmk/vm/vm_user.c#L3287-L3300)
 - Protection change refused: [vm_map.c](https://github.com/apple/darwin-xnu/blob/main/osfmk/vm/vm_map.c#L5961-L5967)
 
-Import replacement works on macOS, shared cache libraries included: the lazy and non lazy symbol pointers of an image
-are rebound. Calls between shared cache libraries may not go through these pointers. Export replacement is not
+Import replacement works on macOS: the lazy and non lazy symbol pointers of an image are rebound. Shared cache libraries
+are supported up to macOS 12: on recent versions (seen on macOS 26) they have no symbol pointers of their own anymore,
+and no import is found in them. Calls between shared cache libraries may not go through these pointers either. Export replacement is not
 implemented on macOS yet.
 
 ## License
