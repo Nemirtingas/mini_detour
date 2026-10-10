@@ -4,11 +4,6 @@
 
 #if defined(MINIDETOUR_ARCH_ARM)
 
-static void *ThumbAddress(void *address)
-{
-    return reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(address) | 1);
-}
-
 // BUGS.md #21: the Thumb absolute jump saved r0 and the address below sp without reserving the stack, where a signal
 // handler could overwrite them. The detour reads the word just below sp: the jump left its address there.
 TEST_CASE("Thumb absolute jump doesn't write below the stack pointer", "[arm_thumb_absolute_jump]")

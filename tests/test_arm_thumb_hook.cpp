@@ -4,12 +4,6 @@
 
 #if defined(MINIDETOUR_ARCH_ARM)
 
-// Thumb code written by hand, called with the Thumb bit set: the test works in ARM and Thumb builds.
-static void *ThumbAddress(void *address)
-{
-    return reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(address) | 1);
-}
-
 // BUGS.md #18: the relative jump size was computed to the detour, but the jump goes to a jump slot allocated later.
 // A detour within 2 KB gave a 2 bytes Thumb jump size while the jump to the slot needs 4 bytes: only 2 bytes were
 // saved and relocated, and 4 bytes were written in a 2 bytes buffer.

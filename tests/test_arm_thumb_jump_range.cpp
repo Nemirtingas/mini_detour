@@ -4,11 +4,6 @@
 
 #if defined(MINIDETOUR_ARCH_ARM)
 
-static void *ThumbAddress(void *address)
-{
-    return reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(address) | 1);
-}
-
 // BUGS.md #20: a jump slot was usable if within the ARM branch range (+-32 MB), but a Thumb B.W only reaches
 // +-16 MB: a free slot 16 to 32 MB away from a Thumb function was used and the jump was truncated.
 TEST_CASE("Thumb hook with a jump region 20 MB away", "[arm_thumb_jump_range]")
