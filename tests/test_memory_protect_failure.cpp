@@ -11,6 +11,12 @@ TEST_CASE("A failed MemoryProtect gives mem_unset as old rights", "[memprotect_f
     MiniDetour::MemoryManipulation::MemoryFree(page, pageSize);
 
     auto oldRights = MiniDetour::MemoryManipulation::MemoryRights::mem_rwx;
-    CHECK_FALSE(MiniDetour::MemoryManipulation::MemoryProtect(page, pageSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rx, &oldRights));
+    if (MiniDetour::MemoryManipulation::MemoryProtect(page, pageSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rx, &oldRights))
+    {
+        // qemu user mode accepts mprotect on memory that isn't mapped.
+        WARN("MemoryProtect succeeded on freed memory, test skipped.");
+        return;
+    }
+
     CHECK(oldRights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset);
 }
