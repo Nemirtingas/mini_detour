@@ -452,6 +452,8 @@ typedef struct MiniDetourMemoryManipulationRegionInfos_t { ... } MiniDetourMemor
 ```
 and prefix the enumerators (`MINIDETOUR_MEM_R`…) while keeping C++ aliases in `MiniDetour::MemoryManipulation`.
 
+Later, `bool` was removed from the C API instead of including `stdbool.h` (not available or defined differently with some compilers and projects): the C functions take and return `int` (0 false, 1 true), the C++ wrappers keep `bool`.
+
 ### ✅ 41. Wrong documentation — fixed in `docs/fix-api-comments`
 - [mini_detour.h:209](include/mini_detour/mini_detour.h:209): `PageRound` rounds **down** (the comment says "upper value").
 - [mini_detour.h:268](include/mini_detour/mini_detour.h:268): `FlushInstructionCache` is implemented on Linux too.
