@@ -188,7 +188,7 @@ TEST_CASE("List modules exported symbols", "[module_list_export_symbols]") {
 #if defined(MINIDETOUR_OS_WINDOWS)
 HMODULE WINAPI MyGetModuleHandleA(LPCSTR)
 {
-    return (HMODULE)0x99887766;
+    return reinterpret_cast<HMODULE>(static_cast<uintptr_t>(0x99887766));
 }
 #elif defined(MINIDETOUR_OS_LINUX)
 void* Mydlopen(const char*, int)
@@ -208,7 +208,7 @@ TEST_CASE("Module IAT hook", "[module_iat_hook]") {
     iatReplace.NewIATAddress = (void*)&MyGetModuleHandleA;
     CHECK(MiniDetour::ModuleManipulation::ReplaceModuleIATs(h, &iatReplace, 1) == 1);
 
-    CHECK(GetModuleHandleA(nullptr) == (HMODULE)0x99887766);
+    CHECK(GetModuleHandleA(nullptr) == reinterpret_cast<HMODULE>(static_cast<uintptr_t>(0x99887766)));
     CHECK(reinterpret_cast<void*(WINAPI *)(void*)>(iatReplace.IATCallAddress)(nullptr) == h);
 
     CHECK(MiniDetour::ModuleManipulation::RestoreModuleIATs(h, &iatReplace, 1) == 1);
