@@ -35,7 +35,7 @@
 // movk x0, #0x89ab, lsl 32
 // movk x0, #0xcdef, lsl 48
 
-bool _AddressesAreRelativeJumpable(void* source, void* dest)
+static bool _AddressesAreRelativeJumpable(void* source, void* dest)
 {
     uintptr_t min_addr = reinterpret_cast<uintptr_t>(std::min(source, dest));
     uintptr_t max_addr = reinterpret_cast<uintptr_t>(std::max(source, dest));
@@ -193,7 +193,7 @@ static inline cs_err _InitDisasm(CodeDisasm& disasm, int /*mode*/)
     return disasm.Init(cs_arch::CS_ARCH_ARM64, (cs_mode)(cs_mode::CS_MODE_ARM | CodeDisasm::RuntimeEndianness()));
 }
 
-void _EnterRecursiveThunk(void*& _pCode)
+static void _EnterRecursiveThunk(void*& _pCode)
 {
     // A longer chain is most likely a loop.
     for (int i = 0; i < 8; ++i)
@@ -224,7 +224,7 @@ static bool _UsesInstructionPointer(cs_insn const& instruction)
     return adr == 0x10000000 || adr == 0x90000000 || (raw & 0x3B000000) == 0x18000000;
 }
 
-size_t _GetRelocatableSize(void* pCode, size_t& relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm& disasm, size_t wanted_relocatable_size)
+static size_t _GetRelocatableSize(void* pCode, size_t& relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm& disasm, size_t wanted_relocatable_size)
 {
     uint8_t code_buffer[80];
     const uint8_t* code_iterator = code_buffer;
@@ -280,7 +280,7 @@ size_t _GetRelocatableSize(void* pCode, size_t& relocatedOriginalCodeSize, bool 
     return relocatable_size;
 }
 
-size_t _RelocateCode(void* pCode, void* pTrampoline, CodeDisasm& disasm, size_t wanted_relocatableSize, int /*func_mode*/)
+static size_t _RelocateCode(void* pCode, void* pTrampoline, CodeDisasm& disasm, size_t wanted_relocatableSize, int /*func_mode*/)
 {
     uint8_t code_buffer[80];
     const uint8_t* code_iterator = code_buffer;

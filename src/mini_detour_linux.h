@@ -86,7 +86,7 @@ struct GnuHashHeader_t
 namespace MiniDetour {
 namespace MemoryManipulation {
 namespace Implementation {
-    int _MemoryProtectRightsToNative(MemoryRights rights)
+    static int _MemoryProtectRightsToNative(MemoryRights rights)
     {
         switch (rights)
         {
@@ -102,7 +102,7 @@ namespace Implementation {
         }
     }
 
-    bool _GetRegionInfo(uintptr_t target, const char* mapLine, size_t mapLineLength, MiniDetourMemoryManipulationRegionInfos_t& region)
+    static bool _GetRegionInfo(uintptr_t target, const char* mapLine, size_t mapLineLength, MiniDetourMemoryManipulationRegionInfos_t& region)
     {
         // remove const because of strtoul
         auto* mapLineStart = (char*)mapLine;
@@ -194,7 +194,7 @@ namespace Implementation {
         return maxAddress;
     }
 
-    size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount, bool onlyFree)
+    static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount, bool onlyFree)
     {
         uintptr_t oldEnd(0);
         size_t writtenRegionCount = 0;
@@ -272,12 +272,12 @@ namespace Implementation {
         return currentRegionCount;
     }
 
-    size_t PageSize()
+    static size_t PageSize()
     {
         return sysconf(_SC_PAGESIZE);
     }
 
-    void GetRegionInfos(void* address, MiniDetourMemoryManipulationRegionInfos_t* regionInfos)
+    static void GetRegionInfos(void* address, MiniDetourMemoryManipulationRegionInfos_t* regionInfos)
     {
         std::ifstream f("/proc/self/maps");
         std::string s;
@@ -304,7 +304,7 @@ namespace Implementation {
         return _GetRegions(regions, regionCount, true);
     }
 
-    bool MemoryProtect(void* address, size_t size, MemoryRights rights, MemoryRights* oldRights)
+    static bool MemoryProtect(void* address, size_t size, MemoryRights rights, MemoryRights* oldRights)
     {
         if (oldRights != nullptr)
         {
@@ -317,7 +317,7 @@ namespace Implementation {
         return res;
     }
 
-    void MemoryFree(void* address, size_t size)
+    static void MemoryFree(void* address, size_t size)
     {
         if (address != nullptr)
             munmap(address, size);
@@ -366,7 +366,7 @@ namespace Implementation {
         return PageSize();
     }
 
-    bool SafeMemoryRead(void* address, uint8_t* buffer, size_t size)
+    static bool SafeMemoryRead(void* address, uint8_t* buffer, size_t size)
     {
         struct iovec local;
         struct iovec remote;
@@ -382,7 +382,7 @@ namespace Implementation {
         return true;
     }
 
-    bool SafeMemoryWrite(void* address, const uint8_t* buffer, size_t size)
+    static bool SafeMemoryWrite(void* address, const uint8_t* buffer, size_t size)
     {
         struct iovec local;
         struct iovec remote;
@@ -398,7 +398,7 @@ namespace Implementation {
         return true;
     }
 
-    int FlushInstructionCache(void* address, size_t size)
+    static int FlushInstructionCache(void* address, size_t size)
     {
         __builtin___clear_cache(address, reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(address) + size));
         return 1;
@@ -683,7 +683,7 @@ namespace Implementation {
         return nullptr;
     }
 
-    size_t GetAllExportedSymbols(void* moduleHandle, ExportDetails_t* exportDetails, size_t exportDetailsCount)
+    static size_t GetAllExportedSymbols(void* moduleHandle, ExportDetails_t* exportDetails, size_t exportDetailsCount)
     {
         void* moduleBase = nullptr;
         ElfSymbol_t* dynamicSymbolsStart = nullptr;
@@ -734,7 +734,7 @@ namespace Implementation {
         return result;
     }
 
-    size_t GetAllIATSymbols(void* moduleHandle, IATDetails_t* iatDetails, size_t iatDetailsCount)
+    static size_t GetAllIATSymbols(void* moduleHandle, IATDetails_t* iatDetails, size_t iatDetailsCount)
     {
         void* moduleBase = nullptr;
         ElfSymbol_t* dynamicSymbolsStart = nullptr;
@@ -775,7 +775,7 @@ namespace Implementation {
         return result;
     }
 
-    size_t ReplaceModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
+    static size_t ReplaceModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
     {
         void* moduleBase = nullptr;
         ElfSymbol_t* dynamicSymbolsStart = nullptr;
@@ -817,7 +817,7 @@ namespace Implementation {
         return result;
     }
 
-    size_t RestoreModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
+    static size_t RestoreModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
     {
         void* moduleBase = nullptr;
         ElfSymbol_t* dynamicSymbolsStart = nullptr;
@@ -861,7 +861,7 @@ namespace Implementation {
         return result;
     }
 
-    size_t ReplaceModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
+    static size_t ReplaceModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
     {
         void* moduleBase = nullptr;
         ElfSymbol_t* dynamicSymbolsStart;
@@ -903,7 +903,7 @@ namespace Implementation {
         return result;
     }
 
-    size_t RestoreModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
+    static size_t RestoreModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
     {
         void* moduleBase = nullptr;
         ElfSymbol_t* dynamicSymbolsStart;
