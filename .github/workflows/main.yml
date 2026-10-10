@@ -3,17 +3,23 @@ name: CI
 on: [push]
 jobs:
   job:
-    name: ${{ matrix.os }}-${{ matrix.platform }}-cmake-build
+    name: ${{ matrix.os }}-${{ matrix.platform }}-${{ matrix.build_type }}-cmake-build
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         platform: [x32, x64]
+        # Release catches what only shows once optimized: small functions, inlined calls, tail calls...
+        build_type: [Debug, Release]
         include:
         # macos-latest runs on Apple Silicon. macOS x64 is tested on a local machine.
         - os: macos-latest
           platform: arm64
+          build_type: Debug
+        - os: macos-latest
+          platform: arm64
+          build_type: Release
             
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +37,7 @@ jobs:
           sudo apt-get update
           sudo apt install -y gcc-multilib g++-multilib # needed for 32-bit builds
           
-          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_i386.toolchain" -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON -S . -B build
+          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_i386.toolchain" -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build
           cmake --build build
           #find build
           cd ${{ github.workspace }}/build
@@ -44,13 +50,13 @@ jobs:
           sudo apt-get update
           sudo apt install -y gcc-arm-linux-gnueabi g++-arm-linux-gnueabi gcc-aarch64-linux-gnu g++-aarch64-linux-gnu qemu-user
           
-          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_arm.toolchain" -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON -S . -B build/linux_arm
+          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_arm.toolchain" -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build/linux_arm
           cmake --build build/linux_arm
           
-          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_aarch64.toolchain" -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON -S . -B build/linux_aarch64
+          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_aarch64.toolchain" -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build/linux_aarch64
           cmake --build build/linux_aarch64
           
-          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON -S . -B build/linux_x64
+          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build/linux_x64
           cmake --build build/linux_x64
           
           echo "### Running ARM tests ###"
@@ -67,7 +73,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         shell: bash
         run: |
-          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON -S . -B build
+          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build
           cmake --build build
           #find build
           cd ${{ github.workspace }}/build
@@ -78,18 +84,18 @@ jobs:
         if: ${{ matrix.os == 'windows-latest' && matrix.platform == 'x32' }}
         shell: powershell
         run: |
-          cmake ${{ github.workspace }}\CMakeLists.txt -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON -S . -B build -A Win32
-          cmake --build build
+          cmake ${{ github.workspace }}\CMakeLists.txt -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build -A Win32
+          cmake --build build --config ${{ matrix.build_type }}
           #Get-ChildItem -Recurse build
-          cd ${{ github.workspace }}\build\Debug
+          cd ${{ github.workspace }}\build\${{ matrix.build_type }}
           .\tests.exe
 
       - name: Windows tests (x64)
         if: ${{ matrix.os == 'windows-latest' && matrix.platform == 'x64' }}
         shell: powershell
         run: |
-          cmake ${{ github.workspace }}\CMakeLists.txt -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON -S . -B build -A x64
-          cmake --build build
+          cmake ${{ github.workspace }}\CMakeLists.txt -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build -A x64
+          cmake --build build --config ${{ matrix.build_type }}
           #Get-ChildItem -Recurse build
-          cd ${{ github.workspace }}\build\Debug
+          cd ${{ github.workspace }}\build\${{ matrix.build_type }}
           .\tests.exe
