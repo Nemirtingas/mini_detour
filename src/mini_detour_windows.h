@@ -602,57 +602,40 @@ static bool _LoadModuleIATDetails(void *moduleHandle, void **moduleBase, PIMAGE_
     return true;
 }
 
-static bool _ReplaceModuleExportInPlace(void *moduleBase, PDWORD exportAddress, void **exportCallAddress, void *newExportAddress)
+// The export RVA is unsigned: an address below the module base, or more than 4 GB above it, is reached through a jump.
+// The jump is searched from the end of the module image, so it lands above it.
+static bool _ReplaceModuleExport(void *moduleBase, PDWORD exportAddress, void *newExportAddress, void **exportCallAddress)
 {
-    MemoryManipulation::MemoryRights oldRights;
+    void *target = newExportAddress;
+    void *jump   = nullptr;
+    if (!_AddressIsRepresentableAsRva(moduleBase, newExportAddress))
+    {
+        auto imageNTHeaders = (PIMAGE_NT_HEADERS)((char *)moduleBase + ((PIMAGE_DOS_HEADER)moduleBase)->e_lfanew);
+        auto moduleEnd      = (void *)((char *)moduleBase + imageNTHeaders->OptionalHeader.SizeOfImage);
+        jump                = GetMemoryManager().GetFreeJump(moduleEnd, moduleBase, _AddressIsRepresentableAsRva);
+        if (jump == nullptr)
+            return false;
 
-    if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::MemoryRights::mem_rw, &oldRights))
-        goto Error;
+        if (!_WriteJumpSlot(jump, newExportAddress, _GetCodeMode(jump), _GetCodeMode(newExportAddress)))
+        {
+            GetMemoryManager().FreeJump(jump);
+            return false;
+        }
 
-    *exportCallAddress = (void *)((char *)moduleBase + *exportAddress);
-    *exportAddress     = static_cast<DWORD>((uintptr_t)newExportAddress - (uintptr_t)moduleBase);
+        target = jump;
+    }
 
-    MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
+    DWORD previous;
+    if (!_ExchangeTableEntry(exportAddress, static_cast<DWORD>((uintptr_t)target - (uintptr_t)moduleBase), &previous))
+    {
+        if (jump != nullptr)
+            GetMemoryManager().FreeJump(jump);
 
+        return false;
+    }
+
+    *exportCallAddress = (void *)((uintptr_t)moduleBase + previous);
     return true;
-
-Error:
-    *exportCallAddress = nullptr;
-    return false;
-}
-
-static bool _ReplaceModuleExportWithTrampoline(void *moduleBase, PDWORD exportAddress, void **exportCallAddress, void *newExportAddress)
-{
-    MemoryManipulation::MemoryRights oldRights;
-
-    *exportCallAddress = nullptr;
-
-    // The export RVA is unsigned: the jump must be above the module base, and within 4 GB of it.
-    // A new jump region is searched from the end of the module image, so it lands above it.
-    auto imageNTHeaders = (PIMAGE_NT_HEADERS)((char *)moduleBase + ((PIMAGE_DOS_HEADER)moduleBase)->e_lfanew);
-    auto moduleEnd      = (void *)((char *)moduleBase + imageNTHeaders->OptionalHeader.SizeOfImage);
-    auto exportJump     = GetMemoryManager().GetFreeJump(moduleEnd, moduleBase, _AddressIsRepresentableAsRva);
-    if (exportJump == nullptr)
-        goto Error;
-
-    if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::MemoryRights::mem_rw, &oldRights))
-        goto ErrorFree;
-
-    if (!_WriteJumpSlot(exportJump, newExportAddress, _GetCodeMode(exportJump), _GetCodeMode(newExportAddress)))
-        goto ErrorFree;
-
-    *exportCallAddress = (void *)((char *)moduleBase + *exportAddress);
-    *exportAddress     = static_cast<DWORD>((uintptr_t)exportJump - (uintptr_t)moduleBase);
-
-    MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
-
-    return true;
-
-ErrorFree:
-    GetMemoryManager().FreeJump(exportJump);
-Error:
-    *exportCallAddress = nullptr;
-    return false;
 }
 
 static inline PDWORD
@@ -886,22 +869,8 @@ static size_t ReplaceModuleExports(void *moduleHandle, ExportReplaceParameter_t 
     {
         auto exportAddress =
             _GetExportAddress(moduleBase, functionAddressesRVA, functionNamesRVA, functionOrdinal, imageExportDirectory->NumberOfNames, exportReplaceDetails[i].ExportName);
-        if (exportAddress == nullptr)
-        {
-            exportReplaceDetails[i].ExportCallAddress = nullptr;
-            continue;
-        }
-
-        if (_AddressIsRepresentableAsRva(moduleBase, exportReplaceDetails[i].NewExportAddress))
-        {
-            if (_ReplaceModuleExportInPlace(moduleBase, exportAddress, &exportReplaceDetails[i].ExportCallAddress, exportReplaceDetails[i].NewExportAddress))
-                ++result;
-        }
-        else
-        {
-            if (_ReplaceModuleExportWithTrampoline(moduleBase, exportAddress, &exportReplaceDetails[i].ExportCallAddress, exportReplaceDetails[i].NewExportAddress))
-                ++result;
-        }
+        if (exportAddress != nullptr && _ReplaceModuleExport(moduleBase, exportAddress, exportReplaceDetails[i].NewExportAddress, &exportReplaceDetails[i].ExportCallAddress))
+            ++result;
     }
 
     return result;
@@ -929,26 +898,53 @@ static size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t 
     {
         auto exportAddress =
             _GetExportAddress(moduleBase, functionAddressesRVA, functionNamesRVA, functionOrdinal, imageExportDirectory->NumberOfNames, exportReplaceDetails[i].ExportName);
-        if (exportAddress == nullptr)
-        {
-            exportReplaceDetails[i].NewExportAddress = nullptr;
-            continue;
-        }
-
-        MemoryManipulation::MemoryRights oldRights;
 
         // Only this entry fails: the next ones can still be restored.
-        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::MemoryRights::mem_rw, &oldRights))
+        DWORD previous;
+        if (exportAddress == nullptr ||
+            !_ExchangeTableEntry(exportAddress, static_cast<DWORD>((uintptr_t)exportReplaceDetails[i].ExportCallAddress - (uintptr_t)moduleBase), &previous))
             continue;
 
-        exportReplaceDetails[i].NewExportAddress = (void *)((uintptr_t)*exportAddress + (uintptr_t)moduleBase);
-        auto oldJumpAddress                      = (void *)((uintptr_t)moduleBase + *exportAddress);
-        *exportAddress                           = static_cast<DWORD>((uintptr_t)exportReplaceDetails[i].ExportCallAddress - (uintptr_t)moduleBase);
-
-        MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
-
-        GetMemoryManager().FreeJump(oldJumpAddress);
+        exportReplaceDetails[i].NewExportAddress = (void *)((uintptr_t)moduleBase + previous);
+        // Does nothing when the export didn't go through a jump.
+        GetMemoryManager().FreeJump(exportReplaceDetails[i].NewExportAddress);
         ++result;
+    }
+
+    return result;
+}
+
+// ReplaceModuleIATs writes NewIATAddress and gives the previous value in IATCallAddress, RestoreModuleIATs does the
+// opposite: value is the field written, previous the field set.
+static size_t _ExchangeModuleIATs(
+    void *moduleHandle,
+    IATReplaceParameter_t *iatReplaceDetails,
+    size_t iatReplaceDetailsCount,
+    void *IATReplaceParameter_t::*value,
+    void *IATReplaceParameter_t::*previous,
+    bool restore)
+{
+    void *moduleBase = nullptr;
+    PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor;
+    size_t result = 0;
+
+    // The slots of modules without OriginalFirstThunk are found from their current value: the replacement on restore.
+    std::vector<void *> currentValues(iatReplaceDetailsCount);
+    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+    {
+        currentValues[i]               = restore ? iatReplaceDetails[i].*previous : nullptr;
+        iatReplaceDetails[i].*previous = nullptr;
+    }
+
+    if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &imageImportDescriptor))
+        return result;
+
+    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+    {
+        auto iatAddress =
+            _GetIATAddress(moduleBase, imageImportDescriptor, iatReplaceDetails[i].IATModuleName, iatReplaceDetails[i].IATName, iatReplaceDetails[i].IATOrdinal, currentValues[i]);
+        if (iatAddress != nullptr && _ExchangeTableEntry(iatAddress, iatReplaceDetails[i].*value, &(iatReplaceDetails[i].*previous)))
+            ++result;
     }
 
     return result;
@@ -956,87 +952,12 @@ static size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t 
 
 static size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
-    void *moduleBase = nullptr;
-    PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor;
-    size_t result = 0;
-
-    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
-        iatReplaceDetails[i].IATCallAddress = nullptr;
-
-    if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &imageImportDescriptor))
-        return result;
-
-    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
-    {
-        auto iatAddress = _GetIATAddress(moduleBase, imageImportDescriptor, iatReplaceDetails[i].IATModuleName, iatReplaceDetails[i].IATName, iatReplaceDetails[i].IATOrdinal);
-        if (iatAddress == nullptr)
-        {
-            iatReplaceDetails[i].IATCallAddress = nullptr;
-            continue;
-        }
-
-        MiniDetour::MemoryManipulation::MemoryRights oldRights;
-        if (!_MakeImportSlotWritable(iatAddress, sizeof(*iatAddress), &oldRights))
-        {
-            iatReplaceDetails[i].IATCallAddress = nullptr;
-            continue;
-        }
-
-        iatReplaceDetails[i].IATCallAddress = *iatAddress;
-        *iatAddress                         = iatReplaceDetails[i].NewIATAddress;
-        MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), oldRights, nullptr);
-        ++result;
-    }
-
-    return result;
+    return _ExchangeModuleIATs(moduleHandle, iatReplaceDetails, iatReplaceDetailsCount, &IATReplaceParameter_t::NewIATAddress, &IATReplaceParameter_t::IATCallAddress, false);
 }
 
 static size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
-    void *moduleBase = nullptr;
-    PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor;
-    size_t result = 0;
-
-    // The slots of modules without OriginalFirstThunk are found from their current value: the replacement address.
-    std::vector<void *> replacedAddresses(iatReplaceDetailsCount);
-    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
-    {
-        replacedAddresses[i]               = iatReplaceDetails[i].NewIATAddress;
-        iatReplaceDetails[i].NewIATAddress = nullptr;
-    }
-
-    if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &imageImportDescriptor))
-        return result;
-
-    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
-    {
-        auto iatAddress = _GetIATAddress(
-            moduleBase,
-            imageImportDescriptor,
-            iatReplaceDetails[i].IATModuleName,
-            iatReplaceDetails[i].IATName,
-            iatReplaceDetails[i].IATOrdinal,
-            replacedAddresses[i]);
-        if (iatAddress == nullptr)
-        {
-            iatReplaceDetails[i].NewIATAddress = nullptr;
-            continue;
-        }
-
-        MiniDetour::MemoryManipulation::MemoryRights oldRights;
-        if (!_MakeImportSlotWritable(iatAddress, sizeof(*iatAddress), &oldRights))
-        {
-            iatReplaceDetails[i].NewIATAddress = nullptr;
-            continue;
-        }
-
-        iatReplaceDetails[i].NewIATAddress = *iatAddress;
-        *iatAddress                        = iatReplaceDetails[i].IATCallAddress;
-        MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), oldRights, nullptr);
-        ++result;
-    }
-
-    return result;
+    return _ExchangeModuleIATs(moduleHandle, iatReplaceDetails, iatReplaceDetailsCount, &IATReplaceParameter_t::IATCallAddress, &IATReplaceParameter_t::NewIATAddress, true);
 }
 
 } // namespace Implementation
