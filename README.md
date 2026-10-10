@@ -141,8 +141,11 @@ Recent kernels may also lock the memory of a process and refuse to add execute r
 
 Import replacement works on macOS: the lazy and non lazy symbol pointers of an image are rebound. Shared cache libraries
 are supported up to macOS 12: on recent versions (seen on macOS 26) they have no symbol pointers of their own anymore,
-and no import is found in them. Calls between shared cache libraries may not go through these pointers either. Export replacement is not
-implemented on macOS yet.
+and no import is found in them. Calls between shared cache libraries may not go through these pointers either.
+
+Export replacement changes the export trie of the image, which dyld reads for `dlsym` and the images loaded later. The
+address of an export must keep its encoded size, so the jump to the new function is written in the padding after the
+load commands, at the start of `__TEXT`.
 
 ## License
 
