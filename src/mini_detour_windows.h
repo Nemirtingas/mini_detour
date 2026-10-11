@@ -487,7 +487,7 @@ static bool _ReplaceModuleExportWithTrampoline(void *moduleBase, PDWORD exportAd
     MemoryManipulation::MemoryRights oldRights;
 
     *exportCallAddress = nullptr;
-    auto exportJump    = mm.GetFreeJump(moduleBase);
+    auto exportJump    = GetMemoryManager().GetFreeJump(moduleBase);
     if (exportJump == nullptr)
         goto Error;
 
@@ -508,7 +508,7 @@ static bool _ReplaceModuleExportWithTrampoline(void *moduleBase, PDWORD exportAd
     return true;
 
 ErrorFree:
-    mm.FreeJump(exportJump);
+    GetMemoryManager().FreeJump(exportJump);
 Error:
     *exportCallAddress = nullptr;
     return false;
@@ -737,7 +737,7 @@ size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t *export
 
         MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
 
-        mm.FreeJump(oldJumpAddress);
+        GetMemoryManager().FreeJump(oldJumpAddress);
         ++result;
     }
 
