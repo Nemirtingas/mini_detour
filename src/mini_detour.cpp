@@ -870,7 +870,7 @@ class Hook_t
         functionRightsChanged = true;
 
         // A failed relocation leaves the trampoline without its jump back to the original function.
-        if (_RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, relativeJumpSize) < relativeJumpSize)
+        if (_RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, relativeJumpSize, func_mode) < relativeJumpSize)
         {
             SPDLOG_ERROR("Failed to relocate code.");
             goto error;

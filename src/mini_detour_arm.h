@@ -251,7 +251,8 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
     return relocatableSize;
 }
 
-size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize)
+// func_mode: 1 for Thumb code. pCode has no mode bit, it was cleared by the caller.
+size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize, int func_mode)
 {
     // MOD-REG-R/M Byte
     //  7 6    5 4 3    2 1 0 - bits
@@ -267,9 +268,6 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
     uint8_t *pTrampolineCode     = reinterpret_cast<uint8_t *>(pTrampoline);
 
     code_size = _ReadCode(pCode, code_buffer, sizeof(code_buffer));
-
-    int func_mode = reinterpret_cast<uintptr_t>(pCode) & 1;
-    int hook_mode = reinterpret_cast<uintptr_t>(pTrampoline) & 1;
 
     size_t relocatedSize     = 0;
     void *originalCodeTarget = nullptr;
@@ -297,7 +295,8 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
     if (originalCodeTarget == nullptr)
         originalCodeTarget = reinterpret_cast<void *>(code_addr);
 
-    AbsJump::WriteOpcodes(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pTrampolineCode)), originalCodeTarget, hook_mode, func_mode);
+    // The trampoline runs the relocated code in the function mode, and goes back to the function in that mode.
+    AbsJump::WriteOpcodes(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pTrampolineCode)), originalCodeTarget, func_mode, func_mode);
 
     return relocatedSize;
 }

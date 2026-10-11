@@ -246,7 +246,7 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
     return relocatable_size;
 }
 
-size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize)
+size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize, int /*func_mode*/)
 {
     // MOD-REG-R/M Byte
     //  7 6    5 4 3    2 1 0 - bits
