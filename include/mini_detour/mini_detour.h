@@ -3,6 +3,9 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#ifndef __cplusplus
+#include <stdbool.h>
+#endif
 
 #if defined(WIN64) || defined(_WIN64) || defined(__MINGW64__) || defined(WIN32) || defined(_WIN32) || defined(__MINGW32__)
 #define MINIDETOUR_OS_WINDOWS
@@ -111,7 +114,7 @@
 #define MINIDETOUR_CXX_EXPORT(return_type) MINIDETOUR_EXPORT_API(MINIDETOUR_EXTERN_CXX, return_type, MINIDETOUR_MODE_DEFAULT, MINIDETOUR_CALL_DEFAULT)
 #endif
 
-enum MiniDetourMemoryManipulationMemoryRights
+typedef enum MiniDetourMemoryManipulationMemoryRights
 {
     mem_none  = 0,
     mem_r     = 1,
@@ -122,9 +125,9 @@ enum MiniDetourMemoryManipulationMemoryRights
     mem_wx    = mem_w | mem_x,
     mem_rwx   = mem_r | mem_w | mem_x,
     mem_unset = 8,
-};
+} MiniDetourMemoryManipulationMemoryRights;
 
-struct MiniDetourMemoryManipulationRegionInfos_t
+typedef struct MiniDetourMemoryManipulationRegionInfos_t
 {
     /// <summary>
     /// Increase StructSize so there is enought space for ModuleName, else it would only contain '\0'
@@ -134,24 +137,24 @@ struct MiniDetourMemoryManipulationRegionInfos_t
     uintptr_t Start;
     uintptr_t End;
     char ModuleName[1];
-};
+} MiniDetourMemoryManipulationRegionInfos_t;
 
-struct MiniDetourModuleManipulationExportDetails_t
+typedef struct MiniDetourModuleManipulationExportDetails_t
 {
     const char *ExportName;
     uint32_t ExportOrdinal;
     void *ExportCallAddress;
-};
+} MiniDetourModuleManipulationExportDetails_t;
 
-struct MiniDetourModuleManipulationIATDetails_t
+typedef struct MiniDetourModuleManipulationIATDetails_t
 {
     const char *ImportModuleName;
     const char *ImportName;
     uint32_t ImportOrdinal;
     void *ImportCallAddress;
-};
+} MiniDetourModuleManipulationIATDetails_t;
 
-struct MiniDetourModuleManipulationExportReplaceParameter_t
+typedef struct MiniDetourModuleManipulationExportReplaceParameter_t
 {
     /// <summary>
     /// IN: The symbol name
@@ -168,9 +171,9 @@ struct MiniDetourModuleManipulationExportReplaceParameter_t
     /// Will be set to null if hook failed.
     /// </summary>
     void *ExportCallAddress;
-};
+} MiniDetourModuleManipulationExportReplaceParameter_t;
 
-struct MiniDetourModuleManipulationIATReplaceParameter_t
+typedef struct MiniDetourModuleManipulationIATReplaceParameter_t
 {
     /// <summary>
     /// IN: The module where IATName resides (the same IATName could be used in multiple modules)
@@ -195,7 +198,7 @@ struct MiniDetourModuleManipulationIATReplaceParameter_t
     /// Will be set to null if hook failed.
     /// </summary>
     void *IATCallAddress;
-};
+} MiniDetourModuleManipulationIATReplaceParameter_t;
 
 /// <summary>
 /// Round the address to the upper value aligned with page_size.
@@ -208,7 +211,7 @@ struct MiniDetourModuleManipulationIATReplaceParameter_t
 MINIDETOUR_EXPORT(void *) MiniDetourUtilsPageRoundUp(void *_addr, size_t page_size);
 
 /// <summary>
-/// Round the address to the upper value aligned with page_size.
+/// Round the address down to the lower value aligned with page_size.
 /// If page_size = 0x1000:
 ///   _addr = 0x17ff -> 0x1000
 /// </summary>
@@ -262,6 +265,8 @@ MINIDETOUR_EXPORT(bool) MiniDetourMemoryManipulationSafeMemoryWrite(void *addres
 
 /// <summary>
 /// Convenient function to write an absolute jump at an address. Pass NULL in address to get the required size of the absolute jump in bytes.
+/// The size depends on the destination on some architectures (ARM64 uses fewer instructions for low addresses),
+/// so pass the real destination when querying the size.
 /// </summary>
 /// <param name="address">Where to write the jump</param>
 /// <param name="destination">Where should to jump to</param>
