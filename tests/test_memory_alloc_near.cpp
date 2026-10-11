@@ -68,6 +68,31 @@ TEST_CASE("Near allocation below the hint", "[mem alloc near]")
 #define NEAR_TEST_FREE(handle) dlclose(handle)
 #endif
 
+#if defined(MINIDETOUR_OS_LINUX) && !defined(MAP_FIXED_NOREPLACE)
+#define MAP_FIXED_NOREPLACE 0x100000
+#endif
+
+// Tells if size bytes can be allocated exactly at address, without changing anything.
+static bool NearTestIsAllocatableAt(uintptr_t address, size_t size)
+{
+#if defined(MINIDETOUR_OS_WINDOWS)
+    void *allocated = VirtualAlloc(reinterpret_cast<void *>(address), size, MEM_RESERVE, PAGE_NOACCESS);
+    if (allocated != nullptr)
+        VirtualFree(allocated, 0, MEM_RELEASE);
+#else
+#if defined(MINIDETOUR_OS_LINUX)
+    void *allocated = mmap(reinterpret_cast<void *>(address), size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+#else
+    void *allocated = mmap(reinterpret_cast<void *>(address), size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#endif
+    if (allocated == MAP_FAILED)
+        return false;
+
+    munmap(allocated, size);
+#endif
+    return allocated == reinterpret_cast<void *>(address);
+}
+
 // Free regions were sorted by the distance to their start only, so a large free region holding the hint
 // came after a small one above the module, and the search started at the region start, far from the hint.
 TEST_CASE("Near allocation inside a large free region", "[mem alloc near]")
@@ -85,13 +110,19 @@ TEST_CASE("Near allocation inside a large free region", "[mem alloc near]")
     std::vector<MiniDetour::MemoryManipulation::RegionInfos_t> freeRegions(MiniDetour::MemoryManipulation::GetFreeRegions(nullptr, 0) * 2);
     freeRegions.resize(MiniDetour::MemoryManipulation::GetFreeRegions(freeRegions.data(), freeRegions.size()));
     uintptr_t bestDistance = (std::numeric_limits<uintptr_t>::max)();
+    uintptr_t bestAddress  = 0;
     for (auto const &region : freeRegions)
     {
         if (region.End - region.Start < size)
             continue;
 
-        const uintptr_t closest = (std::min)((std::max)(hint, region.Start), region.End - size);
-        bestDistance            = (std::min)(bestDistance, closest > hint ? closest - hint : hint - closest);
+        const uintptr_t closest  = (std::min)((std::max)(hint, region.Start), region.End - size);
+        const uintptr_t distance = closest > hint ? closest - hint : hint - closest;
+        if (distance < bestDistance)
+        {
+            bestDistance = distance;
+            bestAddress  = closest;
+        }
     }
 
     auto address =
@@ -100,7 +131,18 @@ TEST_CASE("Near allocation inside a large free region", "[mem alloc near]")
 
     // Allocations are aligned on the allocation granularity (64 KB on Windows).
     const uintptr_t distance = address > hint ? address - hint : hint - address;
-    CHECK(distance <= bestDistance + 0x10000);
+    // The closest address, aligned on 64 KB, down or up: one of them is in the free region.
+    const uintptr_t bestDown = bestAddress - bestAddress % 0x10000;
+    if (distance > bestDistance + 0x10000 && !NearTestIsAllocatableAt(bestDown, size) && !NearTestIsAllocatableAt(bestDown + 0x10000, size))
+    {
+        // qemu user mode shares the address space with qemu itself, and its emulated /proc/self/maps doesn't list qemu's
+        // own mappings (its code cache, close to the shared libraries): memory reported free may not be.
+        WARN("The closest free memory reported can't be allocated (used by the emulator?): distance not checked.");
+    }
+    else
+    {
+        CHECK(distance <= bestDistance + 0x10000);
+    }
 
     MiniDetour::MemoryManipulation::MemoryFree(reinterpret_cast<void *>(address), size);
     NEAR_TEST_FREE(h);
