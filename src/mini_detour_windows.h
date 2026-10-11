@@ -5,7 +5,6 @@
 #define VC_EXTRALEAN
 #define NOMINMAX
 #include <windows.h>
-#include <tlhelp32.h>
 #include <intsafe.h>
 
 typedef enum _MY_THREAD_INFORMATION_CLASS
@@ -55,6 +54,32 @@ typedef struct _THREAD_BASIC_INFORMATION
 extern "C" NTSTATUS NTAPI NtQueryInformationThread(
     IN HANDLE ThreadHandle, IN MY_THREAD_INFORMATION_CLASS ThreadInformationClass, OUT PVOID ThreadInformation, IN ULONG ThreadInformationLength, OUT PULONG ReturnLength OPTIONAL);
 
+extern "C" NTSTATUS NTAPI
+NtGetNextThread(IN HANDLE ProcessHandle, IN HANDLE ThreadHandle, IN ACCESS_MASK DesiredAccess, IN ULONG HandleAttributes, IN ULONG Flags, OUT PHANDLE NewThreadHandle);
+
+// Calls keep(thread) for every thread of the process, opened with access: it returns true to keep the handle open.
+// NtGetNextThread only goes through the threads of this process, where a Toolhelp snapshot lists those of the whole
+// system (tens of milliseconds, for each hook).
+template <typename Keep>
+static void _ForEachProcessThread(ACCESS_MASK access, Keep keep)
+{
+    HANDLE previous   = nullptr;
+    bool keepPrevious = false;
+    HANDLE thread;
+    while (NtGetNextThread(GetCurrentProcess(), previous, access, 0, 0, &thread) >= 0)
+    {
+        // The previous handle is needed to get the next one.
+        if (previous != nullptr && !keepPrevious)
+            CloseHandle(previous);
+
+        keepPrevious = keep(thread);
+        previous     = thread;
+    }
+
+    if (previous != nullptr && !keepPrevious)
+        CloseHandle(previous);
+}
+
 // Suspends the other threads of the process while hooked code is written: a thread running the bytes being written
 // could execute half of the old and half of the new instructions.
 class _OtherThreadsFreezer_t
@@ -74,61 +99,56 @@ class _OtherThreadsFreezer_t
 
     // Suspends every other thread. Fails if one of them is inside the code (at its first byte is fine, the instruction
     // there is replaced as a whole). No heap allocation is done while threads are suspended: one of them can hold the
-    // heap lock.
+    // heap lock. The threads are counted first, a thread created in the meantime makes this attempt fail.
     bool _TryFreeze(uintptr_t code, size_t size)
     {
-        std::vector<DWORD> threadIds;
-        const DWORD processId = GetCurrentProcessId();
-        const DWORD threadId  = GetCurrentThreadId();
-
-        HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-        if (snapshot == INVALID_HANDLE_VALUE)
-            return false;
-
-        THREADENTRY32 threadEntry;
-        threadEntry.dwSize = sizeof(threadEntry);
-        if (Thread32First(snapshot, &threadEntry))
-        {
-            do
+        const DWORD access = THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_LIMITED_INFORMATION;
+        size_t threadCount = 0;
+        _ForEachProcessThread(
+            access,
+            [&threadCount](HANDLE)
             {
-                if (threadEntry.th32OwnerProcessID == processId && threadEntry.th32ThreadID != threadId)
-                    threadIds.push_back(threadEntry.th32ThreadID);
+                ++threadCount;
+                return false;
+            });
+        _Threads.reserve(threadCount + 8);
 
-                threadEntry.dwSize = sizeof(threadEntry);
-            } while (Thread32Next(snapshot, &threadEntry));
-        }
-        CloseHandle(snapshot);
-
-        _Threads.reserve(threadIds.size());
-
-        bool inside = false;
-        for (auto id : threadIds)
-        {
-            // A thread that exited since the snapshot can't be opened: it doesn't need to be suspended.
-            HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, id);
-            if (thread == nullptr)
-                continue;
-
-            if (SuspendThread(thread) == (DWORD)-1)
+        const DWORD currentThreadId = GetCurrentThreadId();
+        bool inside                 = false;
+        bool tooMany                = false;
+        _ForEachProcessThread(
+            access,
+            [&](HANDLE thread)
             {
-                CloseHandle(thread);
-                continue;
-            }
+                if (GetThreadId(thread) == currentThreadId)
+                    return false;
 
-            _Threads.push_back(thread);
+                if (_Threads.size() == _Threads.capacity())
+                {
+                    tooMany = true;
+                    return false;
+                }
 
-            // GetThreadContext also waits for the suspension to be effective.
-            CONTEXT context;
-            context.ContextFlags = CONTEXT_CONTROL;
-            if (GetThreadContext(thread, &context))
-            {
-                const uintptr_t ip = _InstructionPointer(context);
-                if (ip > code && ip < code + size)
-                    inside = true;
-            }
-        }
+                // A thread that is exiting can't be suspended: it doesn't need to be.
+                if (SuspendThread(thread) == (DWORD)-1)
+                    return false;
 
-        return !inside;
+                _Threads.push_back(thread);
+
+                // GetThreadContext also waits for the suspension to be effective.
+                CONTEXT context;
+                context.ContextFlags = CONTEXT_CONTROL;
+                if (GetThreadContext(thread, &context))
+                {
+                    const uintptr_t ip = _InstructionPointer(context);
+                    if (ip > code && ip < code + size)
+                        inside = true;
+                }
+
+                return true;
+            });
+
+        return !inside && !tooMany;
     }
 
   public:
@@ -307,45 +327,21 @@ std::vector<void *> _GetProcessHeapAddresses()
 std::vector<ThreadStackInfos_t> _GetProcessStackAddresses()
 {
     std::vector<ThreadStackInfos_t> stacks;
-
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snap != nullptr && snap != INVALID_HANDLE_VALUE)
-    {
-        THREADENTRY32 te;
-        te.dwSize = sizeof(te);
-
-        if (Thread32First(snap, &te))
+    _ForEachProcessThread(
+        THREAD_QUERY_INFORMATION,
+        [&stacks](HANDLE thread)
         {
-            auto pid = GetProcessId(GetCurrentProcess());
-            do
+            THREAD_BASIC_INFORMATION basicInfo;
+            if (NtQueryInformationThread(thread, ThreadBasicInformation, &basicInfo, sizeof(THREAD_BASIC_INFORMATION), NULL) >= 0)
             {
-                if (te.th32OwnerProcessID == pid)
-                {
-                    HANDLE hThread = OpenThread(THREAD_QUERY_INFORMATION, FALSE, te.th32ThreadID);
-                    if (hThread)
-                    {
-                        THREAD_BASIC_INFORMATION basicInfo;
-                        if (NtQueryInformationThread(hThread, ThreadBasicInformation, &basicInfo, sizeof(THREAD_BASIC_INFORMATION), NULL) >= 0)
-                        {
-                            auto *tib = (const NT_TIB *)basicInfo.TebBaseAddress;
-                            // NtQueryInformationThread can succeed but have to TebBaseAddress
-                            if (tib != nullptr)
-                            {
-                                stacks.emplace_back(
-                                    ThreadStackInfos_t{
-                                        te.th32ThreadID,
-                                        tib->StackLimit, // Because stack is reversed, our begin is the stack's end
-                                    });
-                            }
-                        }
+                // NtQueryInformationThread can succeed without giving a TebBaseAddress.
+                auto *tib = (const NT_TIB *)basicInfo.TebBaseAddress;
+                if (tib != nullptr)
+                    stacks.emplace_back(ThreadStackInfos_t{GetThreadId(thread), tib->StackLimit}); // The stack grows down: its start is its limit.
+            }
 
-                        CloseHandle(hThread);
-                    }
-                }
-            } while (Thread32Next(snap, &te));
-        }
-        CloseHandle(snap);
-    }
+            return false;
+        });
 
     return stacks;
 }
