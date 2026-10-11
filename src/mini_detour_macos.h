@@ -1,6 +1,7 @@
 #ifndef MINI_DETOUR_MACOS_H
 #define MINI_DETOUR_MACOS_H
 
+#include <mach/mach.h>
 #include <mach/mach_init.h>
 #include <mach/mach_vm.h>
 #include <mach/vm_prot.h>
@@ -107,14 +108,122 @@ std::string kern_return_t_2_str(kern_return_t v)
 
 #endif
 
-// Other threads aren't suspended while hooked code is written: not implemented yet (task_threads and
-// thread_suspend could do it).
+// Suspends the other threads of the process while hooked code is written: a thread running the bytes being written
+// could execute half of the old and half of the new instructions.
 class _OtherThreadsFreezer_t
 {
-  public:
-    bool Freeze(void * /*code*/, size_t /*size*/) { return true; }
+    // Allocated by task_threads (not on the heap). The threads that aren't suspended are set to MACH_PORT_NULL.
+    thread_act_array_t _Threads;
+    mach_msg_type_number_t _ThreadCount;
 
-    void Unfreeze() {}
+    static bool _GetInstructionPointer(thread_act_t thread, uintptr_t &ip)
+    {
+#if defined(MINIDETOUR_ARCH_X64)
+        x86_thread_state64_t state;
+        mach_msg_type_number_t count = x86_THREAD_STATE64_COUNT;
+        if (thread_get_state(thread, x86_THREAD_STATE64, (thread_state_t)&state, &count) != KERN_SUCCESS)
+            return false;
+
+        ip = static_cast<uintptr_t>(state.__rip);
+#elif defined(MINIDETOUR_ARCH_X86)
+        x86_thread_state32_t state;
+        mach_msg_type_number_t count = x86_THREAD_STATE32_COUNT;
+        if (thread_get_state(thread, x86_THREAD_STATE32, (thread_state_t)&state, &count) != KERN_SUCCESS)
+            return false;
+
+        ip = static_cast<uintptr_t>(state.__eip);
+#elif defined(MINIDETOUR_ARCH_ARM64)
+        arm_thread_state64_t state;
+        mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
+        if (thread_get_state(thread, ARM_THREAD_STATE64, (thread_state_t)&state, &count) != KERN_SUCCESS)
+            return false;
+
+        ip = static_cast<uintptr_t>(arm_thread_state64_get_pc(state));
+#elif defined(MINIDETOUR_ARCH_ARM)
+        arm_thread_state_t state;
+        mach_msg_type_number_t count = ARM_THREAD_STATE_COUNT;
+        if (thread_get_state(thread, ARM_THREAD_STATE, (thread_state_t)&state, &count) != KERN_SUCCESS)
+            return false;
+
+        ip = static_cast<uintptr_t>(state.__pc);
+#endif
+        return true;
+    }
+
+    // Suspends every other thread. Fails if one of them is inside the code (at its first byte is fine, the instruction
+    // there is replaced as a whole). No heap allocation is done while threads are suspended: one of them can hold the
+    // malloc lock. thread_suspend returns once the thread is stopped.
+    bool _TryFreeze(uintptr_t code, size_t size)
+    {
+        if (task_threads(mach_task_self(), &_Threads, &_ThreadCount) != KERN_SUCCESS)
+        {
+            _Threads     = nullptr;
+            _ThreadCount = 0;
+            return false;
+        }
+
+        const thread_act_t self = mach_thread_self();
+        bool inside             = false;
+        for (mach_msg_type_number_t i = 0; i < _ThreadCount; ++i)
+        {
+            if (_Threads[i] == self || thread_suspend(_Threads[i]) != KERN_SUCCESS)
+            {
+                mach_port_deallocate(mach_task_self(), _Threads[i]);
+                _Threads[i] = MACH_PORT_NULL;
+                continue;
+            }
+
+            uintptr_t ip;
+            if (_GetInstructionPointer(_Threads[i], ip) && ip > code && ip < code + size)
+                inside = true;
+        }
+        mach_port_deallocate(mach_task_self(), self);
+
+        return !inside;
+    }
+
+  public:
+    _OtherThreadsFreezer_t()
+        : _Threads(nullptr)
+        , _ThreadCount(0)
+    {
+    }
+
+    ~_OtherThreadsFreezer_t() { Unfreeze(); }
+
+    // Retries a few times when a thread is inside the code: it is most likely only passing through.
+    bool Freeze(void *code, size_t size)
+    {
+        for (int attempt = 0; attempt < 5; ++attempt)
+        {
+            if (_TryFreeze(reinterpret_cast<uintptr_t>(code), size))
+                return true;
+
+            Unfreeze();
+            usleep(1000);
+        }
+
+        return false;
+    }
+
+    void Unfreeze()
+    {
+        if (_Threads == nullptr)
+            return;
+
+        for (mach_msg_type_number_t i = 0; i < _ThreadCount; ++i)
+        {
+            if (_Threads[i] == MACH_PORT_NULL)
+                continue;
+
+            thread_resume(_Threads[i]);
+            mach_port_deallocate(mach_task_self(), _Threads[i]);
+        }
+
+        vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(_Threads), _ThreadCount * sizeof(thread_act_t));
+        _Threads     = nullptr;
+        _ThreadCount = 0;
+    }
 };
 
 namespace MiniDetour
