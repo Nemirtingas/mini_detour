@@ -630,6 +630,50 @@ namespace MemoryManipulation
 namespace Implementation
 {
 
+// Allocates as close as possible to the hint, so hooks can reach the memory with relative jumps.
+// The platform gives _MemoryAllocAt, _MemoryAllocAnywhere and _AllocationGranularity.
+void *MemoryAlloc(void *_addressHint, size_t size, MemoryRights rights)
+{
+    if (_addressHint > max_user_address)
+        _addressHint = (void *)max_user_address;
+
+    auto pageSize    = PageSize();
+    auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
+    size             = _PageAddrSize((void *)addressHint, size, pageSize);
+
+    if (_addressHint == nullptr)
+        return _MemoryAllocAnywhere(size, rights);
+
+    auto freeRegionCount = GetFreeRegions(nullptr, 0);
+    std::vector<RegionInfos_t> freeRegions((size_t)(freeRegionCount * 1.5));
+    freeRegionCount = GetFreeRegions(freeRegions.data(), freeRegions.size());
+    if (freeRegionCount < freeRegions.size())
+        freeRegions.resize(freeRegionCount);
+
+    std::sort(
+        freeRegions.begin(),
+        freeRegions.end(),
+        [addressHint](RegionInfos_t const &l, RegionInfos_t const &r) { return _DistanceToRegion(addressHint, l) < _DistanceToRegion(addressHint, r); });
+
+    const size_t granularity = _AllocationGranularity();
+    for (auto const &region : freeRegions)
+    {
+        void *address = _AllocInFreeRegion(
+            region,
+            addressHint,
+            size,
+            granularity,
+            (uintptr_t)max_user_address,
+            [&](uintptr_t allocAddress) { return _MemoryAllocAt((void *)allocAddress, size, rights); });
+
+        if (address != nullptr)
+            return address;
+    }
+
+    // Fallback to anywhere alloc
+    return _MemoryAllocAnywhere(size, rights);
+}
+
 size_t WriteAbsoluteJump(void *address, void *destination)
 {
 #if defined(MINIDETOUR_ARCH_ARM)

@@ -302,66 +302,24 @@ static inline kern_return_t MemoryAllocWithProtection(mach_port_t task, void **a
     return kret;
 }
 
-static inline void *MemoryAllocNear(mach_port_t task, uintptr_t addressHint, size_t size, MemoryRights rights, size_t pageSize)
+// Allocates at this exact address, fails if it isn't free.
+static inline void *_MemoryAllocAt(void *address, size_t size, MemoryRights rights)
 {
-    void *address;
-
-    auto freeRegionCount = GetFreeRegions(nullptr, 0);
-    std::vector<RegionInfos_t> freeRegions((size_t)(freeRegionCount * 1.5));
-    freeRegionCount = GetFreeRegions(freeRegions.data(), freeRegions.size());
-    if (freeRegionCount < freeRegions.size())
-        freeRegions.resize(freeRegionCount);
-
-    std::sort(
-        freeRegions.begin(),
-        freeRegions.end(),
-        [addressHint](RegionInfos_t const &l, RegionInfos_t const &r) { return _DistanceToRegion(addressHint, l) < _DistanceToRegion(addressHint, r); });
-
-    for (auto const &region : freeRegions)
-    {
-        address = _AllocInFreeRegion(
-            region,
-            addressHint,
-            size,
-            pageSize,
-            (uintptr_t)max_user_address,
-            [&](uintptr_t allocAddress)
-            {
-                void *allocated = (void *)allocAddress;
-                MemoryAllocWithProtection(task, &allocated, (mach_vm_size_t)size, rights, VM_FLAGS_FIXED);
-                return allocated;
-            });
-
-        if (address != nullptr)
-            return address;
-    }
-
-    // Fallback to anywhere alloc
-    address = nullptr;
-    MemoryAllocWithProtection(task, &address, size, rights, VM_FLAGS_ANYWHERE);
-
+    MemoryAllocWithProtection(mach_task_self(), &address, size, rights, VM_FLAGS_FIXED);
     return address;
 }
 
-void *MemoryAlloc(void *_addressHint, size_t size, MemoryRights rights)
+static inline void *_MemoryAllocAnywhere(size_t size, MemoryRights rights)
 {
-    if (_addressHint > max_user_address)
-        _addressHint = (void *)max_user_address;
+    void *address = nullptr;
+    MemoryAllocWithProtection(mach_task_self(), &address, size, rights, VM_FLAGS_ANYWHERE);
+    return address;
+}
 
-    auto pageSize    = PageSize();
-    auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
-    size             = _PageAddrSize((void *)addressHint, size, pageSize);
-
-    mach_port_t task = mach_task_self();
-
-    if (_addressHint == nullptr)
-    {
-        void *address = nullptr;
-        MemoryAllocWithProtection(task, &address, size, rights, VM_FLAGS_ANYWHERE);
-        return address;
-    }
-
-    return MemoryAllocNear(task, addressHint, size, rights, pageSize);
+// mach_vm_allocate places a mapping at any page.
+static inline size_t _AllocationGranularity()
+{
+    return PageSize();
 }
 
 bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
