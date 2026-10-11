@@ -1,10 +1,13 @@
 #define CATCH_CONFIG_RUNNER
 #include "catch.hpp"
+#include "test_utils.h"
 
 #include <mini_detour/mini_detour.h>
 #include <spdlog/spdlog-inl.h>
 #include <iostream>
+#include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 #include <string>
 
 #if defined(MINIDETOUR_OS_WINDOWS)
@@ -41,13 +44,19 @@ static void _EnterRecursiveThunk(void *&_pCode)
     uint8_t *pCode = reinterpret_cast<uint8_t *>(_pCode);
     while (1)
     {
-        // If its an imported function.      CALL                JUMP
-        if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
+        // Imported function: jmp [address]
+        if (pCode[0] == 0xFF && pCode[1] == 0x25)
         {
-            // Get the real imported function address
-            pCode = **reinterpret_cast<uint8_t ***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
+#if defined(MINIDETOUR_ARCH_X64)
+            // jmp [rip + disp32]: the pointer is relative to the next instruction (6 bytes).
+            pCode = *reinterpret_cast<uint8_t **>(pCode + 6 + *reinterpret_cast<int32_t *>(pCode + 2));
+#else
+            // jmp [disp32]: absolute address of the pointer.
+            pCode = **reinterpret_cast<uint8_t ***>(pCode + 2);
+#endif
         }
-        else if (pCode[0] == 0xe8 || pCode[0] == 0xe9)
+        // Incremental linking thunk: jmp rel32. A call (E8) is the start of a real function, not a thunk.
+        else if (pCode[0] == 0xE9)
         {
             pCode = (uint8_t *)relative_addr_to_absolute(pCode, *(int32_t *)(pCode + 1));
         }
@@ -59,6 +68,40 @@ static void _EnterRecursiveThunk(void *&_pCode)
 
     _pCode = pCode;
 }
+
+#if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
+// The helper decoded jmp [rip + disp32] (x64) as jmp [disp32] (x86), and followed calls.
+TEST_CASE("Test thunk helper follows jmp [address]", "[test_thunk_helper]")
+{
+    CodeBuffer code;
+    REQUIRE(code.IsValid());
+
+    // The jump target, followed by nothing the helper follows.
+    void *target = code.Data(64);
+    code.Write(64, {0xC3}); // ret
+
+#if defined(MINIDETOUR_ARCH_X64)
+    // jmp [rip + 2]; the pointer is 2 bytes after the 6 bytes instruction.
+    code.Write(0, {0xFF, 0x25, 0x02, 0x00, 0x00, 0x00});
+    code.WriteValue<void *>(8, target);
+#else
+    // jmp [slot]
+    code.Write(0, {0xFF, 0x25});
+    code.WriteValue<void *>(2, code.Data(8));
+    code.WriteValue<void *>(8, target);
+#endif
+
+    void *address = code.Data();
+    _EnterRecursiveThunk(address);
+    CHECK(address == target);
+
+    // A call is a function start, not a thunk.
+    code.Write(16, {0xE8, 0x00, 0x00, 0x00, 0x00, 0xC3});
+    address = code.Data(16);
+    _EnterRecursiveThunk(address);
+    CHECK(address == code.Data(16));
+}
+#endif
 
 // Value of an environment variable, empty when it isn't set (getenv is deprecated with MSVC).
 static std::string ReadEnvironmentVariable(const char *name)
@@ -158,7 +201,7 @@ TEST_CASE("List modules exported symbols", "[module_list_export_symbols]")
 #if defined(MINIDETOUR_OS_WINDOWS)
 HMODULE WINAPI MyGetModuleHandleA(LPCSTR)
 {
-    return (HMODULE)0x99887766;
+    return reinterpret_cast<HMODULE>(static_cast<uintptr_t>(0x99887766));
 }
 #elif defined(MINIDETOUR_OS_LINUX)
 void *Mydlopen(const char *, int)
@@ -179,7 +222,7 @@ TEST_CASE("Module IAT hook", "[module_iat_hook]")
     iatReplace.NewIATAddress = (void *)&MyGetModuleHandleA;
     CHECK(MiniDetour::ModuleManipulation::ReplaceModuleIATs(h, &iatReplace, 1) == 1);
 
-    CHECK(GetModuleHandleA(nullptr) == (HMODULE)0x99887766);
+    CHECK(GetModuleHandleA(nullptr) == reinterpret_cast<HMODULE>(static_cast<uintptr_t>(0x99887766)));
     CHECK(reinterpret_cast<void *(WINAPI *)(void *)>(iatReplace.IATCallAddress)(nullptr) == h);
 
     CHECK(MiniDetour::ModuleManipulation::RestoreModuleIATs(h, &iatReplace, 1) == 1);
@@ -532,28 +575,77 @@ TEST_CASE("Memory protect", "[memprotect]")
     MiniDetour::MemoryManipulation::MemoryFree(mem, alloc_size);
 }
 
+// qemu user mode doesn't implement process_vm_readv/process_vm_writev (ENOSYS), used by SafeMemoryRead/Write on Linux.
+// The tests then fall back to a less safe access: a plain copy, only done if the region has the needed right.
+// The library keeps the real calls.
+static bool SafeMemoryAccessUnsupported()
+{
+#if defined(MINIDETOUR_OS_LINUX)
+    uint8_t value = 0;
+    uint8_t copy  = 0;
+    errno         = 0;
+    return !MiniDetour::MemoryManipulation::SafeMemoryRead(&value, &copy, 1) && errno == ENOSYS;
+#else
+    return false;
+#endif
+}
+
+static bool TestMemoryAccess(void *address, size_t size, MiniDetour::MemoryManipulation::MemoryRights right)
+{
+    MiniDetour::MemoryManipulation::RegionInfos_t infos;
+    MiniDetour::MemoryManipulation::GetRegionInfos(address, &infos);
+    return infos.Rights != MiniDetour::MemoryManipulation::MemoryRights::mem_unset && (infos.Rights & right) == right && reinterpret_cast<uintptr_t>(address) + size <= infos.End;
+}
+
+static bool TestSafeMemoryRead(void *address, uint8_t *buffer, size_t size)
+{
+    if (!SafeMemoryAccessUnsupported())
+        return MiniDetour::MemoryManipulation::SafeMemoryRead(address, buffer, size);
+
+    if (!TestMemoryAccess(address, size, MiniDetour::MemoryManipulation::MemoryRights::mem_r))
+        return false;
+
+    memcpy(buffer, address, size);
+    return true;
+}
+
+static bool TestSafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
+{
+    if (!SafeMemoryAccessUnsupported())
+        return MiniDetour::MemoryManipulation::SafeMemoryWrite(address, buffer, size);
+
+    if (!TestMemoryAccess(address, size, MiniDetour::MemoryManipulation::MemoryRights::mem_w))
+        return false;
+
+    memcpy(address, buffer, size);
+    return true;
+}
+
 TEST_CASE("Memory read/write", "[memread/memwrite]")
 {
+    if (SafeMemoryAccessUnsupported())
+        WARN("process_vm_readv/writev not implemented (qemu user mode): checking the regions rights with a plain copy.");
+
     const int alloc_size = 50;
     void *mem            = MiniDetour::MemoryManipulation::MemoryAlloc(nullptr, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_r);
     uint8_t buffer[30];
 
     CHECK(mem != nullptr);
 
-    CHECK(MiniDetour::MemoryManipulation::SafeMemoryWrite(mem, (const uint8_t *)"0123456789ABCDEFabcdef", 22) == false);
+    CHECK(TestSafeMemoryWrite(mem, (const uint8_t *)"0123456789ABCDEFabcdef", 22) == false);
 
     MiniDetour::MemoryManipulation::MemoryProtect(mem, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_rw);
-    CHECK(MiniDetour::MemoryManipulation::SafeMemoryWrite(mem, (const uint8_t *)"0123456789ABCDEFabcdef", 22) == true);
+    CHECK(TestSafeMemoryWrite(mem, (const uint8_t *)"0123456789ABCDEFabcdef", 22) == true);
 
     MiniDetour::MemoryManipulation::MemoryProtect(mem, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_r);
-    CHECK(MiniDetour::MemoryManipulation::SafeMemoryRead(mem, buffer, 22) == true);
+    CHECK(TestSafeMemoryRead(mem, buffer, 22) == true);
 
     CHECK(memcmp(buffer, "0123456789ABCDEFabcdef", 22) == 0);
 
     MiniDetour::MemoryManipulation::MemoryFree(mem, alloc_size);
 
     memset(buffer, 0, 30);
-    CHECK(MiniDetour::MemoryManipulation::SafeMemoryRead(mem, buffer, 30) == false);
+    CHECK(TestSafeMemoryRead(mem, buffer, 30) == false);
     CHECK(memcmp(buffer, "\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0", 30) == 0);
 }
 
@@ -570,9 +662,11 @@ int Myputs(const char *str)
     return puts_hook.GetOriginalFunction<decltype(puts) *>()(str);
 };
 
+// The volatile locals keep the hooked functions large enough to hold a jump once optimized: a + b alone is 4 bytes on x64.
 int do_something(int a, int b)
 {
-    return a + b;
+    volatile int result = a + b;
+    return result;
 }
 
 MiniDetour::Hook_t do_something_hook;
@@ -583,7 +677,8 @@ int Mydo_something(int a, int b)
 
 int do_something2(int a, int b)
 {
-    return a - b;
+    volatile int result = a - b;
+    return result;
 }
 
 MiniDetour::Hook_t do_something_hook2;
@@ -591,6 +686,11 @@ int Mydo_something2(int a, int b)
 {
     return a / b;
 }
+
+// Calls go through volatile pointers: optimized builds would otherwise inline or constant fold them, and never run the
+// hooked code.
+static int (*volatile do_something_ptr)(int, int)  = &do_something;
+static int (*volatile do_something2_ptr)(int, int) = &do_something2;
 
 TEST_CASE("Hook function", "[Hook function]")
 {
@@ -621,7 +721,7 @@ TEST_CASE("Hook function", "[Hook function]")
     CHECK(Myputs_called == false);
 
     SPDLOG_INFO("Calling do_something...");
-    CHECK(do_something(5, 8) == 13);
+    CHECK(do_something_ptr(5, 8) == 13);
 
     SPDLOG_INFO("Hooking do_something...");
     CHECK(do_something_hook.HookFunction((void *)&do_something, (void *)Mydo_something) != nullptr);
@@ -634,18 +734,18 @@ TEST_CASE("Hook function", "[Hook function]")
         CHECK(r == 13);
 
         SPDLOG_INFO("Calling do_something...");
-        r = do_something(5, 8);
+        r = do_something_ptr(5, 8);
         CHECK(r == 40);
 
         SPDLOG_INFO("Restoring do_something...");
         CHECK(do_something_hook.RestoreFunction() != nullptr);
 
         SPDLOG_INFO("Calling do_something...");
-        r = do_something(5, 8);
+        r = do_something_ptr(5, 8);
         CHECK(r == 13);
     }
 
-    CHECK(do_something2(8, 4) == 4);
+    CHECK(do_something2_ptr(8, 4) == 4);
     CHECK(do_something_hook2.HookFunction((void *)&do_something2, (void *)Mydo_something2) != nullptr);
 
     if (do_something_hook2.GetOriginalFunction<void *>() != nullptr)
@@ -657,21 +757,19 @@ TEST_CASE("Hook function", "[Hook function]")
         CHECK(r == 4);
 
         SPDLOG_INFO("Calling do_something2...");
-        r = do_something2(8, 4);
+        r = do_something2_ptr(8, 4);
         CHECK(r == 2);
 
         SPDLOG_INFO("Restoring do_something2...");
         CHECK(do_something_hook2.RestoreFunction() != nullptr);
 
         SPDLOG_INFO("Calling do_something2...");
-        r = do_something2(8, 4);
+        r = do_something2_ptr(8, 4);
         CHECK(r == 4);
     }
 }
 
 #if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
-auto test_func = (void (*)())((void *)"\x50\xE8\x00\x00\x00\x00\x58\xc3");
-
 void (*bkp)();
 
 void nothing()
@@ -688,20 +786,28 @@ void my_test_func()
 TEST_CASE("Hook small function with call", "[Hook function]")
 {
 
-    MiniDetour::Hook_t test_hook;
-
-    MiniDetour::MemoryManipulation::MemoryProtect((void *)test_func, 8, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
     void *nothing_addr = (void *)nothing;
 
     _EnterRecursiveThunk(nothing_addr);
 
-    int32_t jump_addr                                                        = reinterpret_cast<uint8_t *>(nothing_addr) - (reinterpret_cast<uint8_t *>(test_func) + 1 + 5);
-    *reinterpret_cast<int32_t *>(reinterpret_cast<uintptr_t>(test_func) + 2) = jump_addr;
+    // Executable copy of: push eax/rax; call nothing; pop eax/rax; ret
+    // (the code used to be a string literal, modified in place in read-only data).
+    // Allocated near nothing for the rel32 call, and before the hook so it outlives it.
+    CodeBuffer code(4096, nothing_addr);
+    REQUIRE(code.IsValid());
+    code.Write(0, {0x50, 0xE8, 0x00, 0x00, 0x00, 0x00, 0x58, 0xC3});
+    auto test_func = code.As<void (*)()>();
+
+    int32_t jump_addr = static_cast<int32_t>(reinterpret_cast<uint8_t *>(nothing_addr) - (reinterpret_cast<uint8_t *>(test_func) + 1 + 5));
+    code.WriteValue<int32_t>(2, jump_addr);
+
+    MiniDetour::Hook_t test_hook;
 
     SPDLOG_INFO("Calling test_func");
     test_func();
 
     (void *&)bkp = test_hook.HookFunction((void *)test_func, (void *)my_test_func);
+    REQUIRE(bkp != nullptr);
 
     SPDLOG_INFO("Calling test_func");
     test_func();
