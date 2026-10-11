@@ -942,22 +942,23 @@ class Hook_t
             SPDLOG_INFO("Restored hook");
         }
         else
-        { // Our Hook code has been modified, we have to nullify the hook.
-            if (!MemoryManipulation::MemoryProtect(_TrampolineAddress, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rwx))
+        { // Our Hook code has been modified, we have to nullify the hook:
+          // the jump to the detour now goes to the original function trampoline, which stays allocated.
+            const size_t jumpSize = AbsJump::GetMaxOpcodeSize();
+            if (!MemoryManipulation::MemoryProtect(_TrampolineAddress, jumpSize, MemoryManipulation::MemoryRights::mem_rwx))
                 return res;
 
             int func_mode = 0;
-            int hook_mode = 0;
 
 #if defined(MINIDETOUR_ARCH_ARM)
-            func_mode = reinterpret_cast<uintptr_t>(_TrampolineAddress) & 1;
-            hook_mode = reinterpret_cast<uintptr_t>(_DetourCallFunc) & 1;
+            // The jump is reached from the hooked function and goes to its relocated code: both use the function mode.
+            func_mode = reinterpret_cast<uintptr_t>(_OriginalTrampolineCallAddress) & 1;
 #endif
 
-            AbsJump::WriteOpcodes(_TrampolineAddress, _DetourCallFunc, func_mode, hook_mode);
+            AbsJump::WriteOpcodes(_TrampolineAddress, _OriginalTrampolineAddress, func_mode, func_mode);
 
-            MemoryManipulation::MemoryProtect(_TrampolineAddress, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rx);
-            MemoryManipulation::FlushInstructionCache(_TrampolineAddress, _SavedCode.size());
+            MemoryManipulation::MemoryProtect(_TrampolineAddress, jumpSize, MemoryManipulation::MemoryRights::mem_rx);
+            MemoryManipulation::FlushInstructionCache(_TrampolineAddress, jumpSize);
 
             Reset(false);
             SPDLOG_INFO("Bypassed hook");
