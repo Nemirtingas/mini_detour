@@ -191,10 +191,18 @@ void _EnterRecursiveThunk(void *&pCode)
 
 static bool _UsesInstructionPointer(cs_insn const &instruction)
 {
+    // adr computes from pc without listing it as an operand.
+    if (instruction.id == ARM_INS_ADR)
+        return true;
+
     for (size_t i = 0; i < instruction.detail->arm.op_count; i++)
     {
         cs_arm_op op = instruction.detail->arm.operands[i];
         if (op.type == ARM_OP_REG && op.reg == ARM_REG_PC)
+            return true;
+
+        // ldr r0, [pc, #8]: literal loads, common in prologues.
+        if (op.type == ARM_OP_MEM && op.mem.base == ARM_REG_PC)
             return true;
     }
     return false;
