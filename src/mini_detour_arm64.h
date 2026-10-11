@@ -35,20 +35,11 @@
 // movk x0, #0x89ab, lsl 32
 // movk x0, #0xcdef, lsl 48
 
-bool _AddressesAreRelativeJumpable(void *source, void *dest)
+static bool _AddressesAreRelativeJumpable(void *source, void *dest)
 {
     uintptr_t min_addr = reinterpret_cast<uintptr_t>(std::min(source, dest));
     uintptr_t max_addr = reinterpret_cast<uintptr_t>(std::max(source, dest));
     return (max_addr - min_addr) <= 0x7FFFFFC;
-}
-
-// An export table entry holds a 32 bits RVA: the address must be above the module base, within 4 GB.
-bool _AddressIsRepresentableAsRva(void *moduleBase, void *address)
-{
-    uintptr_t base = reinterpret_cast<uintptr_t>(moduleBase);
-    uintptr_t addr = reinterpret_cast<uintptr_t>(address);
-
-    return addr >= base && (addr - base) <= UINT32_MAX;
 }
 
 #pragma pack(push, 1)
@@ -198,7 +189,7 @@ static inline cs_err _InitDisasm(CodeDisasm &disasm, int /*mode*/)
 // address slot, PLT entries (GOT entry) and Windows import thunks (IAT entry):
 //   [bti c]; adrp x16, page; ldr x17, [x16, #offset]; add x16, x16, #offset; br x17
 //   adrp x16, page; ldr x16, [x16, #offset]; br x16
-void _EnterRecursiveThunk(void *&_pCode)
+static void _EnterRecursiveThunk(void *&_pCode)
 {
     // A longer chain is most likely a loop.
     for (int i = 0; i < 8; ++i)
@@ -245,7 +236,7 @@ static bool _UsesInstructionPointer(cs_insn const &instruction)
     return adr == 0x10000000 || adr == 0x90000000 || (raw & 0x3B000000) == 0x18000000;
 }
 
-size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatable_size)
+static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatable_size)
 {
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
@@ -301,7 +292,7 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
     return relocatable_size;
 }
 
-size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize, int /*func_mode*/)
+static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize, int /*func_mode*/)
 {
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;

@@ -41,7 +41,7 @@ using NList_t         = nlist;
 
 #ifdef USE_SPDLOG
 
-std::string kern_return_t_2_str(kern_return_t v)
+static std::string kern_return_t_2_str(kern_return_t v)
 {
 #define CASE_TO_STRING(x) \
     case x: return #x;
@@ -237,7 +237,7 @@ namespace MemoryManipulation
 {
 namespace Implementation
 {
-size_t _MemoryProtectRightsToNative(MemoryRights rights)
+static size_t _MemoryProtectRightsToNative(MemoryRights rights)
 {
     switch (rights)
     {
@@ -294,7 +294,7 @@ static mach_vm_address_t _PageZeroEnd()
     return 0;
 }
 
-size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
+static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
 {
     mach_port_t self_task     = mach_task_self();
     mach_vm_address_t oldEnd  = _PageZeroEnd();
@@ -382,12 +382,12 @@ size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t re
     return currentRegionCount;
 }
 
-size_t PageSize()
+static size_t PageSize()
 {
     return sysconf(_SC_PAGESIZE);
 }
 
-void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *regionInfos)
+static void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *regionInfos)
 {
     mach_vm_address_t vm_address = (mach_vm_address_t)address;
     kern_return_t ret;
@@ -426,17 +426,17 @@ void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *re
     }
 }
 
-size_t GetAllRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount)
+static size_t GetAllRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount)
 {
     return _GetRegions(regions, regionCount, false);
 }
 
-size_t GetFreeRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount)
+static size_t GetFreeRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount)
 {
     return _GetRegions(regions, regionCount, true);
 }
 
-bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights *oldRights)
+static bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights *oldRights)
 {
     if (oldRights != nullptr)
     {
@@ -453,7 +453,7 @@ bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights
     return kret == KERN_SUCCESS;
 }
 
-void MemoryFree(void *address, size_t size)
+static void MemoryFree(void *address, size_t size)
 {
     if (address != nullptr)
         mach_vm_deallocate(mach_task_self(), (mach_vm_address_t)address, size);
@@ -514,7 +514,7 @@ static inline size_t _AllocationGranularity()
     return PageSize();
 }
 
-bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
+static bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
 {
     mach_port_t task          = mach_task_self();
     mach_vm_size_t read_count = 0;
@@ -525,7 +525,7 @@ bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
     return true;
 }
 
-bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
+static bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
 {
     mach_port_t task = mach_task_self();
 
@@ -535,7 +535,7 @@ bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
     return true;
 }
 
-int FlushInstructionCache(void *address, size_t size)
+static int FlushInstructionCache(void *address, size_t size)
 {
     // Required on Apple Silicon after writing code, a no-op on x86.
     sys_icache_invalidate(address, size);
@@ -657,7 +657,7 @@ static bool _LoadModuleExportDetails(void *moduleHandle, uintptr_t *slide, NList
     return true;
 }
 
-size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails, size_t exportDetailsCount)
+static size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails, size_t exportDetailsCount)
 {
     uintptr_t slide;
     NList_t *dynamicSymbols;
@@ -700,12 +700,12 @@ size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails,
     return result;
 }
 
-size_t GetAllIATSymbols(void * /*moduleHandle*/, IATDetails_t * /*exportDetails*/, size_t /*iatDetailsCount*/)
+static size_t GetAllIATSymbols(void * /*moduleHandle*/, IATDetails_t * /*exportDetails*/, size_t /*iatDetailsCount*/)
 {
     return 0;
 }
 
-size_t ReplaceModuleExports(void * /*moduleHandle*/, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
+static size_t ReplaceModuleExports(void * /*moduleHandle*/, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
 {
     // TODO: Read MachO and modify export address
     for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
@@ -714,7 +714,7 @@ size_t ReplaceModuleExports(void * /*moduleHandle*/, ExportReplaceParameter_t *e
     return 0;
 }
 
-size_t RestoreModuleExports(void * /*moduleHandle*/, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
+static size_t RestoreModuleExports(void * /*moduleHandle*/, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
 {
     // TODO: Read MachO and modify export address
     for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
@@ -723,7 +723,7 @@ size_t RestoreModuleExports(void * /*moduleHandle*/, ExportReplaceParameter_t *e
     return 0;
 }
 
-size_t ReplaceModuleIATs(void * /*moduleHandle*/, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+static size_t ReplaceModuleIATs(void * /*moduleHandle*/, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
         iatReplaceDetails[i].IATCallAddress = nullptr;
@@ -731,7 +731,7 @@ size_t ReplaceModuleIATs(void * /*moduleHandle*/, IATReplaceParameter_t *iatRepl
     return 0;
 }
 
-size_t RestoreModuleIATs(void * /*moduleHandle*/, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+static size_t RestoreModuleIATs(void * /*moduleHandle*/, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
         iatReplaceDetails[i].NewIATAddress = nullptr;

@@ -1,21 +1,12 @@
 #ifndef MINI_DETOUR_ARM_H
 #define MINI_DETOUR_ARM_H
 
-bool _AddressesAreRelativeJumpable(void *source, void *dest)
+static bool _AddressesAreRelativeJumpable(void *source, void *dest)
 {
     uintptr_t min_addr = reinterpret_cast<uintptr_t>(std::min(source, dest));
     uintptr_t max_addr = reinterpret_cast<uintptr_t>(std::max(source, dest));
     // Thumb B.W reaches +-16 MB, ARM B +-32 MB: the jump mode isn't known here, use the smallest range.
     return (max_addr - min_addr) <= 0xFFFFF0;
-}
-
-// An export table entry holds a 32 bits RVA: the address must be above the module base, within 4 GB.
-bool _AddressIsRepresentableAsRva(void *moduleBase, void *address)
-{
-    uintptr_t base = reinterpret_cast<uintptr_t>(moduleBase);
-    uintptr_t addr = reinterpret_cast<uintptr_t>(address);
-
-    return addr >= base && (addr - base) <= UINT32_MAX;
 }
 
 #pragma pack(push, 1)
@@ -202,7 +193,7 @@ static uint32_t _ArmImmediate(uint32_t instruction)
 // Follows PLT entries to the function they jump to, read from their GOT entry (keeps its Thumb bit):
 //   add ip, pc, #A; add ip, ip, #B; ldr pc, [ip, #C]!   (GOT entry at entry + 8 + A + B + C)
 // Thumb callers can go through a "bx pc; nop" stub to the ARM entry.
-void _EnterRecursiveThunk(void *&pCode)
+static void _EnterRecursiveThunk(void *&pCode)
 {
     // A longer chain is most likely a loop.
     for (int i = 0; i < 8; ++i)
@@ -246,7 +237,7 @@ static bool _UsesInstructionPointer(cs_insn const &instruction)
     return false;
 }
 
-size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatableSize)
+static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatableSize)
 {
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
@@ -286,7 +277,7 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
 }
 
 // func_mode: 1 for Thumb code. pCode has no mode bit, it was cleared by the caller.
-size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize, int func_mode)
+static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize, int func_mode)
 {
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;

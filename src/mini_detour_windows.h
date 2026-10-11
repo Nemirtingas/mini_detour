@@ -195,7 +195,7 @@ struct ThreadStackInfos_t
     void *threadStack;
 };
 
-DWORD _MemoryProtectRightsToNative(MemoryRights rights)
+static DWORD _MemoryProtectRightsToNative(MemoryRights rights)
 {
     switch (rights)
     {
@@ -211,7 +211,7 @@ DWORD _MemoryProtectRightsToNative(MemoryRights rights)
     }
 }
 
-MemoryRights _MemoryNativeToProtectRights(DWORD rights)
+static MemoryRights _MemoryNativeToProtectRights(DWORD rights)
 {
     // Ignore the modifiers (PAGE_GUARD, PAGE_NOCACHE, PAGE_WRITECOMBINE...).
     switch (rights & 0xFF)
@@ -313,7 +313,7 @@ static void _GetRegionName(std::wstring &wmodule_name, void *address, char *regi
     }
 }
 
-std::vector<void *> _GetProcessHeapAddresses()
+static std::vector<void *> _GetProcessHeapAddresses()
 {
     std::vector<void *> heaps;
     auto numberOfHeaps = GetProcessHeaps(0, nullptr);
@@ -326,7 +326,7 @@ std::vector<void *> _GetProcessHeapAddresses()
     return heaps;
 }
 
-std::vector<ThreadStackInfos_t> _GetProcessStackAddresses()
+static std::vector<ThreadStackInfos_t> _GetProcessStackAddresses()
 {
     std::vector<ThreadStackInfos_t> stacks;
     _ForEachProcessThread(
@@ -348,7 +348,7 @@ std::vector<ThreadStackInfos_t> _GetProcessStackAddresses()
     return stacks;
 }
 
-size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
+static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
 {
     HANDLE processHandle = GetCurrentProcess();
     LPVOID searchAddress = nullptr;
@@ -394,14 +394,14 @@ size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t re
     return currentRegionCount;
 }
 
-size_t PageSize()
+static size_t PageSize()
 {
     SYSTEM_INFO sysInfo;
     GetSystemInfo(&sysInfo);
     return sysInfo.dwPageSize;
 }
 
-void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *regionInfos)
+static void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *regionInfos)
 {
     MEMORY_BASIC_INFORMATION infos;
     std::wstring regionNameBuffer;
@@ -437,7 +437,7 @@ inline size_t GetFreeRegions(MiniDetourMemoryManipulationRegionInfos_t *regions,
     return _GetRegions(regions, regionCount, true);
 }
 
-bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights *old_rights)
+static bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights *old_rights)
 {
     DWORD oldProtect;
     bool res = VirtualProtect(address, size, _MemoryProtectRightsToNative(rights), &oldProtect) != FALSE;
@@ -449,7 +449,7 @@ bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights
     return res;
 }
 
-void MemoryFree(void *address, size_t size)
+static void MemoryFree(void *address, size_t size)
 {
     if (address != nullptr)
         VirtualFree(address, 0, MEM_RELEASE);
@@ -510,7 +510,7 @@ static inline size_t _AllocationGranularity()
     return systemInfo.dwAllocationGranularity;
 }
 
-bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
+static bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
 {
     auto hProcess   = GetCurrentProcess();
     SIZE_T readSize = 0;
@@ -521,7 +521,7 @@ bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
     return true;
 }
 
-bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
+static bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
 {
     auto hProcess    = GetCurrentProcess();
     SIZE_T writeSize = 0;
@@ -532,7 +532,7 @@ bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
     return true;
 }
 
-int FlushInstructionCache(void *pBase, size_t size)
+static int FlushInstructionCache(void *pBase, size_t size)
 {
     return ::FlushInstructionCache(GetCurrentProcess(), pBase, size);
 }
@@ -544,6 +544,15 @@ namespace ModuleManipulation
 {
 namespace Implementation
 {
+// RVAs are unsigned 32 bits offsets from the module base: the address must be above it and within 4 GB of it.
+static bool _AddressIsRepresentableAsRva(void *moduleBase, void *address)
+{
+    uintptr_t base = reinterpret_cast<uintptr_t>(moduleBase);
+    uintptr_t addr = reinterpret_cast<uintptr_t>(address);
+
+    return addr >= base && (addr - base) <= UINT32_MAX;
+}
+
 static bool _LoadModuleExportDetails(
     void *moduleHandle, void **moduleBase, PIMAGE_EXPORT_DIRECTORY *imageExportDirectory, PDWORD *functionAddressesRVA, PDWORD *functionNamesRVA, PWORD *functionOrdinal)
 {
@@ -741,7 +750,7 @@ _GetIATAddress(void *moduleBase, PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor,
     return nullptr;
 }
 
-size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails, size_t exportDetailsCount)
+static size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails, size_t exportDetailsCount)
 {
     void *moduleBase = nullptr;
     PIMAGE_EXPORT_DIRECTORY imageExportDirectory;
@@ -781,7 +790,7 @@ size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails,
     return result;
 }
 
-size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *iatDetails, size_t iatDetailsCount)
+static size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *iatDetails, size_t iatDetailsCount)
 {
     void *moduleBase = nullptr;
     PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor;
@@ -858,7 +867,7 @@ size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *iatDetails, size_t iat
     return result;
 }
 
-size_t ReplaceModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
+static size_t ReplaceModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
 {
     void *moduleBase = nullptr;
     PIMAGE_EXPORT_DIRECTORY imageExportDirectory;
@@ -903,7 +912,7 @@ size_t ReplaceModuleExports(void *moduleHandle, ExportReplaceParameter_t *export
     return result;
 }
 
-size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
+static size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
 {
     void *moduleBase = nullptr;
     PIMAGE_EXPORT_DIRECTORY imageExportDirectory;
@@ -950,7 +959,7 @@ size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t *export
     return result;
 }
 
-size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+static size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
     void *moduleBase = nullptr;
     PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor;
@@ -987,7 +996,7 @@ size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDe
     return result;
 }
 
-size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+static size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
     void *moduleBase = nullptr;
     PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor;
