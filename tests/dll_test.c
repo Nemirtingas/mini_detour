@@ -1,5 +1,4 @@
-#if defined(WIN64) || defined(_WIN64) || defined(__MINGW64__) ||\
-    defined(WIN32) || defined(_WIN32) || defined(__MINGW32__)
+#if defined(WIN64) || defined(_WIN64) || defined(__MINGW64__) || defined(WIN32) || defined(_WIN32) || defined(__MINGW32__)
 #define TESTS_OS_WINDOWS
 #define EXPORT_SYMBOL __declspec(dllexport)
 #elif defined(__linux__) || defined(linux)

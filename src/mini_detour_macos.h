@@ -16,21 +16,21 @@
 
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
 
-using MachHeader_t = mach_header_64;
-using LoadCommand_t = load_command;
-using Section_t = section_64;
+using MachHeader_t    = mach_header_64;
+using LoadCommand_t   = load_command;
+using Section_t       = section_64;
 using SymTabCommand_t = symtab_command;
-using NList_t = nlist_64;
+using NList_t         = nlist_64;
 
 #define MachHeaderMagic MH_MAGIC_64
 
 #elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
 
-using MachHeader_t = mach_header;
-using LoadCommand_t = load_command;
-using Section_t = section;
+using MachHeader_t    = mach_header;
+using LoadCommand_t   = load_command;
+using Section_t       = section;
 using SymTabCommand_t = symtab_command;
-using NList_t = nlist;
+using NList_t         = nlist;
 
 #define MachHeaderMagic MH_MAGIC
 
@@ -40,7 +40,8 @@ using NList_t = nlist;
 
 std::string kern_return_t_2_str(kern_return_t v)
 {
-#define CASE_TO_STRING(x) case x: return #x;
+#define CASE_TO_STRING(x) \
+    case x: return #x;
     switch (v)
     {
         CASE_TO_STRING(KERN_SUCCESS);
@@ -104,578 +105,584 @@ std::string kern_return_t_2_str(kern_return_t v)
 
 #endif
 
-namespace MiniDetour {
-namespace MemoryManipulation {
-namespace Implementation {
+namespace MiniDetour
+{
+namespace MemoryManipulation
+{
+namespace Implementation
+{
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
-    const void* max_user_address = reinterpret_cast<void*>(0x7ffefffff000);
+const void *max_user_address = reinterpret_cast<void *>(0x7ffefffff000);
 #elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
-    // 32 bits process on 64 bits kernel gets the whole 4GB
-    const void* max_user_address = reinterpret_cast<void*>(0xfffff000);
+// 32 bits process on 64 bits kernel gets the whole 4GB
+const void *max_user_address = reinterpret_cast<void *>(0xfffff000);
 #endif
 
-    size_t _MemoryProtectRightsToNative(MemoryRights rights)
+size_t _MemoryProtectRightsToNative(MemoryRights rights)
+{
+    switch (rights)
     {
-        switch (rights)
-        {
-            case MemoryRights::mem_r  : return VM_PROT_READ;
-            case MemoryRights::mem_w  : return VM_PROT_WRITE;
-            case MemoryRights::mem_x  : return VM_PROT_EXECUTE;
-            case MemoryRights::mem_rw : return VM_PROT_WRITE | VM_PROT_READ;
-            case MemoryRights::mem_rx : return VM_PROT_READ  | VM_PROT_EXECUTE;
-            case MemoryRights::mem_wx : return VM_PROT_WRITE | VM_PROT_EXECUTE;
-            case MemoryRights::mem_rwx: return VM_PROT_WRITE | VM_PROT_READ | VM_PROT_EXECUTE;
+        case MemoryRights::mem_r: return VM_PROT_READ;
+        case MemoryRights::mem_w: return VM_PROT_WRITE;
+        case MemoryRights::mem_x: return VM_PROT_EXECUTE;
+        case MemoryRights::mem_rw: return VM_PROT_WRITE | VM_PROT_READ;
+        case MemoryRights::mem_rx: return VM_PROT_READ | VM_PROT_EXECUTE;
+        case MemoryRights::mem_wx: return VM_PROT_WRITE | VM_PROT_EXECUTE;
+        case MemoryRights::mem_rwx: return VM_PROT_WRITE | VM_PROT_READ | VM_PROT_EXECUTE;
 
-            default: return VM_PROT_NONE;
-        }
+        default: return VM_PROT_NONE;
     }
+}
 
-    size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount, bool onlyFree)
+size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
+{
+    mach_port_t self_task     = mach_task_self();
+    mach_vm_address_t oldEnd  = 0;
+    size_t writtenRegionCount = 0;
+    size_t currentRegionCount = 0;
+
+    mach_vm_address_t vm_address = 0;
+    mach_vm_size_t size;
+    vm_region_basic_info_data_64_t infos;
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object_name      = MACH_PORT_NULL;
+
+    while (mach_vm_region(self_task, &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name) == KERN_SUCCESS)
     {
-        mach_port_t self_task = mach_task_self();
-        mach_vm_address_t oldEnd = 0;
-        size_t writtenRegionCount = 0;
-        size_t currentRegionCount = 0;
-
-        mach_vm_address_t vm_address = 0;
-        mach_vm_size_t size;
-        vm_region_basic_info_data_64_t infos;
-        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-        mach_port_t object_name = MACH_PORT_NULL;
-
-        while (mach_vm_region(self_task, &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name) == KERN_SUCCESS)
+        if (oldEnd != vm_address)
         {
-            if (oldEnd != vm_address)
+            if (regions != nullptr && writtenRegionCount < regionCount)
             {
-                if (regions != nullptr && writtenRegionCount < regionCount)
+                auto &region = *regions;
+                if (region.StructSize >= sizeof(region))
                 {
-                    auto& region = *regions;
-                    if (region.StructSize >= sizeof(region))
-                    {
-                        regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t*>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
+                    regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t *>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
 
-                        region.Rights = MemoryRights::mem_unset;
-                        region.Start = oldEnd;
-                        region.End = static_cast<uintptr_t>(vm_address);
-                        region.ModuleName[0] = '\0';
-                        ++writtenRegionCount;
-                    }
+                    region.Rights        = MemoryRights::mem_unset;
+                    region.Start         = oldEnd;
+                    region.End           = static_cast<uintptr_t>(vm_address);
+                    region.ModuleName[0] = '\0';
+                    ++writtenRegionCount;
                 }
-                ++currentRegionCount;
             }
+            ++currentRegionCount;
+        }
 
-            if (!onlyFree)
+        if (!onlyFree)
+        {
+            if (regions != nullptr && writtenRegionCount < regionCount)
             {
-                if (regions != nullptr && writtenRegionCount < regionCount)
+                auto &region = *regions;
+
+                if (region.StructSize >= sizeof(region))
                 {
-                    auto& region = *regions;
+                    regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t *>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
 
-                    if (region.StructSize >= sizeof(region))
-                    {
-                        regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t*>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
+                    region.Rights        = MemoryRights::mem_none;
+                    region.Start         = static_cast<uintptr_t>(vm_address);
+                    region.End           = static_cast<uintptr_t>(vm_address + size);
+                    region.ModuleName[0] = '\0';
 
-                        region.Rights = MemoryRights::mem_none;
-                        region.Start = static_cast<uintptr_t>(vm_address);
-                        region.End = static_cast<uintptr_t>(vm_address + size);
-                        region.ModuleName[0] = '\0';
+                    if (infos.protection & VM_PROT_READ)
+                        (int &)region.Rights |= (int)MemoryRights::mem_r;
 
-                        if (infos.protection & VM_PROT_READ)
-                            (int&)region.Rights |= (int)MemoryRights::mem_r;
+                    if (infos.protection & VM_PROT_WRITE)
+                        (int &)region.Rights |= (int)MemoryRights::mem_w;
 
-                        if (infos.protection & VM_PROT_WRITE)
-                            (int&)region.Rights |= (int)MemoryRights::mem_w;
+                    if (infos.protection & VM_PROT_EXECUTE)
+                        (int &)region.Rights |= (int)MemoryRights::mem_x;
 
-                        if (infos.protection & VM_PROT_EXECUTE)
-                            (int&)region.Rights |= (int)MemoryRights::mem_x;
-
-                        ++writtenRegionCount;
-                    }
+                    ++writtenRegionCount;
                 }
-
-                ++currentRegionCount;
             }
 
-            vm_address += size;
-            oldEnd = vm_address;
+            ++currentRegionCount;
         }
 
-        return currentRegionCount;
+        vm_address += size;
+        oldEnd = vm_address;
     }
 
-    size_t PageSize()
+    return currentRegionCount;
+}
+
+size_t PageSize()
+{
+    return sysconf(_SC_PAGESIZE);
+}
+
+void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *regionInfos)
+{
+    mach_vm_address_t vm_address = (mach_vm_address_t)address;
+    kern_return_t ret;
+    mach_vm_size_t size;
+    vm_region_basic_info_data_64_t infos;
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object_name      = MACH_PORT_NULL;
+
+    unsigned int rights = MemoryRights::mem_unset;
+
+    // mach_vm_region returns the region or the next region to vm_address, so if the region queried is free, it will not return the free region but the next one.
+    ret = mach_vm_region(mach_task_self(), &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name);
+
+    if (ret == KERN_SUCCESS)
     {
-        return sysconf(_SC_PAGESIZE);
-    }
-
-    void GetRegionInfos(void* address, MiniDetourMemoryManipulationRegionInfos_t* regionInfos)
-    {
-        mach_vm_address_t vm_address = (mach_vm_address_t)address;
-        kern_return_t ret;
-        mach_vm_size_t size;
-        vm_region_basic_info_data_64_t infos;
-        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-        mach_port_t object_name = MACH_PORT_NULL;
-
-        unsigned int rights = MemoryRights::mem_unset;
-
-        // mach_vm_region returns the region or the next region to vm_address, so if the region queried is free, it will not return the free region but the next one.
-        ret = mach_vm_region(mach_task_self(), &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name);
-
-        if (ret == KERN_SUCCESS)
+        if (static_cast<uintptr_t>(vm_address) <= reinterpret_cast<uintptr_t>(address) && reinterpret_cast<uintptr_t>(address) < static_cast<uintptr_t>(vm_address) + size)
         {
-            if (static_cast<uintptr_t>(vm_address) <= reinterpret_cast<uintptr_t>(address) && reinterpret_cast<uintptr_t>(address) < static_cast<uintptr_t>(vm_address) + size)
-            {
-                regionInfos->Start = (uintptr_t)vm_address;
-                regionInfos->End = regionInfos->Start + size;
-                regionInfos->Rights = MemoryRights::mem_none;
-                regionInfos->ModuleName[0] = '\0';
+            regionInfos->Start         = (uintptr_t)vm_address;
+            regionInfos->End           = regionInfos->Start + size;
+            regionInfos->Rights        = MemoryRights::mem_none;
+            regionInfos->ModuleName[0] = '\0';
 
-                if (infos.protection & VM_PROT_READ)
-                    (int&)regionInfos->Rights |= (int)MemoryRights::mem_r;
+            if (infos.protection & VM_PROT_READ)
+                (int &)regionInfos->Rights |= (int)MemoryRights::mem_r;
 
-                if (infos.protection & VM_PROT_WRITE)
-                    (int&)regionInfos->Rights |= (int)MemoryRights::mem_w;
+            if (infos.protection & VM_PROT_WRITE)
+                (int &)regionInfos->Rights |= (int)MemoryRights::mem_w;
 
-                if (infos.protection & VM_PROT_EXECUTE)
-                    (int&)regionInfos->Rights |= (int)MemoryRights::mem_x;
-            }
+            if (infos.protection & VM_PROT_EXECUTE)
+                (int &)regionInfos->Rights |= (int)MemoryRights::mem_x;
         }
     }
+}
 
-    size_t GetAllRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount)
+size_t GetAllRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount)
+{
+    return _GetRegions(regions, regionCount, false);
+}
+
+size_t GetFreeRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount)
+{
+    return _GetRegions(regions, regionCount, true);
+}
+
+bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights *oldRights)
+{
+    if (oldRights != nullptr)
     {
-        return _GetRegions(regions, regionCount, false);
+        RegionInfos_t infos;
+        GetRegionInfos(address, &infos);
+        *oldRights = infos.Rights;
     }
 
-    size_t GetFreeRegions(MiniDetourMemoryManipulationRegionInfos_t* regions, size_t regionCount)
-    {
-        return _GetRegions(regions, regionCount, true);
-    }
+    kern_return_t kret = mach_vm_protect(mach_task_self(), (mach_vm_address_t)address, (mach_vm_size_t)size, FALSE, _MemoryProtectRightsToNative(rights));
 
-    bool MemoryProtect(void* address, size_t size, MemoryRights rights, MemoryRights* oldRights)
+    if (kret != KERN_SUCCESS)
+        SPDLOG_ERROR("mach_vm_protect failed with code: {}", kern_return_t_2_str(kret));
+
+    return kret == KERN_SUCCESS;
+}
+
+void MemoryFree(void *address, size_t size)
+{
+    if (address != nullptr)
+        mach_vm_deallocate(mach_task_self(), (mach_vm_address_t)address, size);
+}
+
+static inline kern_return_t MemoryAllocWithProtection(mach_port_t task, void **address, size_t size, MemoryRights rights, int flags)
+{
+    mach_vm_address_t mach_address = (mach_vm_address_t)*address;
+    mach_vm_size_t mach_size       = (mach_vm_size_t)size;
+    kern_return_t kret             = mach_vm_allocate(task, &mach_address, mach_size, flags);
+    if (kret != KERN_SUCCESS)
     {
-        if (oldRights != nullptr)
+        *address = nullptr;
+        SPDLOG_ERROR("mach_vm_allocate failed with code: {}", kern_return_t_2_str(kret));
+    }
+    else
+    {
+        *address = (void *)mach_address;
+        if (!MemoryProtect(*address, mach_size, rights, nullptr))
         {
-            RegionInfos_t infos;
-            GetRegionInfos(address, &infos);
-            *oldRights = infos.Rights;
-        }
-
-        kern_return_t kret = mach_vm_protect(mach_task_self(), (mach_vm_address_t)address, (mach_vm_size_t)size, FALSE, _MemoryProtectRightsToNative(rights));
-
-        if (kret != KERN_SUCCESS)
-            SPDLOG_ERROR("mach_vm_protect failed with code: {}", kern_return_t_2_str(kret));
-
-        return kret == KERN_SUCCESS;
-    }
-
-    void MemoryFree(void* address, size_t size)
-    {
-        if (address != nullptr)
-            mach_vm_deallocate(mach_task_self(), (mach_vm_address_t)address, size);
-    }
-
-    static inline kern_return_t MemoryAllocWithProtection(mach_port_t task, void** address, size_t size, MemoryRights rights, int flags)
-    {
-        mach_vm_address_t mach_address = (mach_vm_address_t)*address;
-        mach_vm_size_t mach_size = (mach_vm_size_t)size;
-        kern_return_t kret = mach_vm_allocate(task, &mach_address, mach_size, flags);
-        if (kret != KERN_SUCCESS)
-        {
+            MemoryFree(*address, size);
             *address = nullptr;
-            SPDLOG_ERROR("mach_vm_allocate failed with code: {}", kern_return_t_2_str(kret));
         }
-        else
-        {
-            *address = (void*)mach_address;
-            if (!MemoryProtect(*address, mach_size, rights, nullptr))
-            {
-                MemoryFree(*address, size);
-                *address = nullptr;
-            }
-        }
-
-        return kret;
     }
 
-    static inline void* MemoryAllocNear(mach_port_t task, uintptr_t addressHint, size_t size, MemoryRights rights, size_t pageSize)
+    return kret;
+}
+
+static inline void *MemoryAllocNear(mach_port_t task, uintptr_t addressHint, size_t size, MemoryRights rights, size_t pageSize)
+{
+    void *address;
+
+    auto freeRegionCount = GetFreeRegions(nullptr, 0);
+    std::vector<RegionInfos_t> freeRegions((size_t)(freeRegionCount * 1.5));
+    freeRegionCount = GetFreeRegions(freeRegions.data(), freeRegions.size());
+    if (freeRegionCount < freeRegions.size())
+        freeRegions.resize(freeRegionCount);
+
+    std::sort(
+        freeRegions.begin(),
+        freeRegions.end(),
+        [addressHint](MemoryManipulation::RegionInfos_t const &l, MemoryManipulation::RegionInfos_t const &r)
+        { return std::max(addressHint, l.Start) - std::min(addressHint, l.Start) < std::max(addressHint, r.Start) - std::min(addressHint, r.Start); });
+
+    for (auto const &region : freeRegions)
     {
-        void* address;
+        auto start     = region.Start > addressHint ? region.Start : (region.End - pageSize);
+        auto increment = static_cast<int32_t>(region.Start > addressHint ? pageSize : -pageSize);
 
-        auto freeRegionCount = GetFreeRegions(nullptr, 0);
-        std::vector<RegionInfos_t> freeRegions((size_t)(freeRegionCount * 1.5));
-        freeRegionCount = GetFreeRegions(freeRegions.data(), freeRegions.size());
-        if (freeRegionCount < freeRegions.size())
-            freeRegions.resize(freeRegionCount);
-
-        std::sort(freeRegions.begin(), freeRegions.end(), [addressHint](MemoryManipulation::RegionInfos_t const& l, MemoryManipulation::RegionInfos_t const& r)
+        for (auto allocAddress = start; allocAddress >= region.Start && (allocAddress + size) <= region.End; allocAddress += increment)
         {
-            return std::max(addressHint, l.Start) - std::min(addressHint, l.Start) <
-                std::max(addressHint, r.Start) - std::min(addressHint, r.Start);
-        });
+            if (allocAddress > (uintptr_t)max_user_address)
+                break;
 
-        for (auto const& region : freeRegions)
-        {
-            auto start = region.Start > addressHint ? region.Start : (region.End - pageSize);
-            auto increment = static_cast<int32_t>(region.Start > addressHint ? pageSize : -pageSize);
-
-            for (auto allocAddress = start; allocAddress >= region.Start && (allocAddress + size) <= region.End; allocAddress += increment)
-            {
-                if (allocAddress > (uintptr_t)max_user_address)
-                    break;
-
-                address = (void*)allocAddress;
-                MemoryAllocWithProtection(task, &address, (mach_vm_size_t)size, rights, VM_FLAGS_FIXED);
-                if (address != nullptr)
-                    return address;
-            }
+            address = (void *)allocAddress;
+            MemoryAllocWithProtection(task, &address, (mach_vm_size_t)size, rights, VM_FLAGS_FIXED);
+            if (address != nullptr)
+                return address;
         }
+    }
 
-        // Fallback to anywhere alloc
-        address = nullptr;
+    // Fallback to anywhere alloc
+    address = nullptr;
+    MemoryAllocWithProtection(task, &address, size, rights, VM_FLAGS_ANYWHERE);
+
+    return address;
+}
+
+void *MemoryAlloc(void *_addressHint, size_t size, MemoryRights rights)
+{
+    if (_addressHint > max_user_address)
+        _addressHint = (void *)max_user_address;
+
+    auto pageSize    = PageSize();
+    auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
+    size             = _PageAddrSize((void *)addressHint, size, pageSize);
+
+    mach_port_t task = mach_task_self();
+
+    if (_addressHint == nullptr)
+    {
+        void *address = nullptr;
         MemoryAllocWithProtection(task, &address, size, rights, VM_FLAGS_ANYWHERE);
-
         return address;
     }
 
-    void* MemoryAlloc(void* _addressHint, size_t size, MemoryRights rights)
+    return MemoryAllocNear(task, addressHint, size, rights, pageSize);
+}
+
+bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
+{
+    mach_port_t task          = mach_task_self();
+    mach_vm_size_t read_count = 0;
+
+    if (mach_vm_read_overwrite(task, (mach_vm_address_t)address, (mach_vm_size_t)size, (mach_vm_address_t)buffer, &read_count) != KERN_SUCCESS || read_count != size)
+        return false;
+
+    return true;
+}
+
+bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
+{
+    mach_port_t task = mach_task_self();
+
+    if (mach_vm_write(task, (mach_vm_address_t)address, (vm_offset_t)buffer, (mach_msg_type_number_t)size) != KERN_SUCCESS)
+        return false;
+
+    return true;
+}
+
+int FlushInstructionCache(void *address, size_t size)
+{
+    return 1;
+}
+} // namespace Implementation
+} // namespace MemoryManipulation
+
+namespace ModuleManipulation
+{
+namespace Implementation
+{
+/*
+static void* _LoadModuleBaseFromHandleDYLDPre941(void* moduleHandle)
+{
+    struct ImageLoader
     {
-        if (_addressHint > max_user_address)
-            _addressHint = (void*)max_user_address;
-
-        auto pageSize = PageSize();
-        auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
-        size = _PageAddrSize((void*)addressHint, size, pageSize);
-
-        mach_port_t task = mach_task_self();
-
-        if (_addressHint == nullptr)
-        {
-            void* address = nullptr;
-            MemoryAllocWithProtection(task, &address, size, rights, VM_FLAGS_ANYWHERE);
-            return address;
-        }
-
-        return MemoryAllocNear(task, addressHint, size, rights, pageSize);
-    }
-
-    bool SafeMemoryRead(void* address, uint8_t* buffer, size_t size)
-    {
-        mach_port_t task = mach_task_self();
-        mach_vm_size_t read_count = 0;
-
-        if (mach_vm_read_overwrite(task, (mach_vm_address_t)address, (mach_vm_size_t)size, (mach_vm_address_t)buffer, &read_count) != KERN_SUCCESS || read_count != size)
-            return false;
-
-        return true;
-    }
-
-    bool SafeMemoryWrite(void* address, const uint8_t* buffer, size_t size)
-    {
-        mach_port_t task = mach_task_self();
-
-        if (mach_vm_write(task, (mach_vm_address_t)address, (vm_offset_t)buffer, (mach_msg_type_number_t)size) != KERN_SUCCESS)
-            return false;
-
-        return true;
-    }
-
-    int FlushInstructionCache(void* address, size_t size)
-    {
-        return 1;
-    }
-}//namespace Implementation
-}//namespace MemoryManipulation
-
-namespace ModuleManipulation {
-namespace Implementation {
-    /*
-    static void* _LoadModuleBaseFromHandleDYLDPre941(void* moduleHandle)
-    {
-        struct ImageLoader
-        {
 #if __x86_64__
-            const char*                 fAotPath;
+        const char*                 fAotPath;
 #endif
-            const char*					fPath;
-            const char*					fRealPath;
-            dev_t						fDevice;
-            ino_t						fInode;
-            time_t						fLastModified;
-            uint32_t					fPathHash;
-            uint32_t					fDlopenReferenceCount;	// count of how many dlopens have been done on this image
-            struct recursive_lock*		fInitializerRecursiveLock;
+        const char*					fPath;
+        const char*					fRealPath;
+        dev_t						fDevice;
+        ino_t						fInode;
+        time_t						fLastModified;
+        uint32_t					fPathHash;
+        uint32_t					fDlopenReferenceCount;	// count of how many dlopens have been done on this image
+        struct recursive_lock*		fInitializerRecursiveLock;
 
-            union {
-                struct {
-                    uint16_t					fLoadOrder;
-                    uint16_t					fDepth : 15,
-                    fObjCMappedNotified : 1;
-                    uint32_t					fState : 8,
-                    fLibraryCount : 9,
-                    fMadeReadOnly : 1,
-                    fAllLibraryChecksumsAndLoadAddressesMatch : 1,
-                    fLeaveMapped : 1,		// when unloaded, leave image mapped in cause some other code may have pointers into it
-                    fNeverUnload : 1,		// image was statically loaded by main executable
-                    fHideSymbols : 1,		// ignore this image's exported symbols when linking other images
-                    fMatchByInstallName : 1,// look at image's install-path not its load path
-                    fInterposed : 1,
-                    fRegisteredDOF : 1,
-                    fAllLazyPointersBound : 1,
-                    fMarkedInUse : 1,
-                    fBeingRemoved : 1,
-                    fAddFuncNotified : 1,
-                    fPathOwnedByImage : 1,
-                    fIsReferencedDownward : 1,
-                    fWeakSymbolsBound : 1;
-                };
-                uint64_t 						sizeOfData;
+        union {
+            struct {
+                uint16_t					fLoadOrder;
+                uint16_t					fDepth : 15,
+                fObjCMappedNotified : 1;
+                uint32_t					fState : 8,
+                fLibraryCount : 9,
+                fMadeReadOnly : 1,
+                fAllLibraryChecksumsAndLoadAddressesMatch : 1,
+                fLeaveMapped : 1,		// when unloaded, leave image mapped in cause some other code may have pointers into it
+                fNeverUnload : 1,		// image was statically loaded by main executable
+                fHideSymbols : 1,		// ignore this image's exported symbols when linking other images
+                fMatchByInstallName : 1,// look at image's install-path not its load path
+                fInterposed : 1,
+                fRegisteredDOF : 1,
+                fAllLazyPointersBound : 1,
+                fMarkedInUse : 1,
+                fBeingRemoved : 1,
+                fAddFuncNotified : 1,
+                fPathOwnedByImage : 1,
+                fIsReferencedDownward : 1,
+                fWeakSymbolsBound : 1;
             };
+            uint64_t 						sizeOfData;
+        };
+    };
+
+    struct ImageLoaderMachO : public ImageLoader
+    {
+        uint64_t								fCoveredCodeLength;
+        const uint8_t*							fMachOData;
+        const uint8_t*							fLinkEditBase; // add any internal "offset" to this to get mapped address
+        uintptr_t								fSlide;
+    };
+
+    // 4 first bits are mode bits
+    // moduleHandle == ImageLoader* & (~0xf)
+    // return ((ImageLoaderMachO_x86*)((uintptr_t)moduleHandle & (~1)))->fMachOData;
+
+    // From cache, use ImageLoaderMegaDylib
+    return nullptr;
+}
+
+static void* _LoadModuleBaseFromHandlePre1066(void* moduleHandle)
+{
+    struct Loader
+    {
+        struct LoaderRef {
+            uint16_t    index       : 15,   // index into PrebuiltLoaderSet
+                        app         :  1;   // app vs dyld cache PrebuiltLoaderSet
         };
 
-        struct ImageLoaderMachO : public ImageLoader
+        enum { kMagic = 'l4yd' };
+
+        const uint32_t      magic;
+        const uint16_t      isPrebuilt         :  1,  // PrebuiltLoader vs JustInTimeLoader
+                            dylibInDyldCache   :  1,
+                            hasObjC            :  1,
+                            mayHavePlusLoad    :  1,
+                            hasReadOnlyData    :  1,  // __DATA_CONST.  Don't use directly.  Use hasConstantSegmentsToProtect()
+                            neverUnload        :  1,  // part of launch or has non-unloadable data (e.g. objc, tlv)
+                            leaveMapped        :  1,  // RTLD_NODELETE
+                            hasReadOnlyObjC    :  1,  // Has __DATA_CONST,__objc_selrefs section
+                            pre2022Binary      :  1,
+                            isPremapped        :  1,  // mapped by exclave core
+                            hasUUIDLoadCommand :  1,
+                            hasWeakDefs        :  1,
+                            hasTLVs            :  1,
+                            belowLibSystem     :  1,
+                            padding            :  2;
+        LoaderRef           ref;
+    };
+
+    struct JustInTimeLoader : public Loader
+    {
+        const mach_header*   mappedAddress;
+        mutable uint64_t     pathOffset         : 16,
+                             dependentsSet      :  1,
+                             fixUpsApplied      :  1,
+                             inited             :  1,
+                             hidden             :  1,
+                             altInstallName     :  1,
+                             lateLeaveMapped    :  1,
+                             overridesCache     :  1,
+                             allDepsAreNormal   :  1,
+                             overrideIndex      : 15,
+                             depCount           : 16,
+                             padding            :  9;
+        uint64_t             sliceOffset;
+    };
+
+    Loader* loader = (Loader*)((uintptr_t)moduleHandle >> 1);
+    if (loader->magic == Loader::kMagic)
+    {
+        if (loader->isPrebuilt)// TODO PrebuiltLoader
+            return nullptr;
+
+        return (void*)((JustInTimeLoader*)loader)->mappedAddress;
+    }
+    return nullptr;
+}
+
+static void* _LoadModuleBaseFromHandlePost1066(void* moduleHandle)
+{
+    uintptr_t dyldStart = (uintptr_t)&__dso_handle;
+    Loader* loader = (Loader*)((((uintptr_t)h) & ~1) ^ dyldStart);
+    if (loader->magic == Loader::kMagic)
+    {
+        if (loader->isPrebuilt)// TODO PrebuiltLoader
+            return nullptr;
+
+        return (void*)((JustInTimeLoader*)loader)->mappedAddress;
+    }
+    return nullptr;
+}
+*/
+
+static bool _LoadModuleExportDetails(void *moduleHandle, void **moduleBase, NList_t **dynamicSymbols, const char **dynamicSymbolsNames, uint32_t *dynamicSymbolsCount)
+{
+    task_dyld_info dyld_info;
+    mach_msg_type_number_t count = TASK_DYLD_INFO_COUNT;
+    kern_return_t ret;
+    ret = task_info(mach_task_self_, TASK_DYLD_INFO, (task_info_t)&dyld_info, &count);
+    if (ret != KERN_SUCCESS)
+        return false;
+
+    // This is the most reliable and safest way to find the module base address. dyld seems to change its internal structure quite often.
+    dyld_all_image_infos *infos = (dyld_all_image_infos *)dyld_info.all_image_info_addr;
+    void *cacheBase             = nullptr;
+    void *foundModuleBase       = nullptr;
+
+    for (int i = 0; i < infos->infoArrayCount && (foundModuleBase == nullptr || cacheBase == nullptr); ++i)
+    {
+        if (foundModuleBase == nullptr)
         {
-            uint64_t								fCoveredCodeLength;
-            const uint8_t*							fMachOData;
-            const uint8_t*							fLinkEditBase; // add any internal "offset" to this to get mapped address
-            uintptr_t								fSlide;
-        };
+            void *loadedHandle = dlopen(infos->infoArray[i].imageFilePath, RTLD_NOW);
+            if (loadedHandle == moduleHandle)
+                foundModuleBase = (void *)infos->infoArray[i].imageLoadAddress;
+            dlclose(loadedHandle);
+        }
 
-        // 4 first bits are mode bits
-        // moduleHandle == ImageLoader* & (~0xf)
-        // return ((ImageLoaderMachO_x86*)((uintptr_t)moduleHandle & (~1)))->fMachOData;
-
-        // From cache, use ImageLoaderMegaDylib
-        return nullptr;
+        if (cacheBase == nullptr)
+            cacheBase = (void *)infos->sharedCacheBaseAddress;
     }
 
-    static void* _LoadModuleBaseFromHandlePre1066(void* moduleHandle)
+    MachHeader_t *machHeader = (MachHeader_t *)foundModuleBase;
+
+    if (machHeader->magic != MachHeaderMagic)
+        return false;
+
+    // cache rx base: void* cache_rx_base
+    // syscall(294, &cache_rx_base);
+
+    bool fromSharedCache = machHeader->flags & MH_DYLIB_IN_CACHE;
+    if (fromSharedCache) // TODO: Handle shared cache
+        return false;
+
+    LoadCommand_t *loadCommandStart = (LoadCommand_t *)(((uintptr_t)foundModuleBase) + sizeof(*machHeader));
+    LoadCommand_t *loadCommandEnd   = (LoadCommand_t *)(((uintptr_t)loadCommandStart) + machHeader->sizeofcmds);
+
+    SymTabCommand_t *symTabCommand = nullptr;
+    uintptr_t linkEditBase         = 0;
+
+    for (auto *loadCommand = loadCommandStart; loadCommand < loadCommandEnd && (symTabCommand == nullptr || linkEditBase == 0);
+         loadCommand       = (LoadCommand_t *)((uintptr_t)loadCommand + loadCommand->cmdsize))
     {
-        struct Loader
+        if (loadCommand->cmd == LC_SYMTAB)
         {
-            struct LoaderRef {
-                uint16_t    index       : 15,   // index into PrebuiltLoaderSet
-                            app         :  1;   // app vs dyld cache PrebuiltLoaderSet
-            };
-
-            enum { kMagic = 'l4yd' };
-    
-            const uint32_t      magic;
-            const uint16_t      isPrebuilt         :  1,  // PrebuiltLoader vs JustInTimeLoader
-                                dylibInDyldCache   :  1,
-                                hasObjC            :  1,
-                                mayHavePlusLoad    :  1,
-                                hasReadOnlyData    :  1,  // __DATA_CONST.  Don't use directly.  Use hasConstantSegmentsToProtect()
-                                neverUnload        :  1,  // part of launch or has non-unloadable data (e.g. objc, tlv)
-                                leaveMapped        :  1,  // RTLD_NODELETE
-                                hasReadOnlyObjC    :  1,  // Has __DATA_CONST,__objc_selrefs section
-                                pre2022Binary      :  1,
-                                isPremapped        :  1,  // mapped by exclave core
-                                hasUUIDLoadCommand :  1,
-                                hasWeakDefs        :  1,
-                                hasTLVs            :  1,
-                                belowLibSystem     :  1,
-                                padding            :  2;
-            LoaderRef           ref;
-        };
-
-        struct JustInTimeLoader : public Loader
-        {
-            const mach_header*   mappedAddress;
-            mutable uint64_t     pathOffset         : 16,
-                                 dependentsSet      :  1,
-                                 fixUpsApplied      :  1,
-                                 inited             :  1,
-                                 hidden             :  1,
-                                 altInstallName     :  1,
-                                 lateLeaveMapped    :  1,
-                                 overridesCache     :  1,
-                                 allDepsAreNormal   :  1,
-                                 overrideIndex      : 15,
-                                 depCount           : 16,
-                                 padding            :  9;
-            uint64_t             sliceOffset;
-        };
-
-        Loader* loader = (Loader*)((uintptr_t)moduleHandle >> 1);
-        if (loader->magic == Loader::kMagic)
-        {
-            if (loader->isPrebuilt)// TODO PrebuiltLoader
-                return nullptr;
-        
-            return (void*)((JustInTimeLoader*)loader)->mappedAddress;
+            symTabCommand = (SymTabCommand_t *)loadCommand;
         }
-        return nullptr;
+        else if (loadCommand->cmd == LC_SEGMENT && strncmp(((segment_command *)loadCommand)->segname, SEG_LINKEDIT, sizeof(((segment_command *)loadCommand)->segname)) == 0)
+        {
+            linkEditBase = (uintptr_t)foundModuleBase + ((segment_command *)loadCommand)->vmaddr - ((segment_command *)loadCommand)->fileoff;
+        }
+        else if (
+            loadCommand->cmd == LC_SEGMENT_64 && strncmp(((segment_command_64 *)loadCommand)->segname, SEG_LINKEDIT, sizeof(((segment_command_64 *)loadCommand)->segname)) == 0)
+        {
+            linkEditBase = (uintptr_t)foundModuleBase + ((segment_command_64 *)loadCommand)->vmaddr - ((segment_command_64 *)loadCommand)->fileoff;
+        }
     }
 
-    static void* _LoadModuleBaseFromHandlePost1066(void* moduleHandle)
+    if (symTabCommand == nullptr || linkEditBase == 0)
+        return false;
+
+    *moduleBase          = foundModuleBase;
+    *dynamicSymbols      = (NList_t *)(linkEditBase + symTabCommand->symoff);
+    *dynamicSymbolsNames = (const char *)(linkEditBase + symTabCommand->stroff);
+    *dynamicSymbolsCount = symTabCommand->nsyms;
+
+    return true;
+}
+
+size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails, size_t exportDetailsCount)
+{
+    void *moduleBase;
+    NList_t *dynamicSymbols;
+    uint32_t dynamicSymbolsCount;
+    const char *dynamicSymbolsNames;
+    size_t result = 0;
+
+    if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbols, &dynamicSymbolsNames, &dynamicSymbolsCount))
+        return result;
+
+    if (exportDetails == nullptr)
     {
-        uintptr_t dyldStart = (uintptr_t)&__dso_handle;
-        Loader* loader = (Loader*)((((uintptr_t)h) & ~1) ^ dyldStart);
-        if (loader->magic == Loader::kMagic)
-        {
-            if (loader->isPrebuilt)// TODO PrebuiltLoader
-                return nullptr;
-        
-            return (void*)((JustInTimeLoader*)loader)->mappedAddress;
-        }
-        return nullptr;
-    }
-    */
-
-    static bool _LoadModuleExportDetails(void* moduleHandle, void** moduleBase, NList_t** dynamicSymbols, const char** dynamicSymbolsNames, uint32_t* dynamicSymbolsCount)
-    {
-        task_dyld_info dyld_info;
-        mach_msg_type_number_t count = TASK_DYLD_INFO_COUNT;
-        kern_return_t ret;
-        ret = task_info(mach_task_self_, TASK_DYLD_INFO, (task_info_t)&dyld_info, &count);
-        if (ret != KERN_SUCCESS)
-            return false;
-
-        // This is the most reliable and safest way to find the module base address. dyld seems to change its internal structure quite often.
-        dyld_all_image_infos *infos = (dyld_all_image_infos *)dyld_info.all_image_info_addr;
-        void* cacheBase = nullptr;
-        void* foundModuleBase = nullptr;
-
-        for (int i = 0; i < infos->infoArrayCount && (foundModuleBase == nullptr || cacheBase == nullptr); ++i)
-        {
-            if (foundModuleBase == nullptr)
-            {
-                void* loadedHandle = dlopen(infos->infoArray[i].imageFilePath, RTLD_NOW);
-                if (loadedHandle == moduleHandle)
-                    foundModuleBase = (void*)infos->infoArray[i].imageLoadAddress;
-                dlclose(loadedHandle);
-            }
-
-            if (cacheBase == nullptr)
-                cacheBase = (void*)infos->sharedCacheBaseAddress;
-
-        }
-
-        MachHeader_t* machHeader = (MachHeader_t*)foundModuleBase;
-
-        if (machHeader->magic != MachHeaderMagic)
-            return false;
-
-        // cache rx base: void* cache_rx_base
-        // syscall(294, &cache_rx_base);
-
-        bool fromSharedCache = machHeader->flags & MH_DYLIB_IN_CACHE;
-        if (fromSharedCache)// TODO: Handle shared cache
-            return false;
-
-        LoadCommand_t* loadCommandStart = (LoadCommand_t*)(((uintptr_t)foundModuleBase) + sizeof(*machHeader));
-        LoadCommand_t* loadCommandEnd = (LoadCommand_t*)(((uintptr_t)loadCommandStart) + machHeader->sizeofcmds);
-
-        SymTabCommand_t* symTabCommand = nullptr;       
-        uintptr_t linkEditBase = 0;
-
-        for (auto* loadCommand = loadCommandStart; loadCommand < loadCommandEnd && (symTabCommand == nullptr || linkEditBase == 0); loadCommand = (LoadCommand_t*)((uintptr_t)loadCommand + loadCommand->cmdsize))
-        {
-            if (loadCommand->cmd == LC_SYMTAB)
-            {
-                symTabCommand = (SymTabCommand_t*)loadCommand;
-            }
-            else if (loadCommand->cmd == LC_SEGMENT && strncmp(((segment_command*)loadCommand)->segname, SEG_LINKEDIT, sizeof(((segment_command*)loadCommand)->segname)) == 0)
-            {
-                linkEditBase = (uintptr_t)foundModuleBase + ((segment_command*)loadCommand)->vmaddr - ((segment_command*)loadCommand)->fileoff;
-            }
-            else if (loadCommand->cmd == LC_SEGMENT_64 && strncmp(((segment_command_64*)loadCommand)->segname, SEG_LINKEDIT, sizeof(((segment_command_64*)loadCommand)->segname)) == 0)
-            {
-                linkEditBase = (uintptr_t)foundModuleBase + ((segment_command_64*)loadCommand)->vmaddr - ((segment_command_64*)loadCommand)->fileoff;
-            }
-        }
-
-        if (symTabCommand == nullptr || linkEditBase == 0)
-            return false;
-
-        *moduleBase = foundModuleBase;
-        *dynamicSymbols = (NList_t*)(linkEditBase + symTabCommand->symoff);
-        *dynamicSymbolsNames = (const char*)(linkEditBase + symTabCommand->stroff);
-        *dynamicSymbolsCount = symTabCommand->nsyms;
-
-        return true;
-    }
-
-    size_t GetAllExportedSymbols(void* moduleHandle, ExportDetails_t* exportDetails, size_t exportDetailsCount)
-    {
-        void* moduleBase;
-        NList_t* dynamicSymbols;
-        uint32_t dynamicSymbolsCount;
-        const char* dynamicSymbolsNames;
-        size_t result = 0;
-        
-        if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbols, &dynamicSymbolsNames, &dynamicSymbolsCount))
-            return result;
-
-        if (exportDetails == nullptr)
-        {
-            for (uint32_t i = 0; i < dynamicSymbolsCount; ++i)
-                if (dynamicSymbols[i].n_type & N_EXT && (dynamicSymbols[i].n_type & N_TYPE) != N_UNDF)
-                    ++result;
-
-            return result;
-        }
-
-        SPDLOG_INFO("{} - {}", moduleHandle, moduleBase);
-        for (uint32_t i = 0; i < dynamicSymbolsCount && result < exportDetailsCount; ++i)
-        {
-            if (!(dynamicSymbols[i].n_type & N_EXT))
-                continue;
-
-            //uint8_t type = dynamicSymbols[i].n_type & N_TYPE;
-            // If type == N_INDR, might need to do some extra work to figure its address.
-            SPDLOG_INFO("{} - ext: {}, type: {}", dynamicSymbolsNames + dynamicSymbols[i].n_un.n_strx, dynamicSymbols[i].n_type & N_EXT, dynamicSymbols[i].n_type & N_TYPE);
-
-            if ((dynamicSymbols[i].n_type & N_TYPE) == N_UNDF)
-                continue;
-
-            exportDetails[result].ExportName = dynamicSymbolsNames + dynamicSymbols[i].n_un.n_strx + 1; // NOTE: on macos, export starts with '_'.
-            exportDetails[result].ExportCallAddress = (void*)((uintptr_t)moduleBase + dynamicSymbols[i].n_value);
-            exportDetails[result++].ExportOrdinal = i;
-        }
+        for (uint32_t i = 0; i < dynamicSymbolsCount; ++i)
+            if (dynamicSymbols[i].n_type & N_EXT && (dynamicSymbols[i].n_type & N_TYPE) != N_UNDF)
+                ++result;
 
         return result;
     }
 
-    size_t GetAllIATSymbols(void* moduleHandle, IATDetails_t* exportDetails, size_t iatDetailsCount)
+    SPDLOG_INFO("{} - {}", moduleHandle, moduleBase);
+    for (uint32_t i = 0; i < dynamicSymbolsCount && result < exportDetailsCount; ++i)
     {
-        return 0;
+        if (!(dynamicSymbols[i].n_type & N_EXT))
+            continue;
+
+        // uint8_t type = dynamicSymbols[i].n_type & N_TYPE;
+        //  If type == N_INDR, might need to do some extra work to figure its address.
+        SPDLOG_INFO("{} - ext: {}, type: {}", dynamicSymbolsNames + dynamicSymbols[i].n_un.n_strx, dynamicSymbols[i].n_type & N_EXT, dynamicSymbols[i].n_type & N_TYPE);
+
+        if ((dynamicSymbols[i].n_type & N_TYPE) == N_UNDF)
+            continue;
+
+        exportDetails[result].ExportName        = dynamicSymbolsNames + dynamicSymbols[i].n_un.n_strx + 1; // NOTE: on macos, export starts with '_'.
+        exportDetails[result].ExportCallAddress = (void *)((uintptr_t)moduleBase + dynamicSymbols[i].n_value);
+        exportDetails[result++].ExportOrdinal   = i;
     }
 
-    size_t ReplaceModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
-    {
-        // TODO: Read MachO and modify export address
-        for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
-            exportReplaceDetails[i].ExportCallAddress = nullptr;
+    return result;
+}
 
-        return 0;
-    }
+size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *exportDetails, size_t iatDetailsCount)
+{
+    return 0;
+}
 
-    size_t RestoreModuleExports(void* moduleHandle, ExportReplaceParameter_t* exportReplaceDetails, size_t exportReplaceDetailsCount)
-    {
-        // TODO: Read MachO and modify export address
-        for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
-            exportReplaceDetails[i].NewExportAddress = nullptr;
+size_t ReplaceModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
+{
+    // TODO: Read MachO and modify export address
+    for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
+        exportReplaceDetails[i].ExportCallAddress = nullptr;
 
-        return 0;
-    }
+    return 0;
+}
 
-    size_t ReplaceModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
-    {
-        for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
-            iatReplaceDetails[i].IATCallAddress = nullptr;
+size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
+{
+    // TODO: Read MachO and modify export address
+    for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
+        exportReplaceDetails[i].NewExportAddress = nullptr;
 
-        return 0;
-    }
+    return 0;
+}
 
-    size_t RestoreModuleIATs(void* moduleHandle, IATReplaceParameter_t* iatReplaceDetails, size_t iatReplaceDetailsCount)
-    {
-        return 0;
-    }
+size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+{
+    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+        iatReplaceDetails[i].IATCallAddress = nullptr;
 
-}//namespace Implementation
-}//namespace ModuleManipulation
-}//namespace MiniDetour
+    return 0;
+}
 
-#endif//MINI_DETOUR_MACOS_H
+size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+{
+    return 0;
+}
+
+} // namespace Implementation
+} // namespace ModuleManipulation
+} // namespace MiniDetour
+
+#endif // MINI_DETOUR_MACOS_H
