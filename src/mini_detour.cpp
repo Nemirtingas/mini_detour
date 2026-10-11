@@ -826,7 +826,12 @@ class Hook_t
             goto error;
         }
 
-        _RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, relativeJumpSize);
+        // A failed relocation leaves the trampoline without its jump back to the original function.
+        if (_RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, relativeJumpSize) < relativeJumpSize)
+        {
+            SPDLOG_ERROR("Failed to relocate code.");
+            goto error;
+        }
 
         if (relocatableSize >= relativeJumpSize)
         {
