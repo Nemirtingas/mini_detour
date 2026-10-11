@@ -85,24 +85,55 @@ DWORD _MemoryProtectRightsToNative(MemoryRights rights)
 
 MemoryRights _MemoryNativeToProtectRights(DWORD rights)
 {
-    switch (rights)
+    // Ignore the modifiers (PAGE_GUARD, PAGE_NOCACHE, PAGE_WRITECOMBINE...).
+    switch (rights & 0xFF)
     {
         case PAGE_READONLY: return MemoryRights::mem_r;
         case PAGE_READWRITE: return MemoryRights::mem_rw;
+        case PAGE_WRITECOPY: return MemoryRights::mem_rw;
         case PAGE_EXECUTE: return MemoryRights::mem_x;
         case PAGE_EXECUTE_READ: return MemoryRights::mem_rx;
         case PAGE_EXECUTE_READWRITE: return MemoryRights::mem_rwx;
+        case PAGE_EXECUTE_WRITECOPY: return MemoryRights::mem_rwx;
         default: return MemoryRights::mem_none;
     }
 }
 
-void _GetRegionName(
-    std::wstring &wmodule_name, void *address, char *regionName, size_t regionNameSize, std::vector<void *> const &heaps, std::vector<ThreadStackInfos_t> const &stacks)
+static std::vector<void *> _GetProcessHeapAddresses();
+static std::vector<ThreadStackInfos_t> _GetProcessStackAddresses();
+
+// The heaps and thread stacks are only listed when a region that isn't a module must be named: listing the stacks
+// opens every thread of the process.
+struct _HeapsAndStacks_t
+{
+    bool Loaded = false;
+    std::vector<void *> Heaps;
+    std::vector<ThreadStackInfos_t> Stacks;
+
+    void Load()
+    {
+        if (Loaded)
+            return;
+
+        Heaps  = _GetProcessHeapAddresses();
+        Stacks = _GetProcessStackAddresses();
+        Loaded = true;
+    }
+};
+
+static void _GetRegionName(std::wstring &wmodule_name, void *address, char *regionName, size_t regionNameSize, _HeapsAndStacks_t &heapsAndStacks)
 {
     DWORD wmodule_name_size = 1024;
     HMODULE moduleHandle;
 
+    if (regionNameSize == 0)
+        return;
+
     regionName[0] = '\0';
+    // No room for a name (the default RegionInfos_t): nothing to look for.
+    if (regionNameSize == 1)
+        return;
+
     if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)address, &moduleHandle) != FALSE &&
         moduleHandle != nullptr)
     {
@@ -119,15 +150,23 @@ void _GetRegionName(
             else if (wmodule_name_size != 0)
             {
                 wmodule_name.resize(wmodule_name_size);
-                wmodule_name_size             = WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wmodule_name.length(), regionName, regionNameSize, nullptr, nullptr);
-                regionName[wmodule_name_size] = '\0';
+
+                // Convert, then copy what fits in regionName with its terminating '\0'.
+                std::string utf8ModuleName(WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wmodule_name.length(), nullptr, 0, nullptr, nullptr), '\0');
+                WideCharToMultiByte(CP_UTF8, 0, wmodule_name.c_str(), wmodule_name.length(), &utf8ModuleName[0], utf8ModuleName.length(), nullptr, nullptr);
+
+                size_t copySize = std::min(utf8ModuleName.length(), regionNameSize - 1);
+                memcpy(regionName, utf8ModuleName.data(), copySize);
+                regionName[copySize] = '\0';
+
                 wmodule_name.resize(wmodule_name.capacity());
                 return;
             }
         }
     }
 
-    for (auto const &heap : heaps)
+    heapsAndStacks.Load();
+    for (auto const &heap : heapsAndStacks.Heaps)
     {
         if (address == heap)
         {
@@ -136,7 +175,7 @@ void _GetRegionName(
             return;
         }
     }
-    for (auto const &stack : stacks)
+    for (auto const &stack : heapsAndStacks.Stacks)
     {
         if (address == stack.threadStack)
         {
@@ -213,9 +252,7 @@ size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t re
     size_t writtenRegionCount = 0;
     size_t currentRegionCount = 0;
     std::wstring regionNameBuffer(1024, L'\0');
-
-    auto heaps  = _GetProcessHeapAddresses();
-    auto stacks = _GetProcessStackAddresses();
+    _HeapsAndStacks_t heapsAndStacks;
 
     while (VirtualQueryEx(processHandle, searchAddress, &memoryBasicInformation, sizeof(memoryBasicInformation)) != 0)
     {
@@ -238,8 +275,7 @@ size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t re
                         memoryBasicInformation.BaseAddress,
                         region.ModuleName,
                         region.StructSize - (sizeof(region) - sizeof(region.ModuleName)),
-                        heaps,
-                        stacks);
+                        heapsAndStacks);
                 }
                 ++writtenRegionCount;
             }
@@ -264,24 +300,26 @@ size_t PageSize()
 void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *regionInfos)
 {
     MEMORY_BASIC_INFORMATION infos;
-    std::wstring regionNameBuffer(1024, L'\0');
+    std::wstring regionNameBuffer;
+    _HeapsAndStacks_t heapsAndStacks;
 
-    auto heaps  = _GetProcessHeapAddresses();
-    auto stacks = _GetProcessStackAddresses();
-
-    regionInfos->Rights = MemoryRights::mem_unset;
+    // Values for an address that can't be queried, replaced below.
+    regionInfos->Rights        = MemoryRights::mem_unset;
+    regionInfos->Start         = 0;
+    regionInfos->End           = 0;
+    regionInfos->ModuleName[0] = '\0';
     if (VirtualQuery(address, &infos, sizeof(infos)) != 0)
     {
         regionInfos->Start  = reinterpret_cast<uintptr_t>(infos.BaseAddress);
         regionInfos->End    = regionInfos->Start + infos.RegionSize;
-        regionInfos->Rights = _MemoryNativeToProtectRights(infos.Protect & 0xFF);
-        _GetRegionName(
-            regionNameBuffer,
-            infos.BaseAddress,
-            regionInfos->ModuleName,
-            regionInfos->StructSize - (sizeof(*regionInfos) - sizeof(regionInfos->ModuleName)),
-            heaps,
-            stacks);
+        regionInfos->Rights = _MemoryNativeToProtectRights(infos.Protect);
+
+        // Only allocated when there is room for a name.
+        const size_t regionNameSize = regionInfos->StructSize - (sizeof(*regionInfos) - sizeof(regionInfos->ModuleName));
+        if (regionNameSize > 1)
+            regionNameBuffer.resize(1024, L'\0');
+
+        _GetRegionName(regionNameBuffer, infos.BaseAddress, regionInfos->ModuleName, regionNameSize, heapsAndStacks);
     }
 }
 
@@ -300,8 +338,9 @@ bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights
     DWORD oldProtect;
     bool res = VirtualProtect(address, size, _MemoryProtectRightsToNative(rights), &oldProtect) != FALSE;
 
+    // oldProtect isn't set when VirtualProtect fails.
     if (old_rights != nullptr)
-        *old_rights = _MemoryNativeToProtectRights(oldProtect & 0xFF);
+        *old_rights = res ? _MemoryNativeToProtectRights(oldProtect) : MemoryRights::mem_unset;
 
     return res;
 }

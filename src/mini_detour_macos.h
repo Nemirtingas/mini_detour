@@ -11,6 +11,7 @@
 #include <mach-o/dyld_images.h>
 #include <mach-o/nlist.h>
 #include <dlfcn.h>
+#include <libkern/OSCacheControl.h>
 
 #include <unistd.h>
 #include <errno.h>
@@ -271,7 +272,11 @@ void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *re
     mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
     mach_port_t object_name      = MACH_PORT_NULL;
 
-    unsigned int rights = MemoryRights::mem_unset;
+    // Values for a free address, replaced below if the address is mapped.
+    regionInfos->Rights        = MemoryRights::mem_unset;
+    regionInfos->Start         = 0;
+    regionInfos->End           = 0;
+    regionInfos->ModuleName[0] = '\0';
 
     // mach_vm_region returns the region or the next region to vm_address, so if the region queried is free, it will not return the free region but the next one.
     ret = mach_vm_region(mach_task_self(), &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name);
@@ -408,6 +413,8 @@ bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
 
 int FlushInstructionCache(void *address, size_t size)
 {
+    // Required on Apple Silicon after writing code, a no-op on x86.
+    sys_icache_invalidate(address, size);
     return 1;
 }
 } // namespace Implementation
