@@ -9,9 +9,15 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        platform: [x32, x64]
+        # arm and arm64 are cross compiled and run under qemu, on Linux only.
+        platform: [x32, x64, arm, arm64]
         # Release catches what only shows once optimized: small functions, inlined calls, tail calls...
         build_type: [Debug, Release]
+        exclude:
+        - os: windows-latest
+          platform: arm
+        - os: windows-latest
+          platform: arm64
         include:
         # macos-latest runs on Apple Silicon. macOS x64 is tested on a local machine.
         - os: macos-latest
@@ -47,27 +53,34 @@ jobs:
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.platform == 'x64' }}
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt install -y gcc-arm-linux-gnueabi g++-arm-linux-gnueabi gcc-aarch64-linux-gnu g++-aarch64-linux-gnu qemu-user
-          
-          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_arm.toolchain" -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build/linux_arm
-          cmake --build build/linux_arm
-          
-          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_aarch64.toolchain" -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build/linux_aarch64
-          cmake --build build/linux_aarch64
-          
-          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build/linux_x64
-          cmake --build build/linux_x64
-          
-          echo "### Running ARM tests ###"
-          cd ${{ github.workspace }}/build/linux_arm/
-          qemu-arm -L /usr/arm-linux-gnueabi ./tests || echo "Failed"
-          echo "### Running AARCH64 tests ###"
-          cd ${{ github.workspace }}/build/linux_aarch64/
-          qemu-aarch64 -L /usr/aarch64-linux-gnu ./tests || echo "Failed"
-          echo "### Running X64 tests ###"
-          cd ${{ github.workspace }}/build/linux_x64/
+          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build
+          cmake --build build
+          cd ${{ github.workspace }}/build
           ./tests
+
+      - name: Linux tests gcc (arm, qemu)
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.platform == 'arm' }}
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt install -y gcc-arm-linux-gnueabi g++-arm-linux-gnueabi qemu-user
+
+          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_arm.toolchain" -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build
+          cmake --build build
+          cd ${{ github.workspace }}/build
+          qemu-arm -L /usr/arm-linux-gnueabi ./tests
+
+      - name: Linux tests gcc (arm64, qemu)
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.platform == 'arm64' }}
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu qemu-user
+
+          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_aarch64.toolchain" -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build
+          cmake --build build
+          cd ${{ github.workspace }}/build
+          qemu-aarch64 -L /usr/aarch64-linux-gnu ./tests
 
       - name: MacOS tests (arm64)
         if: matrix.os == 'macos-latest'
