@@ -187,19 +187,26 @@ if(APPLE)
 endif()
 
 if(MINIDETOUR_BUILD_TESTS)
-  add_library(
-    export_hook_test_library SHARED
-    tests/dll_test.c
-  )
+  # Shared library the tests load from their directory: no "lib" prefix, only the symbols marked for export.
+  function(minidetour_add_test_library name source)
+    add_library(${name} SHARED ${source})
 
-  set_target_properties(export_hook_test_library PROPERTIES
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:${MINIDETOUR_DYNAMIC_RUNTIME}>:DLL>"
-    POSITION_INDEPENDENT_CODE ON
-    C_VISIBILITY_PRESET hidden
-    CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN ON
-    PREFIX ""
-  )
+    set_target_properties(${name} PROPERTIES
+      MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:${MINIDETOUR_DYNAMIC_RUNTIME}>:DLL>"
+      POSITION_INDEPENDENT_CODE ON
+      C_VISIBILITY_PRESET hidden
+      CXX_VISIBILITY_PRESET hidden
+      VISIBILITY_INLINES_HIDDEN ON
+      PREFIX ""
+    )
+  endfunction()
+
+  minidetour_add_test_library(export_hook_test_library tests/dll_test.c)
+
+  if(UNIX AND NOT APPLE)
+    # Shared library without any exported symbol: its GNU hash table has no hashed symbol.
+    minidetour_add_test_library(no_export_test_library tests/no_export_test_library.c)
+  endif()
 
   # Same library, with logs.
   minidetour_add_library(mini_detour_test)

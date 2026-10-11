@@ -446,10 +446,18 @@ static bool _LoadModuleExportSymbolsCount(ElfDyn_t *dynamicTableStart, ElfSymbol
                 max_sym = buckets[i];
         }
 
-        while (!(chains[max_sym - hash_table->symndx] & 1))
-            ++max_sym;
+        if (max_sym < hash_table->symndx)
+        {
+            // No hashed symbol: every bucket is 0, only the symndx unhashed symbols are present.
+            *dynamicSymbolsEnd = *dynamicSymbolsStart + hash_table->symndx;
+        }
+        else
+        {
+            while (!(chains[max_sym - hash_table->symndx] & 1))
+                ++max_sym;
 
-        *dynamicSymbolsEnd = *dynamicSymbolsStart + max_sym + 1;
+            *dynamicSymbolsEnd = *dynamicSymbolsStart + max_sym + 1;
+        }
     }
     else
     {
