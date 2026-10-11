@@ -3,9 +3,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#ifndef __cplusplus
-#include <stdbool.h>
-#endif
 
 #if defined(WIN64) || defined(_WIN64) || defined(__MINGW64__) || defined(WIN32) || defined(_WIN32) || defined(__MINGW32__)
 #define MINIDETOUR_OS_WINDOWS
@@ -238,8 +235,8 @@ MINIDETOUR_EXPORT(size_t) MiniDetourMemoryManipulationGetFreeRegions(MiniDetourM
 /// <param name="size"></param>
 /// <param name="rights"></param>
 /// <param name="old_rights"></param>
-/// <returns></returns>
-MINIDETOUR_EXPORT(bool)
+/// <returns>1 on success, 0 on failure</returns>
+MINIDETOUR_EXPORT(int)
 MiniDetourMemoryManipulationMemoryProtect(
     void *address, size_t size, MiniDetourMemoryManipulationMemoryRights rights, MiniDetourMemoryManipulationMemoryRights *old_rights /* = NULL */);
 MINIDETOUR_EXPORT(void) MiniDetourMemoryManipulationMemoryFree(void *address, size_t size);
@@ -251,8 +248,8 @@ MINIDETOUR_EXPORT(void *) MiniDetourMemoryManipulationMemoryAlloc(void *address_
 /// <param name="address"></param>
 /// <param name="buffer"></param>
 /// <param name="size"></param>
-/// <returns></returns>
-MINIDETOUR_EXPORT(bool) MiniDetourMemoryManipulationSafeMemoryRead(void *address, uint8_t *buffer, size_t size);
+/// <returns>1 if the whole buffer was read, 0 otherwise</returns>
+MINIDETOUR_EXPORT(int) MiniDetourMemoryManipulationSafeMemoryRead(void *address, uint8_t *buffer, size_t size);
 
 /// <summary>
 /// Safely write memory, it doesn't mean it will always succeed, only that on memory not writable or no allocated, it will not crash your application.
@@ -260,8 +257,8 @@ MINIDETOUR_EXPORT(bool) MiniDetourMemoryManipulationSafeMemoryRead(void *address
 /// <param name="address"></param>
 /// <param name="buffer"></param>
 /// <param name="size"></param>
-/// <returns></returns>
-MINIDETOUR_EXPORT(bool) MiniDetourMemoryManipulationSafeMemoryWrite(void *address, const uint8_t *buffer, size_t size);
+/// <returns>1 if the whole buffer was written, 0 otherwise</returns>
+MINIDETOUR_EXPORT(int) MiniDetourMemoryManipulationSafeMemoryWrite(void *address, const uint8_t *buffer, size_t size);
 
 /// <summary>
 /// Convenient function to write an absolute jump at an address. Pass NULL in address to get the required size of the absolute jump in bytes.
@@ -335,14 +332,17 @@ typedef struct _minidetour_hook_handle_t *minidetour_hook_handle_t;
 MINIDETOUR_EXPORT(minidetour_hook_handle_t) MiniDetourHookTAlloc();
 MINIDETOUR_EXPORT(void) MiniDetourHookTFree(minidetour_hook_handle_t handle);
 
-MINIDETOUR_EXPORT(void) MiniDetourHookTRestoreOnDestroy(minidetour_hook_handle_t handle, bool restore);
-MINIDETOUR_EXPORT(bool) MiniDetourHookTCanHook(minidetour_hook_handle_t handle, void *function);
+// restore: non zero to restore the hook when the handle is freed (the default), 0 to leave it in place.
+MINIDETOUR_EXPORT(void) MiniDetourHookTRestoreOnDestroy(minidetour_hook_handle_t handle, int restore);
+// Returns 1 if the function can be hooked, 0 otherwise.
+MINIDETOUR_EXPORT(int) MiniDetourHookTCanHook(minidetour_hook_handle_t handle, void *function);
 MINIDETOUR_EXPORT(void *) MiniDetourHookTHookFunction(minidetour_hook_handle_t handle, void *function_to_hook, void *new_function);
 MINIDETOUR_EXPORT(void *) MiniDetourHookTRestoreFunction(minidetour_hook_handle_t handle);
 MINIDETOUR_EXPORT(void *) MiniDetourHookTGetHookFunction(minidetour_hook_handle_t handle);
 MINIDETOUR_EXPORT(void *) MiniDetourHookTGetOriginalFunction(minidetour_hook_handle_t handle);
 
-MINIDETOUR_EXPORT(bool) MiniDetourHookTReplaceFunction(void *function_to_replace, void *new_function);
+// Returns 1 if the function was replaced, 0 otherwise.
+MINIDETOUR_EXPORT(int) MiniDetourHookTReplaceFunction(void *function_to_replace, void *new_function);
 
 #ifdef __cplusplus
 
@@ -392,7 +392,7 @@ inline size_t PageSize()
 
 inline bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights *old_rights = nullptr)
 {
-    return MiniDetourMemoryManipulationMemoryProtect(address, size, rights, old_rights);
+    return MiniDetourMemoryManipulationMemoryProtect(address, size, rights, old_rights) != 0;
 }
 
 inline void MemoryFree(void *address, size_t size)
@@ -407,12 +407,12 @@ inline void *MemoryAlloc(void *address_hint, size_t size, MemoryRights rights)
 
 inline bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
 {
-    return MiniDetourMemoryManipulationSafeMemoryRead(address, buffer, size);
+    return MiniDetourMemoryManipulationSafeMemoryRead(address, buffer, size) != 0;
 }
 
 inline bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
 {
-    return MiniDetourMemoryManipulationSafeMemoryWrite(address, buffer, size);
+    return MiniDetourMemoryManipulationSafeMemoryWrite(address, buffer, size) != 0;
 }
 
 inline size_t WriteAbsoluteJump(void *address, void *destination)
@@ -503,11 +503,11 @@ class Hook_t
         return *this;
     }
 
-    inline void RestoreOnDestroy(bool restore) { MiniDetourHookTRestoreOnDestroy(_hookHandle, restore); }
+    inline void RestoreOnDestroy(bool restore) { MiniDetourHookTRestoreOnDestroy(_hookHandle, restore ? 1 : 0); }
 
-    inline bool CanHook(void *function) { return MiniDetourHookTCanHook(_hookHandle, function); }
+    inline bool CanHook(void *function) { return MiniDetourHookTCanHook(_hookHandle, function) != 0; }
 
-    static bool ReplaceFunction(void *functionToReplace, void *newFunction) { return MiniDetourHookTReplaceFunction(functionToReplace, newFunction); }
+    static bool ReplaceFunction(void *functionToReplace, void *newFunction) { return MiniDetourHookTReplaceFunction(functionToReplace, newFunction) != 0; }
 
     inline void *HookFunction(void *functionToHook, void *newFunction) { return MiniDetourHookTHookFunction(_hookHandle, functionToHook, newFunction); }
 

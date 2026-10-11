@@ -1,12 +1,17 @@
 /* The public header must compile as C. */
 #include <mini_detour/mini_detour.h>
 
+/* The C API uses int for booleans: the header must not bring bool in (stdbool.h). */
+#if defined(__bool_true_false_are_defined) || defined(bool)
+#error "mini_detour.h must not include stdbool.h or define bool"
+#endif
+
 int MiniDetourCApiTest(void)
 {
     MiniDetourMemoryManipulationRegionInfos_t regionInfos;
     MiniDetourMemoryManipulationMemoryRights rights = mem_rx;
     minidetour_hook_handle_t hook;
-    bool canHook;
+    int canHook;
     void *original;
 
     if (MiniDetourUtilsPageSize() == 0)
@@ -21,9 +26,12 @@ int MiniDetourCApiTest(void)
     if (hook == NULL)
         return 3;
 
-    /* Only checks that bool works in C, the result depends on how the compiler built this function. */
+    /* The result depends on how the compiler built this function: only checks that it is 0 or 1. */
     canHook = MiniDetourHookTCanHook(hook, (void *)&MiniDetourCApiTest);
-    (void)canHook;
+    if (canHook != 0 && canHook != 1)
+        return 5;
+
+    MiniDetourHookTRestoreOnDestroy(hook, 1);
 
     original = MiniDetourHookTGetOriginalFunction(hook);
     MiniDetourHookTFree(hook);
