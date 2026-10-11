@@ -822,8 +822,9 @@ size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t *export
 
         MemoryManipulation::MemoryRights oldRights;
 
+        // Only this entry fails: the next ones can still be restored.
         if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::MemoryRights::mem_rw, &oldRights))
-            break;
+            continue;
 
         exportReplaceDetails[i].NewExportAddress = (void *)((uintptr_t)*exportAddress + (uintptr_t)moduleBase);
         auto oldJumpAddress                      = (void *)((uintptr_t)moduleBase + *exportAddress);
