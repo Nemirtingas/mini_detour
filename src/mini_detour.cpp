@@ -489,9 +489,18 @@ namespace MiniDetour
 // can stay plain statics.
 class Globals_t
 {
-    Globals_t() = default;
+    // Defined once the platform functions are known. It must not use Instance(): it runs while the instance is built.
+    Globals_t();
 
   public:
+    // Values that don't change while the process runs, queried once.
+    size_t PageSize;
+    // Allocations are placed at a multiple of it.
+    size_t AllocationGranularity;
+    // Bounds of the user address space, MaxUserAddress being its end.
+    uintptr_t MinUserAddress;
+    uintptr_t MaxUserAddress;
+
     // Serializes the operations that write code or import/export tables: they share the memory manager slots and
     // change the rights of pages shared between hooks, and hooks can be set from several threads.
     std::mutex HookMutex;
@@ -564,22 +573,33 @@ static void _RestoreCodeRights(void *address, size_t size, MiniDetour::MemoryMan
 
 namespace MiniDetour
 {
+// The platform gives _QueryPageSize, _QueryAllocationGranularity, _QueryMinUserAddress and _QueryMaxUserAddress.
+Globals_t::Globals_t()
+    : PageSize(MemoryManipulation::Implementation::_QueryPageSize())
+    , AllocationGranularity(MemoryManipulation::Implementation::_QueryAllocationGranularity())
+    , MinUserAddress(MemoryManipulation::Implementation::_QueryMinUserAddress())
+    , MaxUserAddress(MemoryManipulation::Implementation::_QueryMaxUserAddress())
+{
+}
+} // namespace MiniDetour
+
+namespace MiniDetour
+{
 namespace MemoryManipulation
 {
 namespace Implementation
 {
 
 // Allocates as close as possible to the hint, so hooks can reach the memory with relative jumps.
-// The platform gives _MemoryAllocAt, _MemoryAllocAnywhere, _AllocationGranularity and the user address space
-// bounds, _MinUserAddress and _MaxUserAddress (end of the user address space).
+// The platform gives _MemoryAllocAt and _MemoryAllocAnywhere.
 void *MemoryAlloc(void *_addressHint, size_t size, MemoryRights rights)
 {
-    const uintptr_t minAddress = _MinUserAddress();
-    const uintptr_t maxAddress = _MaxUserAddress();
+    const uintptr_t minAddress = Globals_t::Instance().MinUserAddress;
+    const uintptr_t maxAddress = Globals_t::Instance().MaxUserAddress;
     if (reinterpret_cast<uintptr_t>(_addressHint) >= maxAddress)
         _addressHint = reinterpret_cast<void *>(maxAddress - 1);
 
-    auto pageSize    = PageSize();
+    auto pageSize    = Globals_t::Instance().PageSize;
     auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
     size             = _PageAddrSize((void *)addressHint, size, pageSize);
 
@@ -598,7 +618,7 @@ void *MemoryAlloc(void *_addressHint, size_t size, MemoryRights rights)
 
     _SortByDistance(freeRegions, addressHint);
 
-    const size_t granularity = _AllocationGranularity();
+    const size_t granularity = Globals_t::Instance().AllocationGranularity;
     for (auto const &region : freeRegions)
     {
         void *address = _AllocInFreeRegion(region, addressHint, size, granularity, [&](uintptr_t allocAddress) { return _MemoryAllocAt((void *)allocAddress, size, rights); });
@@ -1090,7 +1110,7 @@ MINIDETOUR_EXPORT(void *) MiniDetourUtilsPageRound(void *_addr, size_t page_size
 
 MINIDETOUR_EXPORT(size_t) MiniDetourUtilsPageSize()
 {
-    return MiniDetour::MemoryManipulation::Implementation::PageSize();
+    return MiniDetour::Globals_t::Instance().PageSize;
 }
 
 // MiniDetour MemoryManipulation C functions

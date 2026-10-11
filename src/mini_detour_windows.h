@@ -392,7 +392,7 @@ static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, si
     return currentRegionCount;
 }
 
-static size_t PageSize()
+static size_t _QueryPageSize()
 {
     SYSTEM_INFO sysInfo;
     GetSystemInfo(&sysInfo);
@@ -485,7 +485,7 @@ static inline void *_MemoryAllocAnywhere(size_t size, MemoryRights rights)
 }
 
 // The user address space bounds depend on the system and on /LARGEADDRESSAWARE for 32 bits processes.
-static inline uintptr_t _MinUserAddress()
+static inline uintptr_t _QueryMinUserAddress()
 {
     SYSTEM_INFO systemInfo;
     GetSystemInfo(&systemInfo);
@@ -493,7 +493,7 @@ static inline uintptr_t _MinUserAddress()
 }
 
 // End of the user address space (lpMaximumApplicationAddress is its last byte).
-static inline uintptr_t _MaxUserAddress()
+static inline uintptr_t _QueryMaxUserAddress()
 {
     SYSTEM_INFO systemInfo;
     GetSystemInfo(&systemInfo);
@@ -501,7 +501,7 @@ static inline uintptr_t _MaxUserAddress()
 }
 
 // VirtualAlloc rounds the reserved address down to the allocation granularity (64 KB), not to a page.
-static inline size_t _AllocationGranularity()
+static inline size_t _QueryAllocationGranularity()
 {
     SYSTEM_INFO systemInfo;
     GetSystemInfo(&systemInfo);

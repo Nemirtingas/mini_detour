@@ -324,7 +324,7 @@ static mach_vm_address_t _PageZeroEnd()
 static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
 {
     mach_port_t self_task     = mach_task_self();
-    mach_vm_address_t oldEnd  = _PageZeroEnd();
+    mach_vm_address_t oldEnd  = Globals_t::Instance().MinUserAddress;
     size_t writtenRegionCount = 0;
     size_t currentRegionCount = 0;
 
@@ -409,7 +409,7 @@ static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, si
     return currentRegionCount;
 }
 
-static size_t PageSize()
+static size_t _QueryPageSize()
 {
     return sysconf(_SC_PAGESIZE);
 }
@@ -524,21 +524,21 @@ static inline void *_MemoryAllocAnywhere(size_t size, MemoryRights rights)
 }
 
 // Nothing can be allocated in __PAGEZERO.
-static inline uintptr_t _MinUserAddress()
+static inline uintptr_t _QueryMinUserAddress()
 {
     return static_cast<uintptr_t>(_PageZeroEnd());
 }
 
 // End of the user address space.
-static inline uintptr_t _MaxUserAddress()
+static inline uintptr_t _QueryMaxUserAddress()
 {
     return static_cast<uintptr_t>(MACH_VM_MAX_ADDRESS);
 }
 
 // mach_vm_allocate places a mapping at any page.
-static inline size_t _AllocationGranularity()
+static inline size_t _QueryAllocationGranularity()
 {
-    return PageSize();
+    return _QueryPageSize();
 }
 
 static bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
@@ -812,7 +812,7 @@ static bool _WriteProtected(void *address, const void *data, size_t size)
     if (infos.Rights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
         return false;
 
-    const size_t pageSize          = MemoryManipulation::Implementation::PageSize();
+    const size_t pageSize          = Globals_t::Instance().PageSize;
     const mach_vm_address_t start  = reinterpret_cast<mach_vm_address_t>(MiniDetour::MemoryManipulation::PageRound(address, pageSize));
     const mach_vm_address_t end    = (reinterpret_cast<mach_vm_address_t>(address) + size + pageSize - 1) & ~static_cast<mach_vm_address_t>(pageSize - 1);
     const vm_prot_t originalRights = static_cast<vm_prot_t>(MemoryManipulation::Implementation::_MemoryProtectRightsToNative(infos.Rights));
