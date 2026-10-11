@@ -2,7 +2,7 @@
 #include "test_utils.h"
 
 // The other threads are suspended while hooks are written on Windows and macOS (not on Linux).
-#if (defined(MINIDETOUR_OS_WINDOWS) || defined(MINIDETOUR_OS_APPLE)) && (defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64))
+#if (defined(MINIDETOUR_OS_WINDOWS) || defined(MINIDETOUR_OS_APPLE)) && (defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64))
 
 #if defined(MINIDETOUR_OS_WINDOWS)
 #define WIN32_LEAN_AND_MEAN
@@ -20,6 +20,7 @@ static int FreezeThreadsDetour()
     return 100;
 }
 
+#if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
 // Writes at offset a loop a thread can spin in: "jmp $" when spinInside is false, or "nop ; nop ; nop ; jmp -4"
 // (the thread never leaves offsets 1 to 3) when it is true. The loop ends when StopSpinning is called: the jump then
 // goes to the thread return written after it.
@@ -135,6 +136,75 @@ TEST_CASE("A function can be hooked while a thread runs other code", "[freeze_th
     CHECK(hook.RestoreFunction() != nullptr);
     CHECK(code.As<FreezeFunc_t>()() == 1);
 }
+#endif
+
+// Not on macOS ARM64: a function in allocated memory can't be hooked there yet, its trampoline memory can't be made
+// executable.
+#if defined(MINIDETOUR_ARCH_ARM64) && defined(MINIDETOUR_OS_WINDOWS)
+// Runs "loop: ldr w1, [x0] ; cbz w1, loop ; ret" with x0 pointing to a flag, until StopSpinning sets the flag: the loop
+// is stopped through data, not by rewriting its code while it runs.
+class FlagSpinningThread
+{
+    CodeBuffer _Code;
+    volatile uint32_t _Stop;
+    bool _Running;
+    HANDLE _Thread;
+
+  public:
+    FlagSpinningThread()
+        : _Stop(0)
+        , _Running(false)
+        , _Thread(nullptr)
+    {
+        if (!_Code.IsValid())
+            return;
+
+        _Code.Write(0, {0x01, 0x00, 0x40, 0xB9, 0xE1, 0xFF, 0xFF, 0x34, 0xC0, 0x03, 0x5F, 0xD6});
+        _Thread  = CreateThread(nullptr, 0, _Code.As<LPTHREAD_START_ROUTINE>(), const_cast<uint32_t *>(&_Stop), 0, nullptr);
+        _Running = _Thread != nullptr;
+        // Leaves time for the thread to reach its loop.
+        Sleep(100);
+    }
+
+    FlagSpinningThread(FlagSpinningThread const &)            = delete;
+    FlagSpinningThread &operator=(FlagSpinningThread const &) = delete;
+
+    ~FlagSpinningThread() { StopSpinning(); }
+
+    bool IsValid() const { return _Running; }
+
+    void StopSpinning()
+    {
+        if (!_Running)
+            return;
+
+        _Stop = 1;
+        WaitForSingleObject(_Thread, INFINITE);
+        CloseHandle(_Thread);
+        _Running = false;
+    }
+};
+
+// A hook writes a single 4 bytes aligned instruction (b to its jump slot): a thread can't be in the middle of it, so
+// there is no ARM64 version of the test above. The other threads are still suspended, and their pc checked.
+TEST_CASE("A function can be hooked while a thread runs other code", "[freeze_threads]")
+{
+    CodeBuffer code;
+    REQUIRE(code.IsValid());
+    code.Write(0, {0x20, 0x00, 0x80, 0x52, 0xC0, 0x03, 0x5F, 0xD6}); // mov w0, #1 ; ret
+
+    FlagSpinningThread thread;
+    REQUIRE(thread.IsValid());
+
+    MiniDetour::Hook_t hook;
+    REQUIRE(hook.HookFunction(code.Data(), reinterpret_cast<void *>(&FreezeThreadsDetour)) != nullptr);
+    CHECK(code.As<FreezeFunc_t>()() == 100);
+    CHECK(hook.GetOriginalFunction<FreezeFunc_t>()() == 1);
+
+    CHECK(hook.RestoreFunction() != nullptr);
+    CHECK(code.As<FreezeFunc_t>()() == 1);
+}
+#endif
 
 #if defined(MINIDETOUR_OS_WINDOWS)
 static HANDLE g_ResumeOrderWorkers[2];
