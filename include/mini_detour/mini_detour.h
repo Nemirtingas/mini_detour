@@ -269,7 +269,7 @@ MINIDETOUR_EXPORT(bool) MiniDetourMemoryManipulationSafeMemoryWrite(void *addres
 MINIDETOUR_EXPORT(size_t) MiniDetourMemoryManipulationWriteAbsoluteJump(void *address, void *destination);
 
 /// <summary>
-/// Flush the instruction cache. (only implemented on Windows)
+/// Flush the instruction cache. (needed after writing code on ARM, a no-op on x86)
 /// </summary>
 /// <param name="address"></param>
 /// <param name="size"></param>
