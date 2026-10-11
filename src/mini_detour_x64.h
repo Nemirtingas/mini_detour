@@ -218,7 +218,7 @@ void _EnterRecursiveThunk(void *&_pCode)
             // Get the real imported function address
             pCode = *reinterpret_cast<uint8_t **>(pCode + 6 + *(int32_t *)(pCode + 2)); // 2 opcodes + 4 relative address ptr
         }
-        else if (pCode[0] == 0xe8 || pCode[0] == 0xe9)
+        else if (pCode[0] == 0xe9) // jmp rel32, a call (0xe8) is real code and must not be followed
         {
             pCode = (uint8_t *)relative_addr_to_absolute(pCode, *(int32_t *)(pCode + 1));
         }
