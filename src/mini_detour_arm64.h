@@ -186,6 +186,14 @@ void _EnterRecursiveThunk(void *&_pCode)
     // br      x17
 }
 
+// adr, adrp and the literal loads (LDR, LDRSW, PRFM, SIMD LDR) compute their address from pc.
+static bool _UsesInstructionPointer(cs_insn const &instruction)
+{
+    const uint32_t raw = *reinterpret_cast<const uint32_t *>(instruction.bytes);
+    const uint32_t adr = raw & 0x9F000000;
+    return adr == 0x10000000 || adr == 0x90000000 || (raw & 0x3B000000) == 0x18000000;
+}
+
 size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatable_size)
 {
     uint8_t code_buffer[80];
@@ -218,9 +226,8 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
             break;
         }
 
-        uint32_t c = *reinterpret_cast<const uint32_t *>(disasm.GetInstruction().bytes) & 0x9F000000;
-        if (c == 0x10000000 || c == 0x90000000)
-        {                          // adr || adrp
+        if (_UsesInstructionPointer(disasm.GetInstruction()))
+        {
             if (ignore_relocation) // Last instruction, overwrite it if we're ignoring relocations
             {
                 relocatedOriginalCodeSize += disasm.GetInstruction().size;
@@ -246,7 +253,7 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
     return relocatable_size;
 }
 
-size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize)
+size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize, int /*func_mode*/)
 {
     // MOD-REG-R/M Byte
     //  7 6    5 4 3    2 1 0 - bits
@@ -278,9 +285,8 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
             break;
         }
 
-        uint32_t c = *reinterpret_cast<const uint32_t *>(disasm.GetInstruction().bytes) & 0x9F000000;
-        if (c == 0x10000000 || c == 0x90000000)
-        { // adr || adrp
+        if (_UsesInstructionPointer(disasm.GetInstruction()))
+        {
 #ifdef USE_SPDLOG
             SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
 #endif

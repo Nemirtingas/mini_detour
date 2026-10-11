@@ -724,7 +724,9 @@ class Hook_t
 
         _EnterRecursiveThunk(functionToHook);
 
-        relativeJumpSize = RelJump::GetOpcodeSize(functionToHook, newFunction, func_mode, hook_mode);
+        // The relative jump goes to a jump slot that isn't allocated yet, not to newFunction: its size can't be known here
+        // (Thumb has 2 and 4 bytes encodings), so the bytes of the longest encoding are relocated.
+        relativeJumpSize = RelJump::GetMaxOpcodeSize();
         absoluteJumpSize = AbsJump::GetOpcodeSize(newFunction, func_mode, hook_mode);
         relocatableSize  = _GetRelocatableSize(functionToHook, relocatedOriginalCodeSize, ignoreRelocations, disasm, absoluteJumpSize);
 
@@ -868,7 +870,7 @@ class Hook_t
         functionRightsChanged = true;
 
         // A failed relocation leaves the trampoline without its jump back to the original function.
-        if (_RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, relativeJumpSize) < relativeJumpSize)
+        if (_RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, relativeJumpSize, func_mode) < relativeJumpSize)
         {
             SPDLOG_ERROR("Failed to relocate code.");
             goto error;

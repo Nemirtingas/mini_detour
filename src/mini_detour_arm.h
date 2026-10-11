@@ -50,33 +50,23 @@ struct AbsJump
     {
         uint16_t *opcode = reinterpret_cast<uint16_t *>(buffer);
 
-        // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/MOV--immediate-?lang=en
-        // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/MOVT?lang=en
+        // ldr.w pc, [pc, #0] followed by the address: no register or stack use (writing below sp without reserving
+        // it could be overwritten by a signal handler). The literal is read at Align(instruction + 4, 4), so it must
+        // be 4 bytes aligned: a nop is put before the load when the buffer isn't, after the literal otherwise.
+        // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/LDR--literal-
+        const bool aligned = (reinterpret_cast<uintptr_t>(buffer) & 3) == 0;
+        if (!aligned)
+            *opcode++ = 0xbf00; // nop
 
-        uint16_t addr16 = uint16_t(addr);
+        *opcode++ = 0xf8df;
+        *opcode++ = 0xf000; // ldr.w pc, [pc, #0]
+        *opcode++ = uint16_t(addr);
+        *opcode++ = uint16_t(addr >> 16);
 
-        opcode[0] = 0xf84d;
-        opcode[1] = 0x0c08; // str r0, [sp, #-8]
+        if (aligned)
+            *opcode++ = 0xbf00; // nop, never run: keeps the size constant
 
-        opcode[2] = 0xf240 | ((addr16 & 0x800) >> 1) | ((addr16 & 0xf000) >> 12); // movw r0, imm16
-        opcode[3] = (addr16 & 0xff) | ((addr16 & 0x700) << 4);                    // movw r0, imm16
-
-        addr16    = uint16_t(addr >> 16);
-        opcode[4] = 0xf2C0 | ((addr16 & 0x800) >> 1) | ((addr16 & 0xf000) >> 12); // movt r0, addr & 0xffff0000
-        opcode[5] = (addr16 & 0xff) | ((addr16 & 0x700) << 4);                    // movt r0, addr & 0xffff0000
-
-        opcode[6] = 0xb401; // push {r0}
-
-        opcode[7] = 0xf85d;
-        opcode[8] = 0x0c04; // ldr r0, [sp, #-4]
-
-        opcode[9] = 0xbd00; // pop {pc}
-
-        // opcode[0] = 0xf8df; // ldr pc, [pc, #2]
-        // opcode[1] = 0xf002; // ldr pc, [pc, #2]
-        //*reinterpret_cast<uint32_t*>(&opcode[2]) = addr;
-
-        return 20;
+        return 10;
     }
 
     static inline size_t WriteARMOpcodes(void *buffer, uint32_t addr)
@@ -95,9 +85,10 @@ struct AbsJump
         return source_mode ? WriteThumbOpcodes(buffer, addr) : WriteARMOpcodes(buffer, addr);
     }
 
-    static constexpr size_t GetOpcodeSize(void *jump_destination, int source_mode, int dest_mode) { return source_mode ? 20 : 8; }
+    static constexpr size_t GetOpcodeSize(void *jump_destination, int source_mode, int dest_mode) { return source_mode ? 10 : 8; }
 
-    static constexpr size_t GetMaxOpcodeSize() { return 20; }
+    // Jump slots are spaced by this size: it must keep them 4 bytes aligned for ARM code.
+    static constexpr size_t GetMaxOpcodeSize() { return 12; }
 };
 
 struct RelJump
@@ -128,13 +119,14 @@ struct RelJump
             else
             {
                 rel_addr -= 4; // -4 because ARM Instruction Pointer is always 2 instructions ahead
-                uint16_t S     = rel_addr >> 31;
+                // Single bits: rel_addr >> 31 is -1 for a backward jump, which would set every bit of the opcode.
+                uint16_t S     = (rel_addr >> 31) & 1;
                 uint16_t imm11 = (rel_addr >> 1) & 0x07ff;
                 uint16_t imm10 = (rel_addr >> 12) & 0x03ff;
                 uint16_t I1    = (rel_addr >> 23) & 1;
                 uint16_t I2    = (rel_addr >> 22) & 1;
-                uint16_t J1    = (!I1) ^ S;
-                uint16_t J2    = (!I2) ^ S;
+                uint16_t J1    = (I1 ^ 1) ^ S;
+                uint16_t J2    = (I2 ^ 1) ^ S;
 
                 /*
                  * -------------------------------------------------
@@ -199,10 +191,18 @@ void _EnterRecursiveThunk(void *&pCode)
 
 static bool _UsesInstructionPointer(cs_insn const &instruction)
 {
+    // adr computes from pc without listing it as an operand.
+    if (instruction.id == ARM_INS_ADR)
+        return true;
+
     for (size_t i = 0; i < instruction.detail->arm.op_count; i++)
     {
         cs_arm_op op = instruction.detail->arm.operands[i];
         if (op.type == ARM_OP_REG && op.reg == ARM_REG_PC)
+            return true;
+
+        // ldr r0, [pc, #8]: literal loads, common in prologues.
+        if (op.type == ARM_OP_MEM && op.mem.base == ARM_REG_PC)
             return true;
     }
     return false;
@@ -250,7 +250,8 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
     return relocatableSize;
 }
 
-size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize)
+// func_mode: 1 for Thumb code. pCode has no mode bit, it was cleared by the caller.
+size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize, int func_mode)
 {
     // MOD-REG-R/M Byte
     //  7 6    5 4 3    2 1 0 - bits
@@ -266,9 +267,6 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
     uint8_t *pTrampolineCode     = reinterpret_cast<uint8_t *>(pTrampoline);
 
     code_size = _ReadCode(pCode, code_buffer, sizeof(code_buffer));
-
-    int func_mode = reinterpret_cast<uintptr_t>(pCode) & 1;
-    int hook_mode = reinterpret_cast<uintptr_t>(pTrampoline) & 1;
 
     size_t relocatedSize     = 0;
     void *originalCodeTarget = nullptr;
@@ -296,7 +294,8 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
     if (originalCodeTarget == nullptr)
         originalCodeTarget = reinterpret_cast<void *>(code_addr);
 
-    AbsJump::WriteOpcodes(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pTrampolineCode)), originalCodeTarget, hook_mode, func_mode);
+    // The trampoline runs the relocated code in the function mode, and goes back to the function in that mode.
+    AbsJump::WriteOpcodes(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pTrampolineCode)), originalCodeTarget, func_mode, func_mode);
 
     return relocatedSize;
 }

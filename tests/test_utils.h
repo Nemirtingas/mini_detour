@@ -77,6 +77,14 @@ class CodeBuffer
     }
 };
 
+#if defined(MINIDETOUR_ARCH_ARM)
+// Address to call Thumb code written by hand: with the Thumb bit set, the tests work in ARM and Thumb builds.
+static inline void *ThumbAddress(void *address)
+{
+    return reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(address) | 1);
+}
+#endif
+
 #if defined(MINIDETOUR_ARCH_X86)
 // First integer argument in ecx on x86, so generated code doesn't depend on the stack layout.
 #define TEST_CALL MINIDETOUR_CALL_FAST
