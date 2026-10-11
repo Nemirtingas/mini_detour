@@ -134,6 +134,9 @@ struct RelJump
 
 struct CpuPush
 {
+    // push imm32 sign-extends its operand to 64 bits.
+    static constexpr bool _FitsInSignExtendedImm32(uint64_t value) { return static_cast<int64_t>(static_cast<int32_t>(value)) == static_cast<int64_t>(value); }
+
     static size_t WriteOpcodes(void *source, uint64_t value)
     {
         uint8_t code[13] = {
@@ -154,7 +157,7 @@ struct CpuPush
 
         *reinterpret_cast<uint32_t *>(&code[1]) = static_cast<uint32_t>(value);
 
-        if (value & 0xffffffff00000000)
+        if (!_FitsInSignExtendedImm32(value))
         {
             *reinterpret_cast<uint32_t *>(&code[9]) = static_cast<uint32_t>(value >> 32);
             memcpy(source, code, 13);
@@ -172,7 +175,7 @@ struct CpuPush
         // LL LL LL LL | LOW IMM32
         // C7 44 24 04 | MOV DWORD PTR [rsp + 4], HIGH IMM32
         // HH HH HH HH
-        return (value & 0xffffffff00000000 ? 13 : 5);
+        return (_FitsInSignExtendedImm32(value) ? 5 : 13);
     }
 
     static constexpr size_t GetMaxOpcodeSize()
