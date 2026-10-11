@@ -445,7 +445,7 @@ static bool _LoadModuleExportDetails(
 {
     PIMAGE_DOS_HEADER imageDosHeader = (PIMAGE_DOS_HEADER)moduleHandle;
 
-    if (imageDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+    if (imageDosHeader == nullptr || imageDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
         return false;
 
     PIMAGE_NT_HEADERS imageNTHeaders = (PIMAGE_NT_HEADERS)((DWORD_PTR)moduleHandle + imageDosHeader->e_lfanew);
@@ -472,7 +472,7 @@ static bool _LoadModuleIATDetails(void *moduleHandle, void **moduleBase, PIMAGE_
 {
     PIMAGE_DOS_HEADER imageDosHeader = (PIMAGE_DOS_HEADER)moduleHandle;
 
-    if (imageDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+    if (imageDosHeader == nullptr || imageDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
         return false;
 
     PIMAGE_NT_HEADERS imageNTHeaders = (PIMAGE_NT_HEADERS)((DWORD_PTR)moduleHandle + imageDosHeader->e_lfanew);
@@ -550,6 +550,9 @@ Error:
 static inline PDWORD
 _GetExportAddress(void *moduleBase, PDWORD functionAddressesRVA, PDWORD functionNamesRVA, PWORD functionOrdinals, DWORD functionNameCount, const char *symbolName)
 {
+    if (symbolName == nullptr)
+        return nullptr;
+
     for (DWORD j = 0; j < functionNameCount; ++j)
     {
         if (strcmp((const char *)moduleBase + functionNamesRVA[j], symbolName) == 0)
@@ -596,6 +599,10 @@ _GetIATAddress(void *moduleBase, PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor,
 {
     void **addressTable         = nullptr;
     PIMAGE_THUNK_DATA thunkData = nullptr;
+
+    // symbolName can be null (import by ordinal), but the module name is required.
+    if (moduleName == nullptr)
+        return nullptr;
 
     for (auto *importDescriptor = imageImportDescriptor; !_IsLastImportDescriptor(importDescriptor); ++importDescriptor)
     {
