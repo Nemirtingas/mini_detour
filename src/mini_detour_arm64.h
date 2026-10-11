@@ -185,8 +185,6 @@ struct RelJump
 
 #pragma pack(pop)
 
-// Follows PLT entries to the function they jump to, read from their GOT entry:
-//   [bti c]; adrp x16, page; ldr x17, [x16, #offset]; add x16, x16, #offset; br x17
 // The code mode is carried by the address on ARM (Thumb bit): ARM64 has a single mode.
 static inline int _GetCodeMode(void * /*address*/)
 {
@@ -210,12 +208,26 @@ static inline cs_err _InitDisasm(CodeDisasm &disasm, int /*mode*/)
     return disasm.Init(cs_arch::CS_ARCH_ARM64, (cs_mode)(cs_mode::CS_MODE_ARM | CodeDisasm::RuntimeEndianness()));
 }
 
+// Follows the thunks to the function they jump to: incremental linking thunks (b target), and PLT entries, read from
+// their GOT entry: [bti c]; adrp x16, page; ldr x17, [x16, #offset]; add x16, x16, #offset; br x17
 void _EnterRecursiveThunk(void *&_pCode)
 {
     // A longer chain is most likely a loop.
     for (int i = 0; i < 8; ++i)
     {
         const uint32_t *code = reinterpret_cast<const uint32_t *>(_pCode);
+
+        // b target: incremental linking thunk (MSVC /INCREMENTAL), signed 26 bits word offset.
+        if ((code[0] & 0xFC000000) == 0x14000000)
+        {
+            int64_t words = static_cast<int64_t>(code[0] & 0x3FFFFFF);
+            if (words & (int64_t(1) << 25))
+                words -= int64_t(1) << 26;
+
+            _pCode = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(code) + static_cast<uintptr_t>(words * 4));
+            continue;
+        }
+
         if (code[0] == 0xD503245F) // bti c
             ++code;
 
