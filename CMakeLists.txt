@@ -112,66 +112,70 @@ set(CAPSTONE_HEADERS
   ${CMAKE_CURRENT_LIST_DIR}/deps/capstone/arch/X86/X86Mapping.h
 )
 
-add_library(
-  mini_detour
-  src/mini_detour.cpp
-  src/mini_detour_arm.h
-  src/mini_detour_arm64.h
-  src/mini_detour_x86.h
-  src/mini_detour_x64.h
-  src/mini_detour_linux.h
-  src/mini_detour_macos.h
-  src/mini_detour_windows.h
-  include/mini_detour/mini_detour.h
-  
-  ${CAPSTONE_HEADERS}
-  ${CAPSTONE_SOURCES}
-)
+# The library and its test build (mini_detour_test, built with logs) share the same sources and settings.
+function(minidetour_add_library name)
+  add_library(
+    ${name}
+    src/mini_detour.cpp
+    src/mini_detour_arm.h
+    src/mini_detour_arm64.h
+    src/mini_detour_x86.h
+    src/mini_detour_x64.h
+    src/mini_detour_linux.h
+    src/mini_detour_macos.h
+    src/mini_detour_windows.h
+    include/mini_detour/mini_detour.h
 
-set_target_properties(mini_detour PROPERTIES
-  MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:${MINIDETOUR_DYNAMIC_RUNTIME}>:DLL>"
-  POSITION_INDEPENDENT_CODE ON
-  C_VISIBILITY_PRESET hidden
-  CXX_VISIBILITY_PRESET hidden
-  VISIBILITY_INLINES_HIDDEN ON
-)
+    ${CAPSTONE_HEADERS}
+    ${CAPSTONE_SOURCES}
+  )
 
-target_link_libraries(
-  mini_detour
-  PUBLIC
-    
-  $<$<BOOL:${WIN32}>:shell32>
-  $<$<BOOL:${WIN32}>:ntdll>
-  # For library UNIX loading
-  $<$<NOT:$<BOOL:${WIN32}>>:dl>
-)
+  set_target_properties(${name} PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:${MINIDETOUR_DYNAMIC_RUNTIME}>:DLL>"
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+  )
 
-target_compile_definitions(
-  mini_detour
-  PRIVATE
-  $<BUILD_INTERFACE:MINIDETOUR_BUILD>
-  -DCAPSTONE_USE_SYS_DYN_MEM
-  -DCAPSTONE_HAS_X86
-  -DCAPSTONE_HAS_ARM64
-  -DCAPSTONE_HAS_ARM
-  PUBLIC
-  $<$<BOOL:${BUILD_SHARED_LIBS}>:MINIDETOUR_SHARED>
-)
+  target_link_libraries(
+    ${name}
+    PUBLIC
+    $<$<BOOL:${WIN32}>:shell32>
+    $<$<BOOL:${WIN32}>:ntdll>
+    # For library UNIX loading
+    $<$<NOT:$<BOOL:${WIN32}>>:dl>
+  )
 
-target_compile_options(
-  mini_detour
-  PRIVATE
-  $<$<BOOL:${MSVC}>:/MP>
-  $<$<BOOL:${MSVC}>:/utf-8>
-)
+  target_compile_definitions(
+    ${name}
+    PRIVATE
+    $<BUILD_INTERFACE:MINIDETOUR_BUILD>
+    -DCAPSTONE_USE_SYS_DYN_MEM
+    -DCAPSTONE_HAS_X86
+    -DCAPSTONE_HAS_ARM64
+    -DCAPSTONE_HAS_ARM
+    PUBLIC
+    $<$<BOOL:${BUILD_SHARED_LIBS}>:MINIDETOUR_SHARED>
+  )
 
-target_include_directories(
-  mini_detour
-  PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/deps/capstone/include>
-  $<INSTALL_INTERFACE:include>
-)
+  target_compile_options(
+    ${name}
+    PRIVATE
+    $<$<BOOL:${MSVC}>:/MP>
+    $<$<BOOL:${MSVC}>:/utf-8>
+  )
+
+  target_include_directories(
+    ${name}
+    PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/deps/capstone/include>
+    $<INSTALL_INTERFACE:include>
+  )
+endfunction()
+
+minidetour_add_library(mini_detour)
 
 if(APPLE)
   add_executable(
@@ -201,68 +205,18 @@ if(MINIDETOUR_BUILD_TESTS)
     PREFIX ""
   )
 
-  add_library(
-    mini_detour_test
-    src/mini_detour.cpp
-    src/mini_detour_arm.h
-    src/mini_detour_arm64.h
-    src/mini_detour_x86.h
-    src/mini_detour_x64.h
-    src/mini_detour_linux.h
-    src/mini_detour_macos.h
-    src/mini_detour_windows.h
-    include/mini_detour/mini_detour.h
-    
-    ${CAPSTONE_HEADERS}
-    ${CAPSTONE_SOURCES}
-  )
-  
+  # Same library, with logs.
+  minidetour_add_library(mini_detour_test)
+
   set_target_properties(mini_detour_test PROPERTIES
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:${MINIDETOUR_DYNAMIC_RUNTIME}>:DLL>"
-    POSITION_INDEPENDENT_CODE ON
-    C_VISIBILITY_PRESET hidden
-    CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN ON
     CXX_STANDARD 14
   )
-  
-  target_link_libraries(
-    mini_detour_test
-    PUBLIC
-    
-    $<$<BOOL:${WIN32}>:shell32>
-	$<$<BOOL:${WIN32}>:ntdll>
-    # For library UNIX loading
-    $<$<NOT:$<BOOL:${WIN32}>>:dl>
-  )
-  
+
   target_compile_definitions(
     mini_detour_test
     PRIVATE
-    $<BUILD_INTERFACE:MINIDETOUR_BUILD>
-    -DCAPSTONE_USE_SYS_DYN_MEM
-    -DCAPSTONE_HAS_X86
-    -DCAPSTONE_HAS_ARM64
-    -DCAPSTONE_HAS_ARM
     USE_SPDLOG
     $<$<BOOL:${WIN32}>:_SILENCE_ALL_MS_EXT_DEPRECATION_WARNINGS>
-	PUBLIC
-	$<$<BOOL:${BUILD_SHARED_LIBS}>:MINIDETOUR_SHARED>
-  )
-  
-  target_compile_options(
-    mini_detour_test
-    PRIVATE
-    $<$<BOOL:${MSVC}>:/MP>
-	$<$<BOOL:${MSVC}>:/utf-8>
-  )
-  
-  target_include_directories(
-    mini_detour_test
-    PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/deps/capstone/include>
-    $<INSTALL_INTERFACE:include>
   )
 
   add_executable(
