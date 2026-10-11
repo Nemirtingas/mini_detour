@@ -212,10 +212,10 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
 {
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
-    size_t code_size             = 80;
+    size_t code_size             = 0;
     uint64_t code_addr           = reinterpret_cast<uint64_t>(pCode);
 
-    memcpy(code_buffer, reinterpret_cast<void *>(code_addr), 80);
+    code_size = _ReadCode(reinterpret_cast<void *>(code_addr), code_buffer, sizeof(code_buffer));
 
     size_t relocatableSize = 0;
     while (relocatableSize < wanted_relocatableSize)
@@ -261,11 +261,11 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
 
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
-    size_t code_size             = 80;
+    size_t code_size             = 0;
     uint64_t code_addr           = reinterpret_cast<uint64_t>(pCode);
     uint8_t *pTrampolineCode     = reinterpret_cast<uint8_t *>(pTrampoline);
 
-    memcpy(code_buffer, pCode, 80);
+    code_size = _ReadCode(pCode, code_buffer, sizeof(code_buffer));
 
     int func_mode = reinterpret_cast<uintptr_t>(pCode) & 1;
     int hook_mode = reinterpret_cast<uintptr_t>(pTrampoline) & 1;

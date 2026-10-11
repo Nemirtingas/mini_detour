@@ -259,6 +259,25 @@ class CodeDisasm
     }
 };
 
+// Copies up to size bytes of code starting at pCode. The page holding pCode is readable, but the next one may not be
+// (small function at the end of a mapping), so it is read safely and the result is shortened if it isn't readable.
+static size_t _ReadCode(const void *pCode, uint8_t *buffer, size_t size)
+{
+    const size_t pageSize   = MiniDetour::MemoryManipulation::PageSize();
+    const size_t inPageSize = pageSize - (reinterpret_cast<uintptr_t>(pCode) % pageSize);
+    if (size <= inPageSize)
+    {
+        memcpy(buffer, pCode, size);
+        return size;
+    }
+
+    memcpy(buffer, pCode, inPageSize);
+    if (!MiniDetour::MemoryManipulation::SafeMemoryRead(const_cast<uint8_t *>(reinterpret_cast<const uint8_t *>(pCode)) + inPageSize, buffer + inPageSize, size - inPageSize))
+        return inPageSize;
+
+    return size;
+}
+
 #if defined(MINIDETOUR_ARCH_X64)
 #include "mini_detour_x64.h"
 
@@ -479,6 +498,16 @@ static MemoryManager &GetMemoryManager()
     return *memoryManager;
 }
 
+// Gives back to hooked code the rights it had before being made writable: forcing mem_rx would remove the write
+// access of code that needs it (JIT buffers). If they couldn't be read, the code is at least made executable again.
+static void _RestoreCodeRights(void *address, size_t size, MiniDetour::MemoryManipulation::MemoryRights oldRights)
+{
+    if (oldRights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
+        oldRights = MiniDetour::MemoryManipulation::MemoryRights::mem_rx;
+
+    MiniDetour::MemoryManipulation::MemoryProtect(address, size, oldRights);
+}
+
 #if defined(MINIDETOUR_OS_WINDOWS)
 #include "mini_detour_windows.h"
 
@@ -613,6 +642,10 @@ class Hook_t
         _HookCode.clear();
         _OriginalTrampolineAddress = nullptr;
         _OriginalFuncAddress       = nullptr;
+        // Don't expose the old trampoline: once freed, it can be given to another hook.
+        _OriginalTrampolineCallAddress = nullptr;
+        _DetourFunc                    = nullptr;
+        _DetourCallFunc                = nullptr;
     }
 
     bool CanHook(void *func)
@@ -723,7 +756,9 @@ class Hook_t
         if (relocatableSize < smallestJumpSize)
             return false;
 
-        if (!MemoryManipulation::MemoryProtect(functionToReplace, relocatableSize, MemoryManipulation::MemoryRights::mem_rwx))
+        // Restored if the replace fails after this point.
+        MemoryManipulation::MemoryRights functionOldRights;
+        if (!MemoryManipulation::MemoryProtect(functionToReplace, relocatableSize, MemoryManipulation::MemoryRights::mem_rwx, &functionOldRights))
             return false;
 
         if (relocatableSize >= absoluteJumpSize)
@@ -735,11 +770,15 @@ class Hook_t
             // Setup the trampoline
             void *jump_mem = GetMemoryManager().GetFreeJump(functionToReplace);
             if (jump_mem == nullptr)
+            {
+                _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
                 return false;
+            }
 
             if (!MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rwx))
             {
                 GetMemoryManager().FreeJump(jump_mem);
+                _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
                 return false;
             }
 
@@ -751,7 +790,7 @@ class Hook_t
             RelJump::WriteOpcodes(functionToReplace, functionToReplace, jump_mem, func_mode, hook_mode);
         }
 
-        MemoryManipulation::MemoryProtect(functionToReplace, relocatableSize, MemoryManipulation::MemoryRights::mem_rx);
+        _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
         MemoryManipulation::FlushInstructionCache(functionToReplace, relocatableSize);
 
         return true;
@@ -759,6 +798,13 @@ class Hook_t
 
     void *HookFunc(void *functionToHook, void *newFunction)
     {
+        // Already hooking a function: hooking another one would lose the state needed to restore the first one.
+        if (_OriginalFuncAddress != nullptr)
+        {
+            SPDLOG_ERROR("This hook is already in use, restore it first.");
+            return nullptr;
+        }
+
         int func_mode;
         int hook_mode;
         CodeDisasm disasm;
@@ -772,6 +818,9 @@ class Hook_t
             return nullptr;
 
         size_t totalOriginalTrampolineSize = 0;
+        // Restored in the error path once the function was made writable.
+        bool functionRightsChanged                         = false;
+        MemoryManipulation::MemoryRights functionOldRights = MemoryManipulation::MemoryRights::mem_unset;
         SPDLOG_INFO("Needed relocatable size: found({}), rel({})", relocatableSize, relativeJumpSize);
 
         if (relocatableSize < relativeJumpSize)
@@ -780,10 +829,9 @@ class Hook_t
             goto error;
         }
 
-        _SavedCode.resize(relocatableSize);
-
-        // Save the original code
-        memcpy(&_SavedCode[0], functionToHook, _SavedCode.size());
+        // Only the bytes overwritten by the jump are saved and restored: the next ones may be changed by someone else
+        // while the hook is set.
+        _SavedCode.assign(reinterpret_cast<uint8_t *>(functionToHook), reinterpret_cast<uint8_t *>(functionToHook) + relativeJumpSize);
 
         // The total number of bytes to copy from the original function + abs jump for trampoline
         totalOriginalTrampolineSize =
@@ -807,15 +855,21 @@ class Hook_t
         }
 
         // RWX on the orignal func
-        if (!MemoryManipulation::MemoryProtect(functionToHook, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rwx))
+        if (!MemoryManipulation::MemoryProtect(functionToHook, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rwx, &functionOldRights))
         {
             MiniDetour::MemoryManipulation::RegionInfos_t regionInfos;
             MemoryManipulation::GetRegionInfos(functionToHook, &regionInfos);
             SPDLOG_ERROR("Failed to protect function memory ({} : {}), current rights: {}.", functionToHook, _SavedCode.size(), regionInfos.Rights);
             goto error;
         }
+        functionRightsChanged = true;
 
-        _RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, relativeJumpSize);
+        // A failed relocation leaves the trampoline without its jump back to the original function.
+        if (_RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, relativeJumpSize) < relativeJumpSize)
+        {
+            SPDLOG_ERROR("Failed to relocate code.");
+            goto error;
+        }
 
         if (relocatableSize >= relativeJumpSize)
         {
@@ -854,8 +908,9 @@ class Hook_t
             }
 #endif
 
-            // Relative jump shoud have the same mode as the hooked function
-            _HookCode.resize(relativeJumpSize);
+            // Relative jump shoud have the same mode as the hooked function.
+            // A shorter encoding than relativeJumpSize keeps the original bytes after it.
+            _HookCode = _SavedCode;
             RelJump::WriteOpcodes(_HookCode.data(), functionToHook, jump_mem, func_mode, func_mode);
             memcpy(functionToHook, _HookCode.data(), _HookCode.size());
 
@@ -877,8 +932,8 @@ class Hook_t
         MemoryManipulation::MemoryProtect(_OriginalTrampolineAddress, totalOriginalTrampolineSize, MemoryManipulation::MemoryRights::mem_rx);
         MemoryManipulation::FlushInstructionCache(_OriginalTrampolineAddress, totalOriginalTrampolineSize);
 
-        MemoryManipulation::MemoryProtect(functionToHook, relocatableSize, MemoryManipulation::MemoryRights::mem_rx);
-        MemoryManipulation::FlushInstructionCache(functionToHook, relocatableSize);
+        _RestoreCodeRights(functionToHook, _SavedCode.size(), functionOldRights);
+        MemoryManipulation::FlushInstructionCache(functionToHook, _SavedCode.size());
 
         _OriginalFuncAddress = functionToHook;
         _DetourFunc          = newFunction;
@@ -893,6 +948,10 @@ class Hook_t
 
         return _OriginalTrampolineCallAddress;
     error:
+        // The function code wasn't modified yet: only its rights.
+        if (functionRightsChanged)
+            _RestoreCodeRights(functionToHook, _SavedCode.size(), functionOldRights);
+
         _SavedCode.clear();
         _HookCode.clear();
 
@@ -920,9 +979,13 @@ class Hook_t
 
         MiniDetour::MemoryManipulation::RegionInfos_t originalMemoryInfos;
         MemoryManipulation::GetRegionInfos(_OriginalFuncAddress, &originalMemoryInfos);
-        // Memory has been freed, don't try to restore it.
+        // Memory has been freed, don't try to restore it, but release our jump and trampoline so the hook can be reused.
         if (originalMemoryInfos.Rights == MemoryManipulation::MemoryRights::mem_unset || originalMemoryInfos.Rights == MemoryManipulation::MemoryRights::mem_none)
+        {
+            Reset(true);
+            SPDLOG_INFO("Hooked memory was freed, hook released");
             return nullptr;
+        }
 
         memcpy(buffer.data(), _OriginalFuncAddress, buffer.size());
 
@@ -930,34 +993,36 @@ class Hook_t
 
         if (detail::equal(buffer.begin(), buffer.end(), _HookCode.begin(), _HookCode.end()))
         { // Our hook code is still there, we can restore the old instructions.
-            if (!MemoryManipulation::MemoryProtect(_OriginalFuncAddress, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rwx))
+            MemoryManipulation::MemoryRights functionOldRights;
+            if (!MemoryManipulation::MemoryProtect(_OriginalFuncAddress, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rwx, &functionOldRights))
                 return res;
 
             memcpy(_OriginalFuncAddress, _SavedCode.data(), _SavedCode.size());
 
-            MemoryManipulation::MemoryProtect(_OriginalFuncAddress, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rx);
+            _RestoreCodeRights(_OriginalFuncAddress, _SavedCode.size(), functionOldRights);
             MemoryManipulation::FlushInstructionCache(_OriginalFuncAddress, _SavedCode.size());
 
             Reset(true);
             SPDLOG_INFO("Restored hook");
         }
         else
-        { // Our Hook code has been modified, we have to nullify the hook.
-            if (!MemoryManipulation::MemoryProtect(_TrampolineAddress, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rwx))
+        { // Our Hook code has been modified, we have to nullify the hook:
+          // the jump to the detour now goes to the original function trampoline, which stays allocated.
+            const size_t jumpSize = AbsJump::GetMaxOpcodeSize();
+            if (!MemoryManipulation::MemoryProtect(_TrampolineAddress, jumpSize, MemoryManipulation::MemoryRights::mem_rwx))
                 return res;
 
             int func_mode = 0;
-            int hook_mode = 0;
 
 #if defined(MINIDETOUR_ARCH_ARM)
-            func_mode = reinterpret_cast<uintptr_t>(_TrampolineAddress) & 1;
-            hook_mode = reinterpret_cast<uintptr_t>(_DetourCallFunc) & 1;
+            // The jump is reached from the hooked function and goes to its relocated code: both use the function mode.
+            func_mode = reinterpret_cast<uintptr_t>(_OriginalTrampolineCallAddress) & 1;
 #endif
 
-            AbsJump::WriteOpcodes(_TrampolineAddress, _DetourCallFunc, func_mode, hook_mode);
+            AbsJump::WriteOpcodes(_TrampolineAddress, _OriginalTrampolineAddress, func_mode, func_mode);
 
-            MemoryManipulation::MemoryProtect(_TrampolineAddress, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rx);
-            MemoryManipulation::FlushInstructionCache(_TrampolineAddress, _SavedCode.size());
+            MemoryManipulation::MemoryProtect(_TrampolineAddress, jumpSize, MemoryManipulation::MemoryRights::mem_rx);
+            MemoryManipulation::FlushInstructionCache(_TrampolineAddress, jumpSize);
 
             Reset(false);
             SPDLOG_INFO("Bypassed hook");
