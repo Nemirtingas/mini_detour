@@ -1176,8 +1176,9 @@ class Hook_t
             SPDLOG_INFO("Restored hook");
         }
         else
-        { // Our Hook code has been modified, we have to nullify the hook:
-          // the jump to the detour now goes to the original function trampoline, which stays allocated.
+        {
+            // Our Hook code has been modified, we have to nullify the hook:
+            // the jump to the detour now goes to the original function trampoline, which stays allocated.
             const size_t jumpSize = AbsJump::GetMaxOpcodeSize();
             if (!MemoryManipulation::MemoryProtect(_TrampolineAddress, jumpSize, MemoryManipulation::MemoryRights::mem_rwx))
                 return res;
