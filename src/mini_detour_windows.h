@@ -55,6 +55,112 @@ typedef struct _THREAD_BASIC_INFORMATION
 extern "C" NTSTATUS NTAPI NtQueryInformationThread(
     IN HANDLE ThreadHandle, IN MY_THREAD_INFORMATION_CLASS ThreadInformationClass, OUT PVOID ThreadInformation, IN ULONG ThreadInformationLength, OUT PULONG ReturnLength OPTIONAL);
 
+// Suspends the other threads of the process while hooked code is written: a thread running the bytes being written
+// could execute half of the old and half of the new instructions.
+class _OtherThreadsFreezer_t
+{
+    std::vector<HANDLE> _Threads;
+
+    static uintptr_t _InstructionPointer(CONTEXT const &context)
+    {
+#if defined(MINIDETOUR_ARCH_X86)
+        return context.Eip;
+#elif defined(MINIDETOUR_ARCH_X64)
+        return context.Rip;
+#else
+        return context.Pc;
+#endif
+    }
+
+    // Suspends every other thread. Fails if one of them is inside the code (at its first byte is fine, the instruction
+    // there is replaced as a whole). No heap allocation is done while threads are suspended: one of them can hold the
+    // heap lock.
+    bool _TryFreeze(uintptr_t code, size_t size)
+    {
+        std::vector<DWORD> threadIds;
+        const DWORD processId = GetCurrentProcessId();
+        const DWORD threadId  = GetCurrentThreadId();
+
+        HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if (snapshot == INVALID_HANDLE_VALUE)
+            return false;
+
+        THREADENTRY32 threadEntry;
+        threadEntry.dwSize = sizeof(threadEntry);
+        if (Thread32First(snapshot, &threadEntry))
+        {
+            do
+            {
+                if (threadEntry.th32OwnerProcessID == processId && threadEntry.th32ThreadID != threadId)
+                    threadIds.push_back(threadEntry.th32ThreadID);
+
+                threadEntry.dwSize = sizeof(threadEntry);
+            } while (Thread32Next(snapshot, &threadEntry));
+        }
+        CloseHandle(snapshot);
+
+        _Threads.reserve(threadIds.size());
+
+        bool inside = false;
+        for (auto id : threadIds)
+        {
+            // A thread that exited since the snapshot can't be opened: it doesn't need to be suspended.
+            HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, id);
+            if (thread == nullptr)
+                continue;
+
+            if (SuspendThread(thread) == (DWORD)-1)
+            {
+                CloseHandle(thread);
+                continue;
+            }
+
+            _Threads.push_back(thread);
+
+            // GetThreadContext also waits for the suspension to be effective.
+            CONTEXT context;
+            context.ContextFlags = CONTEXT_CONTROL;
+            if (GetThreadContext(thread, &context))
+            {
+                const uintptr_t ip = _InstructionPointer(context);
+                if (ip > code && ip < code + size)
+                    inside = true;
+            }
+        }
+
+        return !inside;
+    }
+
+  public:
+    ~_OtherThreadsFreezer_t() { Unfreeze(); }
+
+    // Retries a few times when a thread is inside the code: it is most likely only passing through.
+    bool Freeze(void *code, size_t size)
+    {
+        for (int attempt = 0; attempt < 5; ++attempt)
+        {
+            if (_TryFreeze(reinterpret_cast<uintptr_t>(code), size))
+                return true;
+
+            Unfreeze();
+            Sleep(1);
+        }
+
+        return false;
+    }
+
+    void Unfreeze()
+    {
+        for (auto thread : _Threads)
+        {
+            ResumeThread(thread);
+            CloseHandle(thread);
+        }
+
+        _Threads.clear();
+    }
+};
+
 namespace MiniDetour
 {
 namespace MemoryManipulation

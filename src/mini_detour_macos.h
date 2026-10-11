@@ -107,6 +107,16 @@ std::string kern_return_t_2_str(kern_return_t v)
 
 #endif
 
+// Other threads aren't suspended while hooked code is written: not implemented yet (task_threads and
+// thread_suspend could do it).
+class _OtherThreadsFreezer_t
+{
+  public:
+    bool Freeze(void * /*code*/, size_t /*size*/) { return true; }
+
+    void Unfreeze() {}
+};
+
 namespace MiniDetour
 {
 namespace MemoryManipulation
