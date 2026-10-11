@@ -132,65 +132,72 @@ struct RelJump
     }
 };
 
-struct CpuPush
+// A real call through an absolute address: the callee's ret then matches the return address the CPU saved on the
+// shadow stack (CET). A "push return address ; jmp" got the process killed when shadow stacks are enabled.
+struct AbsCall
 {
-    static size_t WriteOpcodes(void *source, uint64_t value)
+    static inline size_t WriteOpcodes(void *buffer, void *call_destination)
     {
-        uint8_t code[13] = {
-            0x68, // PUSH
+        uint8_t code[16]{
+            0xFF,
+            0x15, // CALL
+            0x02,
+            0x00,
+            0x00,
+            0x00, // RIP OFFSET (RIP + 2)
+            0xEB,
+            0x08, // JMP over the address
             0x00,
             0x00,
             0x00,
-            0x00, // IMM32
-            0xC7,
-            0x44,
-            0x24,
-            0x04, // mov DWORD PTR [rsp + 4], HIGH IMM32
             0x00,
             0x00,
             0x00,
             0x00,
+            0x00, // ABS_ADDR
         };
 
-        *reinterpret_cast<uint32_t *>(&code[1]) = static_cast<uint32_t>(value);
-
-        if (value & 0xffffffff00000000)
-        {
-            *reinterpret_cast<uint32_t *>(&code[9]) = static_cast<uint32_t>(value >> 32);
-            memcpy(source, code, 13);
-            return 13;
-        }
-
-        memcpy(source, code, 5);
-
-        return 5;
-    }
-
-    static constexpr size_t GetOpcodeSize(uint64_t value)
-    {
-        // 68          | PUSH
-        // LL LL LL LL | LOW IMM32
-        // C7 44 24 04 | MOV DWORD PTR [rsp + 4], HIGH IMM32
-        // HH HH HH HH
-        return (value & 0xffffffff00000000 ? 13 : 5);
+        *reinterpret_cast<void **>(&code[8]) = call_destination;
+        memcpy(buffer, code, GetMaxOpcodeSize());
+        return GetMaxOpcodeSize();
     }
 
     static constexpr size_t GetMaxOpcodeSize()
     {
-        // 68          | PUSH
-        // LL LL LL LL | LOW IMM32
-        // C7 44 24 04 | mov DWORD PTR [rsp + 4], HIGH IMM32
-        // HH HH HH HH
-        return 13;
+        // FF 15 02 00 00 00 | CALL [RIP + 2]
+        // EB 08             | JMP +8
+        // ABS_ADDR
+        return 16;
     }
 };
 
 #pragma pack(pop)
 
+// Returns true if the instruction is a conditional jump (Jcc rel8 / Jcc rel32) and gives its condition code.
+// jrcxz/jecxz and loop also are relative jumps but have no rel32 form, they are not handled.
+static bool _GetJccConditionCode(cs_insn const &instruction, uint8_t &conditionCode)
+{
+    uint8_t const *opcode = instruction.detail->x86.opcode;
+    if (opcode[0] >= 0x70 && opcode[0] <= 0x7F)
+    {
+        conditionCode = opcode[0] & 0x0F;
+        return true;
+    }
+
+    if (opcode[0] == 0x0F && opcode[1] >= 0x80 && opcode[1] <= 0x8F)
+    {
+        conditionCode = opcode[1] & 0x0F;
+        return true;
+    }
+
+    return false;
+}
+
 void _EnterRecursiveThunk(void *&_pCode)
 {
     uint8_t *pCode = reinterpret_cast<uint8_t *>(_pCode);
-    while (1)
+    // A longer chain is most likely a loop (a thunk jumping to itself would never end).
+    for (int i = 0; i < 8; ++i)
     {
         // If its an imported function.      CALL                JUMP
         if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
@@ -198,7 +205,7 @@ void _EnterRecursiveThunk(void *&_pCode)
             // Get the real imported function address
             pCode = *reinterpret_cast<uint8_t **>(pCode + 6 + *(int32_t *)(pCode + 2)); // 2 opcodes + 4 relative address ptr
         }
-        else if (pCode[0] == 0xe8 || pCode[0] == 0xe9)
+        else if (pCode[0] == 0xe9) // jmp rel32, a call (0xe8) is real code and must not be followed
         {
             pCode = (uint8_t *)relative_addr_to_absolute(pCode, *(int32_t *)(pCode + 1));
         }
@@ -209,6 +216,124 @@ void _EnterRecursiveThunk(void *&_pCode)
     }
 
     _pCode = pCode;
+}
+
+// Gets the encoding number (0-15) of a 64 bits or 32 bits general purpose register.
+static bool _GetRegisterNumber(x86_reg reg, uint8_t &number, bool &is64)
+{
+    static const x86_reg registers64[] = {
+        X86_REG_RAX,
+        X86_REG_RCX,
+        X86_REG_RDX,
+        X86_REG_RBX,
+        X86_REG_RSP,
+        X86_REG_RBP,
+        X86_REG_RSI,
+        X86_REG_RDI,
+        X86_REG_R8,
+        X86_REG_R9,
+        X86_REG_R10,
+        X86_REG_R11,
+        X86_REG_R12,
+        X86_REG_R13,
+        X86_REG_R14,
+        X86_REG_R15,
+    };
+    static const x86_reg registers32[] = {
+        X86_REG_EAX,
+        X86_REG_ECX,
+        X86_REG_EDX,
+        X86_REG_EBX,
+        X86_REG_ESP,
+        X86_REG_EBP,
+        X86_REG_ESI,
+        X86_REG_EDI,
+        X86_REG_R8D,
+        X86_REG_R9D,
+        X86_REG_R10D,
+        X86_REG_R11D,
+        X86_REG_R12D,
+        X86_REG_R13D,
+        X86_REG_R14D,
+        X86_REG_R15D,
+    };
+
+    for (uint8_t i = 0; i < 16; ++i)
+    {
+        if (registers64[i] == reg || registers32[i] == reg)
+        {
+            number = i;
+            is64   = registers64[i] == reg;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// Max size of the code written by _WriteRipRelativeLoad: movabs reg, imm64 (10) + mov reg, [reg] (up to 4)
+static constexpr size_t _RipRelativeLoadMaxSize = 14;
+
+// Matches "mov reg, [rip + disp]" and "lea reg, [rip + disp]", the only rip relative instructions we can relocate.
+static bool _GetRipRelativeLoad(cs_insn const &instruction, uint8_t &reg, bool &is64, bool &dereference, uint64_t &address)
+{
+    auto const &x86 = instruction.detail->x86;
+
+    if (instruction.id != X86_INS_MOV && instruction.id != X86_INS_LEA)
+        return false;
+
+    if (x86.op_count != 2 || x86.operands[0].type != X86_OP_REG || x86.operands[1].type != X86_OP_MEM || x86.operands[1].mem.base != X86_REG_RIP ||
+        x86.operands[1].mem.index != X86_REG_INVALID)
+        return false;
+
+    if (!_GetRegisterNumber(x86.operands[0].reg, reg, is64))
+        return false;
+
+    // rsp would be used as a temporary register and a 32 bits lea doesn't zero the upper bits like movabs does.
+    if (reg == 4 || (instruction.id == X86_INS_LEA && !is64))
+        return false;
+
+    dereference = instruction.id == X86_INS_MOV;
+    address     = instruction.address + instruction.size + x86.operands[1].mem.disp;
+    return true;
+}
+
+// Writes "movabs reg, address" and, for a mov, "mov reg, [reg]".
+static size_t _WriteRipRelativeLoad(uint8_t *code, uint8_t reg, bool is64, bool dereference, uint64_t address)
+{
+    uint8_t *start   = code;
+    uint8_t lowReg   = reg & 7;
+    uint8_t extended = reg >= 8 ? 1 : 0;
+
+    *code++ = 0x48 | extended; // REX.W + REX.B
+    *code++ = 0xB8 + lowReg;   // movabs reg, imm64
+    memcpy(code, &address, sizeof(address));
+    code += sizeof(address);
+
+    if (dereference)
+    {
+        uint8_t rex = (is64 ? 0x48 : 0x40) | (extended << 2) | extended; // REX.W + REX.R + REX.B
+        if (rex != 0x40)
+            *code++ = rex;
+
+        *code++ = 0x8B; // mov reg, [reg]
+        if (lowReg == 5)
+        { // rbp/r13 base needs a displacement: [reg + 0]
+            *code++ = 0x40 | (lowReg << 3) | lowReg;
+            *code++ = 0x00;
+        }
+        else if (lowReg == 4)
+        { // r12 base needs a SIB byte
+            *code++ = (lowReg << 3) | lowReg;
+            *code++ = 0x24;
+        }
+        else
+        {
+            *code++ = (lowReg << 3) | lowReg;
+        }
+    }
+
+    return code - start;
 }
 
 size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatable_size)
@@ -243,12 +368,23 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
             }
             else if (disasm.GetJumpType() == 3)
             {
-                relocatedOriginalCodeSize += disasm.GetInstruction().size;
-                relocatable_size += disasm.GetInstruction().size;
+                uint8_t conditionCode;
+                if (disasm.GetInstruction().id == X86_INS_JMP)
+                {
+                    // Not copied: the jump back of the trampoline goes to its target.
+                    relocatable_size += disasm.GetInstruction().size;
+                }
+                else if (_GetJccConditionCode(disasm.GetInstruction(), conditionCode))
+                {
+                    // Jcc rel8 over the not taken jump + not taken jump (the taken jump is the jump back)
+                    relocatedOriginalCodeSize += 2 + AbsJump::GetMaxOpcodeSize();
+                    relocatable_size += disasm.GetInstruction().size;
+                }
             }
             else if (disasm.GetJumpType() == 5)
             {
-                relocatedOriginalCodeSize += disasm.GetInstruction().size;
+                // Absolute call (the jump back goes to the instruction after the call)
+                relocatedOriginalCodeSize += AbsCall::GetMaxOpcodeSize();
                 relocatable_size += disasm.GetInstruction().size;
             }
 
@@ -262,10 +398,13 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
         { // Relative addressing opcode
             if (!ignore_relocation)
             {
-                if (disasm.GetInstruction().detail->x86.operands[0].type == X86_OP_REG && disasm.GetInstruction().detail->x86.operands[1].type == X86_OP_MEM &&
-                    disasm.GetInstruction().detail->x86.operands[1].mem.base == X86_REG_RIP)
+                uint8_t reg;
+                bool is64;
+                bool dereference;
+                uint64_t address;
+                if (_GetRipRelativeLoad(disasm.GetInstruction(), reg, is64, dereference, address))
                 {
-                    relocatedOriginalCodeSize += 10;
+                    relocatedOriginalCodeSize += _RipRelativeLoadMaxSize;
                     relocatable_size += disasm.GetInstruction().size;
                 }
                 else
@@ -281,6 +420,8 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
 #ifdef USE_SPDLOG
         SPDLOG_INFO("Can relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
 #endif
+        // Copied as is.
+        relocatedOriginalCodeSize += disasm.GetInstruction().size;
         relocatable_size += disasm.GetInstruction().size;
     }
 
@@ -313,20 +454,31 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
 
         if (disasm.IsInstructionTerminating())
         {
-            if (disasm.GetJumpType() == 3)
+            uint8_t conditionCode;
+            if (disasm.GetJumpType() == 3 && disasm.GetInstruction().id == X86_INS_JMP)
             {
                 relocatedSize += disasm.GetInstruction().size;
                 originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().detail->x86.operands[0].imm);
                 break;
             }
+            else if (disasm.GetJumpType() == 3 && _GetJccConditionCode(disasm.GetInstruction(), conditionCode))
+            {
+                // Jcc taken          ; short jump over the not taken path
+                // JMP not_taken      ; absolute jump to the instruction after the Jcc
+                // taken: JMP target  ; absolute jump to the Jcc target (written below)
+                relocatedSize += disasm.GetInstruction().size;
+                *pTrampolineCode++ = 0x70 | conditionCode;
+                *pTrampolineCode++ = static_cast<uint8_t>(AbsJump::GetMaxOpcodeSize());
+                pTrampolineCode += AbsJump::WriteOpcodes(reinterpret_cast<void *>(pTrampolineCode), reinterpret_cast<void *>(code_addr), 0, 0);
+                originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().detail->x86.operands[0].imm);
+                break;
+            }
             else if (disasm.GetJumpType() == 5)
             {
+                // The callee returns into the trampoline, then the jump back goes to the instruction after the call.
                 relocatedSize += disasm.GetInstruction().size;
-                pTrampolineCode += CpuPush::WriteOpcodes(
-                    reinterpret_cast<void *>(pTrampolineCode),
-                    code_addr // Where to return
-                );
-                originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().detail->x86.operands[0].imm);
+                pTrampolineCode += AbsCall::WriteOpcodes(reinterpret_cast<void *>(pTrampolineCode), reinterpret_cast<void *>(disasm.GetInstruction().detail->x86.operands[0].imm));
+                originalCodeTarget = reinterpret_cast<void *>(code_addr);
                 break;
             }
 
@@ -338,26 +490,14 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
 
         if ((disasm.GetInstruction().detail->x86.modrm & modrm_mask) == 0x05)
         { // Relative addressing opcode
-            if (disasm.GetInstruction().detail->x86.operands[0].type == X86_OP_REG && disasm.GetInstruction().detail->x86.operands[1].type == X86_OP_MEM &&
-                disasm.GetInstruction().detail->x86.operands[1].mem.base == X86_REG_RIP)
+            uint8_t reg;
+            bool is64;
+            bool dereference;
+            uint64_t address;
+            if (_GetRipRelativeLoad(disasm.GetInstruction(), reg, is64, dereference, address))
             {
                 relocatedSize += disasm.GetInstruction().size;
-
-                auto const &op0 = disasm.GetInstruction().detail->x86.operands[0];
-                auto const &op1 = disasm.GetInstruction().detail->x86.operands[1];
-
-                *pTrampolineCode++ = 0x48;
-
-                switch (op0.reg)
-                {
-                    case X86_REG_RAX: *pTrampolineCode++ = 0xB8; break;
-                    case X86_REG_RCX: *pTrampolineCode++ = 0xB9; break;
-                    case X86_REG_RDX: *pTrampolineCode++ = 0xBA; break;
-                    case X86_REG_RBX: *pTrampolineCode++ = 0xBB; break;
-                }
-
-                *reinterpret_cast<uintptr_t *>(pTrampolineCode) = disasm.GetInstruction().address + disasm.GetInstruction().size + op1.mem.disp;
-                pTrampolineCode += sizeof(uintptr_t);
+                pTrampolineCode += _WriteRipRelativeLoad(pTrampolineCode, reg, is64, dereference, address);
                 originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().address + disasm.GetInstruction().size);
 
                 break;

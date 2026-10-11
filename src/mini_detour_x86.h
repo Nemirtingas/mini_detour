@@ -138,10 +138,31 @@ struct CpuPush
 
 #pragma pack(pop)
 
+// Returns true if the instruction is a conditional jump (Jcc rel8 / Jcc rel32) and gives its condition code.
+// jrcxz/jecxz and loop also are relative jumps but have no rel32 form, they are not handled.
+static bool _GetJccConditionCode(cs_insn const &instruction, uint8_t &conditionCode)
+{
+    uint8_t const *opcode = instruction.detail->x86.opcode;
+    if (opcode[0] >= 0x70 && opcode[0] <= 0x7F)
+    {
+        conditionCode = opcode[0] & 0x0F;
+        return true;
+    }
+
+    if (opcode[0] == 0x0F && opcode[1] >= 0x80 && opcode[1] <= 0x8F)
+    {
+        conditionCode = opcode[1] & 0x0F;
+        return true;
+    }
+
+    return false;
+}
+
 void _EnterRecursiveThunk(void *&_pCode)
 {
     uint8_t *pCode = reinterpret_cast<uint8_t *>(_pCode);
-    while (1)
+    // A longer chain is most likely a loop (a thunk jumping to itself would never end).
+    for (int i = 0; i < 8; ++i)
     {
         // If its an imported function.      CALL                JUMP
         if (pCode[0] == 0xFF && (/*pCode[1] == 0x15 ||*/ pCode[1] == 0x25))
@@ -149,7 +170,7 @@ void _EnterRecursiveThunk(void *&_pCode)
             // Get the real imported function address
             pCode = **reinterpret_cast<uint8_t ***>(pCode + 2); // 2 opcodes + 4 absolute address ptr
         }
-        else if (pCode[0] == 0xe8 || pCode[0] == 0xe9)
+        else if (pCode[0] == 0xe9) // jmp rel32, a call (0xe8) is real code and must not be followed
         {
             pCode = (uint8_t *)relative_addr_to_absolute(pCode, *(int32_t *)(pCode + 1));
         }
@@ -164,13 +185,6 @@ void _EnterRecursiveThunk(void *&_pCode)
 
 size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatable_size)
 {
-    // MOD-REG-R/M Byte
-    //  7 6    5 4 3    2 1 0 - bits
-    //[ MOD ][  REG  ][  R/M  ]
-    static constexpr auto mod_mask   = 0xC0;
-    static constexpr auto rm_mask    = 0x07; // Register or memory mask
-    static constexpr auto modrm_mask = mod_mask | rm_mask;
-
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
     size_t code_size             = 0;
@@ -194,12 +208,23 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
             }
             else if (disasm.GetJumpType() == 3)
             {
-                relocatedOriginalCodeSize += disasm.GetInstruction().size;
-                relocatable_size += disasm.GetInstruction().size;
+                uint8_t conditionCode;
+                if (disasm.GetInstruction().id == X86_INS_JMP)
+                {
+                    // Not copied: the jump back of the trampoline goes to its target.
+                    relocatable_size += disasm.GetInstruction().size;
+                }
+                else if (_GetJccConditionCode(disasm.GetInstruction(), conditionCode))
+                {
+                    // Jcc rel8 over the not taken jump + not taken jump (the taken jump is the jump back)
+                    relocatedOriginalCodeSize += 2 + AbsJump::GetMaxOpcodeSize();
+                    relocatable_size += disasm.GetInstruction().size;
+                }
             }
             else if (disasm.GetJumpType() == 5)
             {
-                relocatedOriginalCodeSize += disasm.GetInstruction().size;
+                // Return address push (the call itself is the jump back)
+                relocatedOriginalCodeSize += CpuPush::GetMaxOpcodeSize();
                 relocatable_size += disasm.GetInstruction().size;
             }
 
@@ -209,29 +234,14 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
             break;
         }
 
-        if ((disasm.GetInstruction().detail->x86.modrm & modrm_mask) == 0x05)
-        { // Relative addressing opcode
-            if (!ignore_relocation)
-            {
-                if (disasm.GetInstruction().detail->x86.operands[0].type == X86_OP_REG && disasm.GetInstruction().detail->x86.operands[1].type == X86_OP_MEM &&
-                    disasm.GetInstruction().detail->x86.operands[1].mem.base == X86_REG_EIP)
-                {
-                    relocatedOriginalCodeSize += 5;
-                    relocatable_size += disasm.GetInstruction().size;
-                }
-                else
-                {
-#ifdef USE_SPDLOG
-                    SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
-#endif
-                }
-                break;
-            }
-        }
+        // On x86, modrm mod=00 rm=101 is an absolute [disp32] address: there is no instruction pointer
+        // relative addressing, so the instruction can be copied as is.
 
 #ifdef USE_SPDLOG
         SPDLOG_INFO("Can relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
 #endif
+        // Copied as is.
+        relocatedOriginalCodeSize += disasm.GetInstruction().size;
         relocatable_size += disasm.GetInstruction().size;
     }
 
@@ -240,13 +250,6 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
 
 size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatable_size)
 {
-    // MOD-REG-R/M Byte
-    //  7 6    5 4 3    2 1 0 - bits
-    //[ MOD ][  REG  ][  R/M  ]
-    static constexpr auto mod_mask   = 0xC0;
-    static constexpr auto rm_mask    = 0x07; // Register or memory mask
-    static constexpr auto modrm_mask = mod_mask | rm_mask;
-
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
     size_t code_size             = 0;
@@ -264,9 +267,22 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
 
         if (disasm.IsInstructionTerminating())
         {
-            if (disasm.GetJumpType() == 3)
+            uint8_t conditionCode;
+            if (disasm.GetJumpType() == 3 && disasm.GetInstruction().id == X86_INS_JMP)
             {
                 relocatedSize += disasm.GetInstruction().size;
+                originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().detail->x86.operands[0].imm);
+                break;
+            }
+            else if (disasm.GetJumpType() == 3 && _GetJccConditionCode(disasm.GetInstruction(), conditionCode))
+            {
+                // Jcc taken          ; short jump over the not taken path
+                // JMP not_taken      ; absolute jump to the instruction after the Jcc
+                // taken: JMP target  ; absolute jump to the Jcc target (written below)
+                relocatedSize += disasm.GetInstruction().size;
+                *pTrampolineCode++ = 0x70 | conditionCode;
+                *pTrampolineCode++ = static_cast<uint8_t>(AbsJump::GetMaxOpcodeSize());
+                pTrampolineCode += AbsJump::WriteOpcodes(reinterpret_cast<void *>(pTrampolineCode), reinterpret_cast<void *>(code_addr), 0, 0);
                 originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().detail->x86.operands[0].imm);
                 break;
             }
@@ -285,37 +301,6 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
             SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
 #endif
             break;
-        }
-
-        if ((disasm.GetInstruction().detail->x86.modrm & modrm_mask) == 0x05)
-        { // Relative addressing opcode
-            if (disasm.GetInstruction().detail->x86.operands[0].type == X86_OP_REG && disasm.GetInstruction().detail->x86.operands[1].type == X86_OP_MEM &&
-                disasm.GetInstruction().detail->x86.operands[1].mem.base == X86_REG_RIP)
-            {
-                relocatedSize += disasm.GetInstruction().size;
-
-                auto const &op0 = disasm.GetInstruction().detail->x86.operands[0];
-                auto const &op1 = disasm.GetInstruction().detail->x86.operands[1];
-
-                switch (op0.reg)
-                {
-                    case X86_REG_EAX: *pTrampolineCode++ = 0xB8; break;
-                    case X86_REG_ECX: *pTrampolineCode++ = 0xB9; break;
-                    case X86_REG_EDX: *pTrampolineCode++ = 0xBA; break;
-                    case X86_REG_EBX: *pTrampolineCode++ = 0xBB; break;
-                }
-
-                *reinterpret_cast<uintptr_t *>(pTrampolineCode) = disasm.GetInstruction().address + disasm.GetInstruction().size + op1.mem.disp;
-                pTrampolineCode += sizeof(uintptr_t);
-                originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().address + disasm.GetInstruction().size);
-
-                break;
-            }
-
-#ifdef USE_SPDLOG
-            SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
-#endif
-            return 0;
         }
 
 #ifdef USE_SPDLOG

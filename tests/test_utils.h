@@ -84,4 +84,13 @@ class CodeBuffer
 #define TEST_CALL
 #endif
 
+#if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
+// Register holding the first integer argument: ecx (Windows x64 / x86 fastcall) or edi (System V x64).
+#if defined(MINIDETOUR_ARCH_X64) && !defined(MINIDETOUR_OS_WINDOWS)
+#define TEST_ARG0_TEST_SELF 0xFF // test edi, edi
+#else
+#define TEST_ARG0_TEST_SELF 0xC9 // test ecx, ecx
+#endif
+#endif
+
 #endif // MINI_DETOUR_TEST_UTILS_H
