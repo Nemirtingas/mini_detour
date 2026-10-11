@@ -5,6 +5,7 @@
 #include <mach/mach_vm.h>
 #include <mach/vm_prot.h>
 #include <mach/vm_map.h>
+#include <mach/vm_param.h>
 #include <mach-o/loader.h>
 #include <mach-o/dyld.h>
 #include <mach-o/dyld_images.h>
@@ -111,13 +112,6 @@ namespace MemoryManipulation
 {
 namespace Implementation
 {
-#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
-const void *max_user_address = reinterpret_cast<void *>(0x7ffefffff000);
-#elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
-// 32 bits process on 64 bits kernel gets the whole 4GB
-const void *max_user_address = reinterpret_cast<void *>(0xfffff000);
-#endif
-
 size_t _MemoryProtectRightsToNative(MemoryRights rights)
 {
     switch (rights)
@@ -134,12 +128,69 @@ size_t _MemoryProtectRightsToNative(MemoryRights rights)
     }
 }
 
+// __PAGEZERO is reserved from 0 up to the main executable (its end moves with the ASLR slide), but mach_vm_region
+// doesn't report it: nothing can be allocated there.
+static mach_vm_address_t _PageZeroEnd()
+{
+    // The executable isn't always image 0: libraries inserted with DYLD_INSERT_LIBRARIES come first.
+    const MachHeader_t *header = nullptr;
+    uint32_t imageIndex        = 0;
+    for (uint32_t i = 0; i < _dyld_image_count(); ++i)
+    {
+        auto imageHeader = reinterpret_cast<const MachHeader_t *>(_dyld_get_image_header(i));
+        if (imageHeader != nullptr && imageHeader->filetype == MH_EXECUTE)
+        {
+            header     = imageHeader;
+            imageIndex = i;
+            break;
+        }
+    }
+
+    if (header == nullptr)
+        return 0;
+
+    auto loadCommand = reinterpret_cast<const LoadCommand_t *>(header + 1);
+    for (uint32_t i = 0; i < header->ncmds; ++i, loadCommand = reinterpret_cast<const LoadCommand_t *>(reinterpret_cast<uintptr_t>(loadCommand) + loadCommand->cmdsize))
+    {
+        if (loadCommand->cmd == LC_SEGMENT_64)
+        {
+            auto segment = reinterpret_cast<const segment_command_64 *>(loadCommand);
+            if (strncmp(segment->segname, SEG_PAGEZERO, sizeof(segment->segname)) == 0)
+                return segment->vmaddr + segment->vmsize + _dyld_get_image_vmaddr_slide(imageIndex);
+        }
+        else if (loadCommand->cmd == LC_SEGMENT)
+        {
+            auto segment = reinterpret_cast<const segment_command *>(loadCommand);
+            if (strncmp(segment->segname, SEG_PAGEZERO, sizeof(segment->segname)) == 0)
+                return segment->vmaddr + segment->vmsize + _dyld_get_image_vmaddr_slide(imageIndex);
+        }
+    }
+
+    return 0;
+}
+
 size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
 {
     mach_port_t self_task     = mach_task_self();
-    mach_vm_address_t oldEnd  = 0;
+    mach_vm_address_t oldEnd  = _PageZeroEnd();
     size_t writtenRegionCount = 0;
     size_t currentRegionCount = 0;
+
+    if (!onlyFree && oldEnd != 0)
+    {
+        if (regions != nullptr && writtenRegionCount < regionCount && regions->StructSize >= sizeof(*regions))
+        {
+            auto &region = *regions;
+            regions      = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t *>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
+
+            region.Rights        = MemoryRights::mem_none;
+            region.Start         = 0;
+            region.End           = static_cast<uintptr_t>(oldEnd);
+            region.ModuleName[0] = '\0';
+            ++writtenRegionCount;
+        }
+        ++currentRegionCount;
+    }
 
     mach_vm_address_t vm_address = 0;
     mach_vm_size_t size;
@@ -149,7 +200,7 @@ size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t re
 
     while (mach_vm_region(self_task, &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name) == KERN_SUCCESS)
     {
-        if (oldEnd != vm_address)
+        if (vm_address > oldEnd)
         {
             if (regions != nullptr && writtenRegionCount < regionCount)
             {
@@ -302,65 +353,36 @@ static inline kern_return_t MemoryAllocWithProtection(mach_port_t task, void **a
     return kret;
 }
 
-static inline void *MemoryAllocNear(mach_port_t task, uintptr_t addressHint, size_t size, MemoryRights rights, size_t pageSize)
+// Allocates at this exact address, fails if it isn't free.
+static inline void *_MemoryAllocAt(void *address, size_t size, MemoryRights rights)
 {
-    void *address;
-
-    auto freeRegionCount = GetFreeRegions(nullptr, 0);
-    std::vector<RegionInfos_t> freeRegions((size_t)(freeRegionCount * 1.5));
-    freeRegionCount = GetFreeRegions(freeRegions.data(), freeRegions.size());
-    if (freeRegionCount < freeRegions.size())
-        freeRegions.resize(freeRegionCount);
-
-    std::sort(
-        freeRegions.begin(),
-        freeRegions.end(),
-        [addressHint](MemoryManipulation::RegionInfos_t const &l, MemoryManipulation::RegionInfos_t const &r)
-        { return std::max(addressHint, l.Start) - std::min(addressHint, l.Start) < std::max(addressHint, r.Start) - std::min(addressHint, r.Start); });
-
-    for (auto const &region : freeRegions)
-    {
-        auto start     = region.Start > addressHint ? region.Start : (region.End - pageSize);
-        auto increment = static_cast<int32_t>(region.Start > addressHint ? pageSize : -pageSize);
-
-        for (auto allocAddress = start; allocAddress >= region.Start && (allocAddress + size) <= region.End; allocAddress += increment)
-        {
-            if (allocAddress > (uintptr_t)max_user_address)
-                break;
-
-            address = (void *)allocAddress;
-            MemoryAllocWithProtection(task, &address, (mach_vm_size_t)size, rights, VM_FLAGS_FIXED);
-            if (address != nullptr)
-                return address;
-        }
-    }
-
-    // Fallback to anywhere alloc
-    address = nullptr;
-    MemoryAllocWithProtection(task, &address, size, rights, VM_FLAGS_ANYWHERE);
-
+    MemoryAllocWithProtection(mach_task_self(), &address, size, rights, VM_FLAGS_FIXED);
     return address;
 }
 
-void *MemoryAlloc(void *_addressHint, size_t size, MemoryRights rights)
+static inline void *_MemoryAllocAnywhere(size_t size, MemoryRights rights)
 {
-    if (_addressHint > max_user_address)
-        _addressHint = (void *)max_user_address;
+    void *address = nullptr;
+    MemoryAllocWithProtection(mach_task_self(), &address, size, rights, VM_FLAGS_ANYWHERE);
+    return address;
+}
 
-    auto pageSize    = PageSize();
-    auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
-    size             = _PageAddrSize((void *)addressHint, size, pageSize);
+// Nothing can be allocated in __PAGEZERO.
+static inline uintptr_t _MinUserAddress()
+{
+    return static_cast<uintptr_t>(_PageZeroEnd());
+}
 
-    mach_port_t task = mach_task_self();
+// End of the user address space.
+static inline uintptr_t _MaxUserAddress()
+{
+    return static_cast<uintptr_t>(MACH_VM_MAX_ADDRESS);
+}
 
-    if (_addressHint == nullptr)
-    {
-        void *address = nullptr;
-        MemoryAllocWithProtection(task, &address, size, rights, VM_FLAGS_ANYWHERE);
-        return address;
-    }
-
-    return MemoryAllocNear(task, addressHint, size, rights, pageSize);
+// mach_vm_allocate places a mapping at any page.
+static inline size_t _AllocationGranularity()
+{
+    return PageSize();
 }
 
 bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)

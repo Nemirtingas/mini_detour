@@ -61,12 +61,6 @@ namespace MemoryManipulation
 {
 namespace Implementation
 {
-#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
-const void *max_user_address = reinterpret_cast<void *>(0x7ffffffff000);
-#elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
-const void *max_user_address = reinterpret_cast<void *>(0x7ffff000);
-#endif
-
 struct ThreadStackInfos_t
 {
     DWORD threadId;
@@ -324,65 +318,53 @@ static inline BOOL MemoryAllocWithProtection(HANDLE hProcess, LPVOID *address, S
     return *address != nullptr;
 }
 
-static inline void *MemoryAllocNear(HANDLE hProcess, uintptr_t addressHint, size_t size, MemoryRights rights, size_t pageSize)
+// Allocates at this exact address, fails if it isn't free.
+static inline void *_MemoryAllocAt(void *address, size_t size, MemoryRights rights)
 {
-    void *address;
+    // VirtualAlloc treats NULL as "anywhere".
+    if (address == nullptr)
+        return nullptr;
 
-    auto freeRegionCount = GetFreeRegions(nullptr, 0);
-    std::vector<RegionInfos_t> freeRegions((size_t)(freeRegionCount * 1.5));
-    freeRegionCount = GetFreeRegions(freeRegions.data(), freeRegions.size());
-    if (freeRegionCount < freeRegions.size())
-        freeRegions.resize(freeRegionCount);
-
-    std::sort(
-        freeRegions.begin(),
-        freeRegions.end(),
-        [addressHint](MemoryManipulation::RegionInfos_t const &l, MemoryManipulation::RegionInfos_t const &r)
-        { return std::max(addressHint, l.Start) - std::min(addressHint, l.Start) < std::max(addressHint, r.Start) - std::min(addressHint, r.Start); });
-
-    for (auto const &region : freeRegions)
+    void *allocated = address;
+    MemoryAllocWithProtection(GetCurrentProcess(), &allocated, size, rights);
+    if (allocated != nullptr && allocated != address)
     {
-        auto start     = region.Start > addressHint ? region.Start : (region.End - pageSize);
-        auto increment = static_cast<int32_t>(region.Start > addressHint ? pageSize : -pageSize);
-
-        for (auto allocAddress = start; allocAddress >= region.Start && (allocAddress + size) < region.End; allocAddress += increment)
-        {
-            if (allocAddress > (uintptr_t)max_user_address)
-                break;
-
-            address = (void *)allocAddress;
-            MemoryAllocWithProtection(hProcess, &address, size, rights);
-            if (address != nullptr)
-                return address;
-        }
+        MemoryFree(allocated, size);
+        return nullptr;
     }
 
-    // Fallback to anywhere alloc
-    address = nullptr;
-    MemoryAllocWithProtection(hProcess, &address, size, rights);
-
-    return address;
+    return allocated;
 }
 
-void *MemoryAlloc(void *_addressHint, size_t size, MemoryRights rights)
+static inline void *_MemoryAllocAnywhere(size_t size, MemoryRights rights)
 {
-    if (_addressHint > max_user_address)
-        _addressHint = (void *)max_user_address;
+    LPVOID address = nullptr;
+    MemoryAllocWithProtection(GetCurrentProcess(), &address, size, rights);
+    return (void *)address;
+}
 
-    auto pageSize    = PageSize();
-    auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
-    size             = _PageAddrSize((void *)addressHint, size, pageSize);
+// The user address space bounds depend on the system and on /LARGEADDRESSAWARE for 32 bits processes.
+static inline uintptr_t _MinUserAddress()
+{
+    SYSTEM_INFO systemInfo;
+    GetSystemInfo(&systemInfo);
+    return reinterpret_cast<uintptr_t>(systemInfo.lpMinimumApplicationAddress);
+}
 
-    HANDLE hProcess = GetCurrentProcess();
+// End of the user address space (lpMaximumApplicationAddress is its last byte).
+static inline uintptr_t _MaxUserAddress()
+{
+    SYSTEM_INFO systemInfo;
+    GetSystemInfo(&systemInfo);
+    return reinterpret_cast<uintptr_t>(systemInfo.lpMaximumApplicationAddress) + 1;
+}
 
-    if (_addressHint == nullptr)
-    {
-        LPVOID address = nullptr;
-        MemoryAllocWithProtection(hProcess, &address, size, rights);
-        return (void *)address;
-    }
-
-    return MemoryAllocNear(hProcess, addressHint, size, rights, pageSize);
+// VirtualAlloc rounds the reserved address down to the allocation granularity (64 KB), not to a page.
+static inline size_t _AllocationGranularity()
+{
+    SYSTEM_INFO systemInfo;
+    GetSystemInfo(&systemInfo);
+    return systemInfo.dwAllocationGranularity;
 }
 
 bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
@@ -487,7 +469,12 @@ static bool _ReplaceModuleExportWithTrampoline(void *moduleBase, PDWORD exportAd
     MemoryManipulation::MemoryRights oldRights;
 
     *exportCallAddress = nullptr;
-    auto exportJump    = GetMemoryManager().GetFreeJump(moduleBase);
+
+    // The export RVA is unsigned: the jump must be above the module base, and within 4 GB of it.
+    // A new jump region is searched from the end of the module image, so it lands above it.
+    auto imageNTHeaders = (PIMAGE_NT_HEADERS)((char *)moduleBase + ((PIMAGE_DOS_HEADER)moduleBase)->e_lfanew);
+    auto moduleEnd      = (void *)((char *)moduleBase + imageNTHeaders->OptionalHeader.SizeOfImage);
+    auto exportJump     = GetMemoryManager().GetFreeJump(moduleEnd, moduleBase, _AddressIsRepresentableAsRva);
     if (exportJump == nullptr)
         goto Error;
 

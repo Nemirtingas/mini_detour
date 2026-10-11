@@ -7,6 +7,10 @@
 #include <errno.h>
 #include <elf.h>
 
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0x100000
+#endif
+
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
 using ElfHeader_t        = Elf64_Ehdr;
 using ElfSectionHeader_t = Elf64_Shdr;
@@ -79,13 +83,6 @@ namespace MemoryManipulation
 {
 namespace Implementation
 {
-#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
-const void *max_user_address = reinterpret_cast<void *>(0x7ffefffff000);
-#elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
-// 32 bits process on 64 bits kernel gets the whole 4GB
-const void *max_user_address = reinterpret_cast<void *>(0xfffff000);
-#endif
-
 int _MemoryProtectRightsToNative(MemoryRights rights)
 {
     switch (rights)
@@ -147,12 +144,86 @@ bool _GetRegionInfo(uintptr_t target, const char *mapLine, size_t mapLineLength,
     return true;
 }
 
+// mmap refuses the addresses below vm.mmap_min_addr.
+static inline uintptr_t _MinUserAddress()
+{
+    unsigned long minAddress = 0;
+    std::ifstream f("/proc/sys/vm/mmap_min_addr");
+    if (!(f >> minAddress))
+        minAddress = 0x10000; // Default value
+
+    return static_cast<uintptr_t>(minAddress);
+}
+
+// The end of the user address space (TASK_SIZE) depends on the kernel: 47, 48 or 39 bits on 64 bits, 3 or 4 GB
+// on 32 bits. It isn't exposed, so it is searched with mmap, which fails with ENOMEM above it.
+static uintptr_t _FindMaxUserAddress()
+{
+    const uintptr_t pageSize = sysconf(_SC_PAGESIZE);
+
+    // The stack is in the user address space. The search ends below 2^57 (5 levels paging) on 64 bits, and below the
+    // last page on 32 bits (it is never available).
+    uintptr_t inside  = reinterpret_cast<uintptr_t>(&pageSize) & ~(pageSize - 1);
+    uintptr_t outside = sizeof(void *) == 8 ? static_cast<uintptr_t>(uint64_t(1) << 57) : ~(pageSize - 1);
+
+    while (outside - inside > pageSize)
+    {
+        const uintptr_t middle = (inside + (outside - inside) / 2) & ~(pageSize - 1);
+        void *mapped           = mmap(reinterpret_cast<void *>(middle), pageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        const int error        = errno;
+        if (mapped != MAP_FAILED)
+            munmap(mapped, pageSize);
+
+        // Kernels older than 4.17 treat MAP_FIXED_NOREPLACE as a hint: another address means outside too.
+        if ((mapped == MAP_FAILED && error == ENOMEM) || (mapped != MAP_FAILED && mapped != reinterpret_cast<void *>(middle)))
+            outside = middle;
+        else
+            inside = middle;
+    }
+
+    return outside;
+}
+
+// End of the user address space.
+static inline uintptr_t _MaxUserAddress()
+{
+    static const uintptr_t maxAddress = _FindMaxUserAddress();
+    return maxAddress;
+}
+
 size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
 {
-    uintptr_t start;
     uintptr_t oldEnd(0);
     size_t writtenRegionCount = 0;
     size_t currentRegionCount = 0;
+
+    // Free memory is only listed inside the user address space: the gap below [vsyscall] (x64) or [vectors] (ARM),
+    // which the kernel maps above it, isn't free. The free memory above the last mapping is listed.
+    const uintptr_t minAddress = _MinUserAddress();
+    const uintptr_t maxAddress = _MaxUserAddress();
+    auto addFreeRegion         = [&](uintptr_t start, uintptr_t end)
+    {
+        start = std::max(start, minAddress);
+        end   = std::min(end, maxAddress);
+        if (start >= end)
+            return;
+
+        if (regions != nullptr && writtenRegionCount < regionCount)
+        {
+            auto &region = *regions;
+            if (region.StructSize >= sizeof(region))
+            {
+                regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t *>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
+
+                region.Rights        = MemoryRights::mem_unset;
+                region.Start         = start;
+                region.End           = end;
+                region.ModuleName[0] = '\0';
+                ++writtenRegionCount;
+            }
+        }
+        ++currentRegionCount;
+    };
 
     std::ifstream f("/proc/self/maps");
     std::string s;
@@ -168,23 +239,7 @@ size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t re
             if (start != 0 && end != 0)
             {
                 if (oldEnd != start)
-                {
-                    if (regions != nullptr && writtenRegionCount < regionCount)
-                    {
-                        auto &region = *regions;
-                        if (region.StructSize >= sizeof(region))
-                        {
-                            regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t *>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
-
-                            region.Rights        = MemoryRights::mem_unset;
-                            region.Start         = oldEnd;
-                            region.End           = start;
-                            region.ModuleName[0] = '\0';
-                            ++writtenRegionCount;
-                        }
-                    }
-                    ++currentRegionCount;
-                }
+                    addFreeRegion(oldEnd, start);
 
                 if (!onlyFree)
                 {
@@ -208,6 +263,8 @@ size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t re
             }
         }
     }
+
+    addFreeRegion(oldEnd, maxAddress);
 
     return currentRegionCount;
 }
@@ -265,67 +322,45 @@ void MemoryFree(void *address, size_t size)
 
 static inline bool MemoryAllocWithProtection(void **address, size_t size, MemoryRights rights, int flags)
 {
-    *address = mmap(*address, size, _MemoryProtectRightsToNative(rights), flags, -1, 0);
-    return *address != nullptr;
-}
-
-static inline void *MemoryAllocNear(uintptr_t addressHint, size_t size, MemoryRights rights, size_t pageSize)
-{
-    void *address;
-
-    auto freeRegionCount = GetFreeRegions(nullptr, 0);
-    std::vector<RegionInfos_t> freeRegions((size_t)(freeRegionCount * 1.5));
-    freeRegionCount = GetFreeRegions(freeRegions.data(), freeRegions.size());
-    if (freeRegionCount < freeRegions.size())
-        freeRegions.resize(freeRegionCount);
-
-    std::sort(
-        freeRegions.begin(),
-        freeRegions.end(),
-        [addressHint](MemoryManipulation::RegionInfos_t const &l, MemoryManipulation::RegionInfos_t const &r)
-        { return std::max(addressHint, l.Start) - std::min(addressHint, l.Start) < std::max(addressHint, r.Start) - std::min(addressHint, r.Start); });
-
-    for (auto const &region : freeRegions)
+    void *hint   = *address;
+    void *result = mmap(hint, size, _MemoryProtectRightsToNative(rights), flags, -1, 0);
+    if (result == MAP_FAILED)
     {
-        auto start     = region.Start > addressHint ? region.Start : (region.End - pageSize);
-        auto increment = static_cast<int32_t>(region.Start > addressHint ? pageSize : -pageSize);
-
-        for (auto allocAddress = start; allocAddress >= region.Start && (allocAddress + size) <= region.End; allocAddress += increment)
-        {
-            if (allocAddress > (uintptr_t)max_user_address)
-                break;
-
-            address = (void *)allocAddress;
-            MemoryAllocWithProtection(&address, size, rights, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS);
-            if (address != nullptr)
-                return address;
-        }
+        *address = nullptr;
+        return false;
     }
 
-    // Fallback to anywhere alloc
-    address = nullptr;
-    MemoryAllocWithProtection(&address, size, rights, MAP_PRIVATE | MAP_ANONYMOUS);
+    // Kernels older than 4.17 ignore MAP_FIXED_NOREPLACE and treat the address as a hint.
+    if ((flags & MAP_FIXED_NOREPLACE) && result != hint)
+    {
+        munmap(result, size);
+        *address = nullptr;
+        return false;
+    }
 
+    *address = result;
+    return true;
+}
+
+// Allocates at this exact address, fails if it isn't free.
+static inline void *_MemoryAllocAt(void *address, size_t size, MemoryRights rights)
+{
+    // MAP_FIXED would silently replace a mapping created after the free regions were listed.
+    MemoryAllocWithProtection(&address, size, rights, MAP_FIXED_NOREPLACE | MAP_PRIVATE | MAP_ANONYMOUS);
     return address;
 }
 
-void *MemoryAlloc(void *_addressHint, size_t size, MemoryRights rights)
+static inline void *_MemoryAllocAnywhere(size_t size, MemoryRights rights)
 {
-    if (_addressHint > max_user_address)
-        _addressHint = (void *)max_user_address;
+    void *address = nullptr;
+    MemoryAllocWithProtection(&address, size, rights, MAP_PRIVATE | MAP_ANONYMOUS);
+    return address;
+}
 
-    auto pageSize    = PageSize();
-    auto addressHint = reinterpret_cast<uintptr_t>(PageRound(_addressHint, pageSize));
-    size             = _PageAddrSize((void *)addressHint, size, pageSize);
-
-    if (_addressHint == nullptr)
-    {
-        void *address = nullptr;
-        MemoryAllocWithProtection(&address, size, rights, MAP_PRIVATE | MAP_ANONYMOUS);
-        return address;
-    }
-
-    return MemoryAllocNear(addressHint, size, rights, pageSize);
+// mmap places a mapping at any page.
+static inline size_t _AllocationGranularity()
+{
+    return PageSize();
 }
 
 bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
