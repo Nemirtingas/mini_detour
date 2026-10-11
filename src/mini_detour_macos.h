@@ -746,6 +746,9 @@ size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDe
 
 size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
+    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+        iatReplaceDetails[i].NewIATAddress = nullptr;
+
     return 0;
 }
 

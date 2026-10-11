@@ -593,6 +593,9 @@ static inline ElfAddr_t *_GetExportAddress(
     size_t dynamicSymbolsNamesSize,
     const char *symbolName)
 {
+    if (symbolName == nullptr)
+        return nullptr;
+
     for (ElfSymbol_t *symbol = dynamicSymbolsStart; symbol < dynamicSymbolsEnd; symbol = (ElfSymbol_t *)((uintptr_t)symbol + dynamicSymbolsSize))
     {
         auto symbolBind = ELF_ST_BIND(symbol->st_info);
@@ -704,6 +707,10 @@ static inline void **_GetIATAddress(
     size_t dynamicSymbolsNamesSize,
     const char *symbolName)
 {
+    // ELF imports have no ordinal: they can only be found by name.
+    if (symbolName == nullptr)
+        return nullptr;
+
     for (int table = 0; table < _ImportRelocationTableCount; ++table)
     {
         for (auto relocation = relocations.Start[table]; relocation < relocations.End[table]; ++relocation)
