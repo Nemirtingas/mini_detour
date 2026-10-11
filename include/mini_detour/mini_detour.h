@@ -244,21 +244,23 @@ MINIDETOUR_EXPORT(void *) MiniDetourMemoryManipulationMemoryAlloc(void *address_
 
 /// <summary>
 /// Safely read memory, it doesn't mean it will always succeed, only that on memory not readable or no allocated, it will not crash your application.
+/// The copy stops at the first page that can't be read.
 /// </summary>
 /// <param name="address"></param>
 /// <param name="buffer"></param>
 /// <param name="size"></param>
-/// <returns>1 if the whole buffer was read, 0 otherwise</returns>
-MINIDETOUR_EXPORT(int) MiniDetourMemoryManipulationSafeMemoryRead(void *address, uint8_t *buffer, size_t size);
+/// <returns>The number of bytes read: size when everything was read</returns>
+MINIDETOUR_EXPORT(size_t) MiniDetourMemoryManipulationSafeMemoryRead(void *address, uint8_t *buffer, size_t size);
 
 /// <summary>
 /// Safely write memory, it doesn't mean it will always succeed, only that on memory not writable or no allocated, it will not crash your application.
+/// The copy stops at the first page that can't be written.
 /// </summary>
 /// <param name="address"></param>
 /// <param name="buffer"></param>
 /// <param name="size"></param>
-/// <returns>1 if the whole buffer was written, 0 otherwise</returns>
-MINIDETOUR_EXPORT(int) MiniDetourMemoryManipulationSafeMemoryWrite(void *address, const uint8_t *buffer, size_t size);
+/// <returns>The number of bytes written: size when everything was written</returns>
+MINIDETOUR_EXPORT(size_t) MiniDetourMemoryManipulationSafeMemoryWrite(void *address, const uint8_t *buffer, size_t size);
 
 /// <summary>
 /// Convenient function to write an absolute jump at an address. Pass NULL in address to get the required size of the absolute jump in bytes.
@@ -405,14 +407,16 @@ inline void *MemoryAlloc(void *address_hint, size_t size, MemoryRights rights)
     return MiniDetourMemoryManipulationMemoryAlloc(address_hint, size, rights);
 }
 
-inline bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
+// Returns the number of bytes read: size when everything was read.
+inline size_t SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
 {
-    return MiniDetourMemoryManipulationSafeMemoryRead(address, buffer, size) != 0;
+    return MiniDetourMemoryManipulationSafeMemoryRead(address, buffer, size);
 }
 
-inline bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
+// Returns the number of bytes written: size when everything was written.
+inline size_t SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
 {
-    return MiniDetourMemoryManipulationSafeMemoryWrite(address, buffer, size) != 0;
+    return MiniDetourMemoryManipulationSafeMemoryWrite(address, buffer, size);
 }
 
 inline size_t WriteAbsoluteJump(void *address, void *destination)
