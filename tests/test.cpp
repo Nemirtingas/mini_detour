@@ -4,6 +4,8 @@
 #include <mini_detour/mini_detour.h>
 #include <spdlog/spdlog-inl.h>
 #include <iostream>
+#include <stdlib.h>
+#include <string>
 
 #if defined(MINIDETOUR_OS_WINDOWS)
 #define EXPORT_HOOK_TEST_LIBRARY "./export_hook_test_library.dll"
@@ -58,9 +60,30 @@ static void _EnterRecursiveThunk(void *&_pCode)
     _pCode = pCode;
 }
 
+// Value of an environment variable, empty when it isn't set (getenv is deprecated with MSVC).
+static std::string ReadEnvironmentVariable(const char *name)
+{
+#if defined(_MSC_VER)
+    char *value = nullptr;
+    size_t size = 0;
+    std::string result;
+    if (_dupenv_s(&value, &size, name) == 0 && value != nullptr)
+        result = value;
+
+    free(value);
+    return result;
+#else
+    const char *value = getenv(name);
+    return value != nullptr ? value : "";
+#endif
+}
+
 int main(int argc, char *argv[])
 {
-    // global setup...
+    // The library logs every hook and relocated instruction at the info level: tens of thousands of lines for the
+    // whole suite. Only warnings and errors are shown, unless MINIDETOUR_TEST_LOG_LEVEL asks for more (info, debug...).
+    const std::string logLevel = ReadEnvironmentVariable("MINIDETOUR_TEST_LOG_LEVEL");
+    spdlog::set_level(logLevel.empty() ? spdlog::level::warn : spdlog::level::from_str(logLevel));
 
     int result = Catch::Session().run(argc, argv);
 
