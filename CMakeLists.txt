@@ -159,6 +159,9 @@ function(minidetour_add_library name)
     $<$<BOOL:${MSVC}>:/utf-8>
   )
 
+  # The C++ part of the public header (noexcept, deleted functions) needs C++11 in the projects using it too.
+  target_compile_features(${name} PUBLIC cxx_std_11)
+
   target_include_directories(
     ${name}
     PUBLIC
