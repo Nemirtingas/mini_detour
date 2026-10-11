@@ -559,18 +559,54 @@ _GetExportAddress(void *moduleBase, PDWORD functionAddressesRVA, PDWORD function
     return nullptr;
 }
 
-static inline void **_GetIATAddress(void *moduleBase, PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor, const char *moduleName, const char *symbolName, DWORD ordinal)
+// The import descriptors end with a zeroed one. Characteristics can't be used to detect it: it is the
+// OriginalFirstThunk, which is 0 for modules built by old linkers.
+static inline bool _IsLastImportDescriptor(PIMAGE_IMPORT_DESCRIPTOR importDescriptor)
+{
+    return importDescriptor->Name == 0 && importDescriptor->FirstThunk == 0;
+}
+
+// Without OriginalFirstThunk, the loaded IAT only holds resolved addresses: the import names are gone.
+// The slot is found from its value: boundAddress, or the address the loader resolved for the symbol.
+static inline void **_FindBoundIATSlot(void **addressTable, const char *libraryName, const char *symbolName, DWORD ordinal, void *boundAddress)
+{
+    if (boundAddress == nullptr)
+    {
+        HMODULE library = GetModuleHandleA(libraryName);
+        if (library == nullptr)
+            return nullptr;
+
+        boundAddress = (void *)GetProcAddress(library, symbolName != nullptr ? symbolName : MAKEINTRESOURCEA(ordinal));
+        if (boundAddress == nullptr)
+            return nullptr;
+    }
+
+    for (int i = 0; addressTable[i] != nullptr; ++i)
+    {
+        if (addressTable[i] == boundAddress)
+            return addressTable + i;
+    }
+
+    return nullptr;
+}
+
+// boundAddress: current value of the slot if known (used only for modules without OriginalFirstThunk).
+static inline void **
+_GetIATAddress(void *moduleBase, PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor, const char *moduleName, const char *symbolName, DWORD ordinal, void *boundAddress = nullptr)
 {
     void **addressTable         = nullptr;
     PIMAGE_THUNK_DATA thunkData = nullptr;
 
-    for (auto *importDescriptor = imageImportDescriptor; importDescriptor->Characteristics != 0; ++importDescriptor)
+    for (auto *importDescriptor = imageImportDescriptor; !_IsLastImportDescriptor(importDescriptor); ++importDescriptor)
     {
         auto *libraryName = (const char *)((uintptr_t)moduleBase + importDescriptor->Name);
         if (stricmp(moduleName, libraryName) == 0)
         {
             addressTable = (void **)((uintptr_t)moduleBase + importDescriptor->FirstThunk);
-            thunkData    = (PIMAGE_THUNK_DATA)((uintptr_t)moduleBase + importDescriptor->OriginalFirstThunk);
+            if (importDescriptor->OriginalFirstThunk == 0)
+                return _FindBoundIATSlot(addressTable, libraryName, symbolName, ordinal, boundAddress);
+
+            thunkData = (PIMAGE_THUNK_DATA)((uintptr_t)moduleBase + importDescriptor->OriginalFirstThunk);
             break;
         }
     }
@@ -647,8 +683,18 @@ size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *iatDetails, size_t iat
 
     if (iatDetails == nullptr)
     {
-        for (auto *importDescriptor = imageImportDescriptor; importDescriptor->Characteristics != 0; ++importDescriptor)
+        for (auto *importDescriptor = imageImportDescriptor; !_IsLastImportDescriptor(importDescriptor); ++importDescriptor)
         {
+            // Without OriginalFirstThunk, count the IAT slots.
+            auto *slot = (void **)((uintptr_t)moduleBase + importDescriptor->FirstThunk);
+            if (importDescriptor->OriginalFirstThunk == 0)
+            {
+                for (; *slot != nullptr; ++slot)
+                    ++result;
+
+                continue;
+            }
+
             for (thunkData = (PIMAGE_THUNK_DATA)((uintptr_t)moduleBase + importDescriptor->OriginalFirstThunk); thunkData->u1.AddressOfData != 0; ++thunkData)
             {
                 ++result;
@@ -658,12 +704,27 @@ size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *iatDetails, size_t iat
         return result;
     }
 
-    for (auto *importDescriptor = imageImportDescriptor; importDescriptor->Characteristics != 0 && result < iatDetailsCount; ++importDescriptor)
+    for (auto *importDescriptor = imageImportDescriptor; !_IsLastImportDescriptor(importDescriptor) && result < iatDetailsCount; ++importDescriptor)
     {
         auto *libraryName = (const char *)((uintptr_t)moduleBase + importDescriptor->Name);
 
         addressTable = (void **)((uintptr_t)moduleBase + importDescriptor->FirstThunk);
-        thunkData    = (PIMAGE_THUNK_DATA)((uintptr_t)moduleBase + importDescriptor->OriginalFirstThunk);
+
+        // Without OriginalFirstThunk, only the resolved addresses are known.
+        if (importDescriptor->OriginalFirstThunk == 0)
+        {
+            for (int i = 0; addressTable[i] != nullptr && result < iatDetailsCount; ++i)
+            {
+                iatDetails[result].ImportOrdinal      = uint32_t(-1);
+                iatDetails[result].ImportName         = nullptr;
+                iatDetails[result].ImportCallAddress  = addressTable[i];
+                iatDetails[result++].ImportModuleName = libraryName;
+            }
+
+            continue;
+        }
+
+        thunkData = (PIMAGE_THUNK_DATA)((uintptr_t)moduleBase + importDescriptor->OriginalFirstThunk);
 
         for (int i = 0; thunkData[i].u1.AddressOfData != 0 && result < iatDetailsCount; ++i)
         {
@@ -820,15 +881,26 @@ size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDe
     PIMAGE_IMPORT_DESCRIPTOR imageImportDescriptor;
     size_t result = 0;
 
+    // The slots of modules without OriginalFirstThunk are found from their current value: the replacement address.
+    std::vector<void *> replacedAddresses(iatReplaceDetailsCount);
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+    {
+        replacedAddresses[i]               = iatReplaceDetails[i].NewIATAddress;
         iatReplaceDetails[i].NewIATAddress = nullptr;
+    }
 
     if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &imageImportDescriptor))
         return result;
 
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
     {
-        auto iatAddress = _GetIATAddress(moduleBase, imageImportDescriptor, iatReplaceDetails[i].IATModuleName, iatReplaceDetails[i].IATName, iatReplaceDetails[i].IATOrdinal);
+        auto iatAddress = _GetIATAddress(
+            moduleBase,
+            imageImportDescriptor,
+            iatReplaceDetails[i].IATModuleName,
+            iatReplaceDetails[i].IATName,
+            iatReplaceDetails[i].IATOrdinal,
+            replacedAddresses[i]);
         if (iatAddress == nullptr)
         {
             iatReplaceDetails[i].NewIATAddress = nullptr;
