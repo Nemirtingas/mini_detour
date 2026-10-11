@@ -56,6 +56,15 @@ bool _AddressesAreRelativeJumpable(void *source, void *dest)
     // return addr >= -134217728 && addr <= 134217724; // 26 bits signed integer range
 }
 
+// An export table entry holds a 32 bits RVA: the address must be above the module base, within 4 GB.
+bool _AddressIsRepresentableAsRva(void *moduleBase, void *address)
+{
+    uintptr_t base = reinterpret_cast<uintptr_t>(moduleBase);
+    uintptr_t addr = reinterpret_cast<uintptr_t>(address);
+
+    return addr >= base && (addr - base) <= UINT32_MAX;
+}
+
 #pragma pack(push, 1)
 
 // Struct used by the memory manager to allocate trampolines
