@@ -503,7 +503,7 @@ static bool _LoadModuleCommonDetails(ElfDyn_t *dynamicTableStart, const char **d
 
     *dynamicSymbolsNamesSize = dynamicEntry->d_un.d_val;
 
-    return *dynamicSymbolsNames != nullptr && dynamicSymbolsNamesSize != 0;
+    return *dynamicSymbolsNames != nullptr && *dynamicSymbolsNamesSize != 0;
 }
 
 static bool _LoadModuleExportDetails(
