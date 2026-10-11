@@ -208,8 +208,10 @@ static inline cs_err _InitDisasm(CodeDisasm &disasm, int /*mode*/)
     return disasm.Init(cs_arch::CS_ARCH_ARM64, (cs_mode)(cs_mode::CS_MODE_ARM | CodeDisasm::RuntimeEndianness()));
 }
 
-// Follows the thunks to the function they jump to: incremental linking thunks (b target), and PLT entries, read from
-// their GOT entry: [bti c]; adrp x16, page; ldr x17, [x16, #offset]; add x16, x16, #offset; br x17
+// Follows the thunks to the function they jump to: incremental linking thunks (b target), and the jumps through an
+// address slot, PLT entries (GOT entry) and Windows import thunks (IAT entry):
+//   [bti c]; adrp x16, page; ldr x17, [x16, #offset]; add x16, x16, #offset; br x17
+//   adrp x16, page; ldr x16, [x16, #offset]; br x16
 void _EnterRecursiveThunk(void *&_pCode)
 {
     // A longer chain is most likely a loop.
@@ -231,7 +233,11 @@ void _EnterRecursiveThunk(void *&_pCode)
         if (code[0] == 0xD503245F) // bti c
             ++code;
 
-        if ((code[0] & 0x9F00001F) != 0x90000010 || (code[1] & 0xFFC003FF) != 0xF9400211 || code[3] != 0xD61F0220)
+        // Both load the address from the slot adrp + ldr point to, into x17 (PLT entry) or x16 (Windows import thunk).
+        const bool isAdrpX16     = (code[0] & 0x9F00001F) == 0x90000010;
+        const bool isPltEntry    = isAdrpX16 && (code[1] & 0xFFC003FF) == 0xF9400211 && code[3] == 0xD61F0220;
+        const bool isImportThunk = isAdrpX16 && (code[1] & 0xFFC003FF) == 0xF9400210 && code[2] == 0xD61F0200;
+        if (!isPltEntry && !isImportThunk)
             return;
 
         // adrp: signed 21 bits page count, immhi (bits 5-23) and immlo (bits 29-30).
@@ -239,9 +245,9 @@ void _EnterRecursiveThunk(void *&_pCode)
         if (pages & (int64_t(1) << 20))
             pages -= int64_t(1) << 21;
 
-        const uintptr_t page     = (reinterpret_cast<uintptr_t>(code) & ~uintptr_t(0xFFF)) + static_cast<uintptr_t>(pages * 0x1000);
-        const uintptr_t gotEntry = page + ((code[1] >> 10) & 0xFFF) * 8;
-        _pCode                   = *reinterpret_cast<void **>(gotEntry);
+        const uintptr_t page = (reinterpret_cast<uintptr_t>(code) & ~uintptr_t(0xFFF)) + static_cast<uintptr_t>(pages * 0x1000);
+        const uintptr_t slot = page + ((code[1] >> 10) & 0xFFF) * 8;
+        _pCode               = *reinterpret_cast<void **>(slot);
     }
 }
 
