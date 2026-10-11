@@ -484,9 +484,9 @@ class MemoryManager
 
 namespace MiniDetour
 {
-// Holds every object with a constructor or destructor that the library keeps between calls, instead of separate static
-// objects: they are built in the order they are declared here, which C++ doesn't guarantee for statics. Trivial values
-// can stay plain statics.
+// Holds everything the library keeps between calls that code has to build or compute (objects with a constructor or a
+// destructor, values queried from the system), instead of separate statics: they are built in the order they are
+// declared here, which C++ doesn't guarantee for statics. Only constants known at compile time stay plain statics.
 class Globals_t
 {
     // Defined once the platform functions are known. It must not use Instance(): it runs while the instance is built.
