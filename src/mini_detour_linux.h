@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include <errno.h>
 #include <elf.h>
+#include <dlfcn.h>
+#include <link.h>
 
 #ifndef MAP_FIXED_NOREPLACE
 #define MAP_FIXED_NOREPLACE 0x100000
@@ -465,28 +467,15 @@ static bool _LoadModuleExportSymbolsCount(ElfDyn_t *dynamicTableStart, ElfSymbol
 
 static bool _LoadModuleDynamicTable(void *moduleHandle, void **moduleBase, ElfDyn_t **dynamicTable)
 {
-    ElfHeader_t *elfHeader = *(ElfHeader_t **)moduleHandle;
-
-    if (elfHeader->e_ident[EI_MAG0] != ELFMAG0 || elfHeader->e_ident[EI_MAG1] != ELFMAG1 || elfHeader->e_ident[EI_MAG2] != ELFMAG2 || elfHeader->e_ident[EI_MAG3] != ELFMAG3)
-    {
+    // l_addr is the load bias, not the ELF header: it is 0 for a non-PIE executable.
+    // Symbol values and relocation offsets are relative to this bias.
+    struct link_map *linkMap = nullptr;
+    if (moduleHandle == nullptr || dlinfo(moduleHandle, RTLD_DI_LINKMAP, &linkMap) != 0 || linkMap == nullptr || linkMap->l_ld == nullptr)
         return false;
-    }
 
-    ElfProgramHeader_t *programHeadersStart = (ElfProgramHeader_t *)((uintptr_t)elfHeader + elfHeader->e_phoff);
-    ElfProgramHeader_t *programHeadersEnd   = (ElfProgramHeader_t *)((uintptr_t)programHeadersStart + elfHeader->e_phentsize * elfHeader->e_phnum);
-
-    for (ElfProgramHeader_t *programHeader = programHeadersStart; programHeader < programHeadersEnd;
-         programHeader                     = (ElfProgramHeader_t *)((uintptr_t)programHeader + elfHeader->e_phentsize))
-    {
-        if (programHeader->p_type == PT_DYNAMIC)
-        {
-            *moduleBase   = (void *)elfHeader;
-            *dynamicTable = (ElfDyn_t *)((uintptr_t)elfHeader + programHeader->p_vaddr);
-            return true;
-        }
-    }
-
-    return false;
+    *moduleBase   = (void *)linkMap->l_addr;
+    *dynamicTable = (ElfDyn_t *)linkMap->l_ld;
+    return true;
 }
 
 static bool _LoadModuleCommonDetails(ElfDyn_t *dynamicTableStart, const char **dynamicSymbolsNames, size_t *dynamicSymbolsNamesSize)
