@@ -187,6 +187,26 @@ struct CpuPush
 
 #pragma pack(pop)
 
+// Returns true if the instruction is a conditional jump (Jcc rel8 / Jcc rel32) and gives its condition code.
+// jrcxz/jecxz and loop also are relative jumps but have no rel32 form, they are not handled.
+static bool _GetJccConditionCode(cs_insn const &instruction, uint8_t &conditionCode)
+{
+    uint8_t const *opcode = instruction.detail->x86.opcode;
+    if (opcode[0] >= 0x70 && opcode[0] <= 0x7F)
+    {
+        conditionCode = opcode[0] & 0x0F;
+        return true;
+    }
+
+    if (opcode[0] == 0x0F && opcode[1] >= 0x80 && opcode[1] <= 0x8F)
+    {
+        conditionCode = opcode[1] & 0x0F;
+        return true;
+    }
+
+    return false;
+}
+
 void _EnterRecursiveThunk(void *&_pCode)
 {
     uint8_t *pCode = reinterpret_cast<uint8_t *>(_pCode);
@@ -243,8 +263,18 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
             }
             else if (disasm.GetJumpType() == 3)
             {
-                relocatedOriginalCodeSize += disasm.GetInstruction().size;
-                relocatable_size += disasm.GetInstruction().size;
+                uint8_t conditionCode;
+                if (disasm.GetInstruction().id == X86_INS_JMP)
+                {
+                    relocatedOriginalCodeSize += disasm.GetInstruction().size;
+                    relocatable_size += disasm.GetInstruction().size;
+                }
+                else if (_GetJccConditionCode(disasm.GetInstruction(), conditionCode))
+                {
+                    // Jcc rel8 over the not taken jump + not taken jump + taken jump
+                    relocatedOriginalCodeSize += 2 + 2 * AbsJump::GetMaxOpcodeSize();
+                    relocatable_size += disasm.GetInstruction().size;
+                }
             }
             else if (disasm.GetJumpType() == 5)
             {
@@ -313,9 +343,22 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
 
         if (disasm.IsInstructionTerminating())
         {
-            if (disasm.GetJumpType() == 3)
+            uint8_t conditionCode;
+            if (disasm.GetJumpType() == 3 && disasm.GetInstruction().id == X86_INS_JMP)
             {
                 relocatedSize += disasm.GetInstruction().size;
+                originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().detail->x86.operands[0].imm);
+                break;
+            }
+            else if (disasm.GetJumpType() == 3 && _GetJccConditionCode(disasm.GetInstruction(), conditionCode))
+            {
+                // Jcc taken          ; short jump over the not taken path
+                // JMP not_taken      ; absolute jump to the instruction after the Jcc
+                // taken: JMP target  ; absolute jump to the Jcc target (written below)
+                relocatedSize += disasm.GetInstruction().size;
+                *pTrampolineCode++ = 0x70 | conditionCode;
+                *pTrampolineCode++ = static_cast<uint8_t>(AbsJump::GetMaxOpcodeSize());
+                pTrampolineCode += AbsJump::WriteOpcodes(reinterpret_cast<void *>(pTrampolineCode), reinterpret_cast<void *>(code_addr), 0, 0);
                 originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().detail->x86.operands[0].imm);
                 break;
             }
