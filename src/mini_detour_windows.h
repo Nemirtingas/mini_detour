@@ -495,7 +495,12 @@ static bool _ReplaceModuleExportWithTrampoline(void *moduleBase, PDWORD exportAd
     MemoryManipulation::MemoryRights oldRights;
 
     *exportCallAddress = nullptr;
-    auto exportJump    = GetMemoryManager().GetFreeJump(moduleBase);
+
+    // The export RVA is unsigned: the jump must be above the module base, and within 4 GB of it.
+    // A new jump region is searched from the end of the module image, so it lands above it.
+    auto imageNTHeaders = (PIMAGE_NT_HEADERS)((char *)moduleBase + ((PIMAGE_DOS_HEADER)moduleBase)->e_lfanew);
+    auto moduleEnd      = (void *)((char *)moduleBase + imageNTHeaders->OptionalHeader.SizeOfImage);
+    auto exportJump     = GetMemoryManager().GetFreeJump(moduleEnd, moduleBase, _AddressIsRepresentableAsRva);
     if (exportJump == nullptr)
         goto Error;
 

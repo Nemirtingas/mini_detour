@@ -344,7 +344,8 @@ class MemoryManager
         //     MemoryManipulation::MemoryFree(v, _RegionSize());
     }
 
-    void *AllocJumpsRegion(void *hint_addr)
+    // isUsable(reference, jump) tells if a jump slot can be used from reference.
+    void *AllocJumpsRegion(void *hint_addr, void *reference, bool (*isUsable)(void *, void *))
     {
         void *jump_table = nullptr;
 
@@ -353,9 +354,9 @@ class MemoryManager
 
         if (jump_table != nullptr)
         {
-            if (_AddressesAreRelativeJumpable(hint_addr, jump_table))
+            if (isUsable(reference, jump_table))
             {
-                SPDLOG_INFO("Relative jump from {} to {} is possible", hint_addr, jump_table);
+                SPDLOG_INFO("Jump region {} is usable from {}", jump_table, reference);
 
                 memset(jump_table, 0xCC, _RegionSize());
 
@@ -370,7 +371,7 @@ class MemoryManager
             }
             else
             {
-                SPDLOG_INFO("Relative jump from {} to {} is impossible", hint_addr, jump_table);
+                SPDLOG_INFO("Jump region {} is not usable from {}", jump_table, reference);
 
                 MiniDetour::MemoryManipulation::MemoryFree(jump_table, _RegionSize());
                 jump_table = nullptr;
@@ -380,7 +381,10 @@ class MemoryManager
         return jump_table;
     }
 
-    void *GetFreeJump(void *address_hint)
+    void *GetFreeJump(void *address_hint) { return GetFreeJump(address_hint, address_hint, _AddressesAreRelativeJumpable); }
+
+    // Free jump slot for which isUsable(reference, slot) is true. A new region is allocated near address_hint if needed.
+    void *GetFreeJump(void *address_hint, void *reference, bool (*isUsable)(void *, void *))
     {
         std::lock_guard<std::recursive_mutex> lock(_Mutex);
 
@@ -388,7 +392,7 @@ class MemoryManager
         {
             for (int i = 0; i < region.bitmap.size(); ++i)
             {
-                if (!region.bitmap[i] && _AddressesAreRelativeJumpable(address_hint, region.jump_table + i))
+                if (!region.bitmap[i] && isUsable(reference, region.jump_table + i))
                 {
                     SPDLOG_INFO("Using free jump {} in region {} for {}", (void *)(region.jump_table + i), (void *)region.jump_table, address_hint);
                     region.bitmap[i] = true;
@@ -397,7 +401,7 @@ class MemoryManager
             }
         }
 
-        void *res = AllocJumpsRegion(address_hint);
+        void *res = AllocJumpsRegion(address_hint, reference, isUsable);
         if (res == nullptr)
         {
             SPDLOG_INFO("Couldn't find a suitable free jump and couldn't allocate one near {}, hooking will fail.", address_hint);
