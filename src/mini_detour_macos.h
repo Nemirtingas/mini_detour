@@ -315,32 +315,25 @@ static inline void *MemoryAllocNear(mach_port_t task, uintptr_t addressHint, siz
     std::sort(
         freeRegions.begin(),
         freeRegions.end(),
-        [addressHint](MemoryManipulation::RegionInfos_t const &l, MemoryManipulation::RegionInfos_t const &r)
-        { return std::max(addressHint, l.Start) - std::min(addressHint, l.Start) < std::max(addressHint, r.Start) - std::min(addressHint, r.Start); });
+        [addressHint](RegionInfos_t const &l, RegionInfos_t const &r) { return _DistanceToRegion(addressHint, l) < _DistanceToRegion(addressHint, r); });
 
     for (auto const &region : freeRegions)
     {
-        // Range of the allocation start address. Computed from the region size so a huge size can't wrap around,
-        // and the downward search starts at the highest address where the whole allocation fits.
-        if (size > region.End - region.Start)
-            continue;
+        address = _AllocInFreeRegion(
+            region,
+            addressHint,
+            size,
+            pageSize,
+            (uintptr_t)max_user_address,
+            [&](uintptr_t allocAddress)
+            {
+                void *allocated = (void *)allocAddress;
+                MemoryAllocWithProtection(task, &allocated, (mach_vm_size_t)size, rights, VM_FLAGS_FIXED);
+                return allocated;
+            });
 
-        const uintptr_t lowest  = region.Start;
-        const uintptr_t highest = std::min<uintptr_t>(region.End - size, (uintptr_t)max_user_address);
-        if (highest < lowest)
-            continue;
-
-        const bool upward = region.Start > addressHint;
-        for (uintptr_t allocAddress = upward ? lowest : highest;; allocAddress = upward ? allocAddress + pageSize : allocAddress - pageSize)
-        {
-            address = (void *)allocAddress;
-            MemoryAllocWithProtection(task, &address, (mach_vm_size_t)size, rights, VM_FLAGS_FIXED);
-            if (address != nullptr)
-                return address;
-
-            if (upward ? highest - allocAddress < pageSize : allocAddress - lowest < pageSize)
-                break;
-        }
+        if (address != nullptr)
+            return address;
     }
 
     // Fallback to anywhere alloc
