@@ -613,6 +613,10 @@ class Hook_t
         _HookCode.clear();
         _OriginalTrampolineAddress = nullptr;
         _OriginalFuncAddress       = nullptr;
+        // Don't expose the old trampoline: once freed, it can be given to another hook.
+        _OriginalTrampolineCallAddress = nullptr;
+        _DetourFunc                    = nullptr;
+        _DetourCallFunc                = nullptr;
     }
 
     bool CanHook(void *func)
