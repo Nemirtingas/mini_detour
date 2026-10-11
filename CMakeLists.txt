@@ -6,13 +6,6 @@ project(
   LANGUAGES C CXX
 )
 
-if(APPLE)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
-endif()
-
-set(CMAKE_C_STANDARD_LIBRARIES "" CACHE STRING "" FORCE)
-set(CMAKE_CXX_STANDARD_LIBRARIES "" CACHE STRING "" FORCE)
-
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -166,6 +159,9 @@ function(minidetour_add_library name)
     $<$<BOOL:${MSVC}>:/utf-8>
   )
 
+  # The C++ part of the public header (noexcept, deleted functions) needs C++11 in the projects using it too.
+  target_compile_features(${name} PUBLIC cxx_std_11)
+
   target_include_directories(
     ${name}
     PUBLIC
@@ -286,7 +282,7 @@ install(FILES ${MINIDETOUR_HEADERS}
 # Export targets
 install(
   EXPORT MiniDetourTargets
-  FILE MiniDetourConfig.cmake
+  FILE MiniDetourTargets.cmake
   NAMESPACE Nemirtingas::
   DESTINATION lib/cmake/MiniDetour
 )
@@ -302,7 +298,7 @@ configure_package_config_file(
   
 write_basic_package_version_file(
   ${CMAKE_CURRENT_BINARY_DIR}/MiniDetourConfigVersion.cmake
-  VERSION 0.0.0
+  VERSION ${PROJECT_VERSION}
   COMPATIBILITY SameMajorVersion)
   
 install(FILES
