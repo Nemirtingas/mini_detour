@@ -308,12 +308,7 @@ class MemoryManager
     std::vector<JumpRegion_t> jumps_regions;     // Jumps next to functions addresses
     std::vector<memory_t *> trampolines_regions; // memory regions for trampolines
 
-    // Guards the regions, and the pages they share between hooks: hooks can be set from several threads.
-    std::recursive_mutex _Mutex;
-
   public:
-    std::recursive_mutex &Mutex() { return _Mutex; }
-
     // Allocates near hint_addr. When the closest free memory isn't usable from reference (for example below a module
     // that needs a positive RVA), the other free regions are tried, closest first.
     void *_AllocUsableJumpsRegion(void *hint_addr, void *reference, bool (*isUsable)(void *, void *))
@@ -383,8 +378,6 @@ class MemoryManager
     // Free jump slot for which isUsable(reference, slot) is true. A new region is allocated near address_hint if needed.
     void *GetFreeJump(void *address_hint, void *reference, bool (*isUsable)(void *, void *))
     {
-        std::lock_guard<std::recursive_mutex> lock(_Mutex);
-
         for (auto &region : jumps_regions)
         {
             for (size_t i = 0; i < region.bitmap.size(); ++i)
@@ -412,8 +405,6 @@ class MemoryManager
 
     void FreeJump(void *jump)
     {
-        std::lock_guard<std::recursive_mutex> lock(_Mutex);
-
         SPDLOG_DEBUG("Freeing jump {}", jump);
 
         JumpRegion_t::jump_t *jump_addr = reinterpret_cast<JumpRegion_t::jump_t *>(jump);
@@ -443,8 +434,6 @@ class MemoryManager
 
     uint8_t *GetFreeTrampoline(size_t mem_size)
     {
-        std::lock_guard<std::recursive_mutex> lock(_Mutex);
-
         // A larger trampoline would be written over the next slot.
         if (mem_size > sizeof(memory_t::data))
         {
@@ -482,8 +471,6 @@ class MemoryManager
 
     void FreeTrampoline(void *trampoline)
     {
-        std::lock_guard<std::recursive_mutex> lock(_Mutex);
-
         SPDLOG_DEBUG("Freeing trampoline {}", trampoline);
         memory_t *mem = reinterpret_cast<memory_t *>(reinterpret_cast<uint8_t *>(trampoline) - offsetof(memory_t, data));
 
@@ -495,13 +482,30 @@ class MemoryManager
     }
 };
 
-// Never destroyed: Hook_t objects with static storage restore their hook (and use the manager) during static
-// destruction, possibly after the manager would have been destroyed.
-static MemoryManager &GetMemoryManager()
+namespace MiniDetour
 {
-    static MemoryManager *memoryManager = new MemoryManager();
-    return *memoryManager;
-}
+// Holds every object with a constructor or destructor that the library keeps between calls, instead of separate static
+// objects: they are built in the order they are declared here, which C++ doesn't guarantee for statics. Trivial values
+// can stay plain statics.
+class Globals_t
+{
+    Globals_t() = default;
+
+  public:
+    // Serializes the operations that write code or import/export tables: they share the memory manager slots and
+    // change the rights of pages shared between hooks, and hooks can be set from several threads.
+    std::mutex HookMutex;
+    MemoryManager Memory;
+
+    // Never destroyed: Hook_t objects with static storage restore their hook (and use the globals) during static
+    // destruction, possibly after the globals would have been destroyed.
+    static Globals_t &Instance()
+    {
+        static Globals_t *instance = new Globals_t();
+        return *instance;
+    }
+};
+} // namespace MiniDetour
 
 // Writes an absolute jump in a jump slot, which is read/execute the rest of the time, and flushes it.
 static bool _WriteJumpSlot(void *jump, void *destination, int sourceMode, int destinationMode)
@@ -677,11 +681,11 @@ class Hook_t
         {
             if (_TrampolineAddress != nullptr)
             { // If we have a relative jump, clear it
-                GetMemoryManager().FreeJump(_TrampolineAddress);
+                Globals_t::Instance().Memory.FreeJump(_TrampolineAddress);
                 _TrampolineAddress = nullptr;
             }
 
-            GetMemoryManager().FreeTrampoline(_OriginalTrampolineAddress);
+            Globals_t::Instance().Memory.FreeTrampoline(_OriginalTrampolineAddress);
         }
 
         _SavedCode.clear();
@@ -796,7 +800,7 @@ class Hook_t
         else
         {
             // Setup the trampoline
-            void *jump_mem = GetMemoryManager().GetFreeJump(functionToReplace);
+            void *jump_mem = Globals_t::Instance().Memory.GetFreeJump(functionToReplace);
             if (jump_mem == nullptr)
             {
                 _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
@@ -805,14 +809,14 @@ class Hook_t
 
             if (!_WriteJumpSlot(jump_mem, newFunction, func_mode, hook_mode))
             {
-                GetMemoryManager().FreeJump(jump_mem);
+                Globals_t::Instance().Memory.FreeJump(jump_mem);
                 _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
                 return false;
             }
 
             if (!freezer.Freeze(functionToReplace, relocatableSize))
             {
-                GetMemoryManager().FreeJump(jump_mem);
+                Globals_t::Instance().Memory.FreeJump(jump_mem);
                 _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
                 return false;
             }
@@ -869,7 +873,7 @@ class Hook_t
         // on its destination). Used to check the slot size, and to protect and flush the whole trampoline.
         totalOriginalTrampolineSize = relocatedOriginalCodeSize + AbsJump::GetMaxOpcodeSize();
 
-        _OriginalTrampolineAddress = GetMemoryManager().GetFreeTrampoline(totalOriginalTrampolineSize);
+        _OriginalTrampolineAddress = Globals_t::Instance().Memory.GetFreeTrampoline(totalOriginalTrampolineSize);
         if (_OriginalTrampolineAddress == nullptr)
         {
             SPDLOG_ERROR("Failed to get memory for trampoline.");
@@ -907,7 +911,7 @@ class Hook_t
             SPDLOG_INFO("Relative hook");
 
             // Setup the trampoline
-            void *jump_mem = GetMemoryManager().GetFreeJump(functionToHook);
+            void *jump_mem = Globals_t::Instance().Memory.GetFreeJump(functionToHook);
             if (jump_mem == nullptr)
             {
                 SPDLOG_ERROR("Failed to get memory for jump.");
@@ -917,7 +921,7 @@ class Hook_t
             SPDLOG_INFO("Trampoline located at: {}", jump_mem);
             if (!_WriteJumpSlot(jump_mem, newFunction, func_mode, hook_mode))
             {
-                GetMemoryManager().FreeJump(jump_mem);
+                Globals_t::Instance().Memory.FreeJump(jump_mem);
                 SPDLOG_ERROR("Failed to protect jump memory.");
                 goto error;
             }
@@ -943,7 +947,7 @@ class Hook_t
                 _OtherThreadsFreezer_t freezer;
                 if (!freezer.Freeze(functionToHook, _HookCode.size()))
                 {
-                    GetMemoryManager().FreeJump(jump_mem);
+                    Globals_t::Instance().Memory.FreeJump(jump_mem);
                     SPDLOG_ERROR("A thread is running the code to hook.");
                     goto error;
                 }
@@ -990,7 +994,7 @@ class Hook_t
 
         if (_OriginalTrampolineAddress != nullptr)
         {
-            GetMemoryManager().FreeTrampoline(_OriginalTrampolineAddress);
+            Globals_t::Instance().Memory.FreeTrampoline(_OriginalTrampolineAddress);
             _OriginalTrampolineAddress = nullptr;
         }
 
@@ -1189,7 +1193,7 @@ MiniDetourModuleManipulationReplaceModuleExports(void *moduleHandle, MiniDetourM
     if (exportReplaceDetails == nullptr && exportReplaceDetailsCount != 0)
         return 0;
 
-    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
+    std::lock_guard<std::mutex> lock(MiniDetour::Globals_t::Instance().HookMutex);
     return MiniDetour::ModuleManipulation::Implementation::ReplaceModuleExports(moduleHandle, exportReplaceDetails, exportReplaceDetailsCount);
 }
 
@@ -1199,7 +1203,7 @@ MiniDetourModuleManipulationRestoreModuleExports(void *moduleHandle, MiniDetourM
     if (exportReplaceDetails == nullptr && exportReplaceDetailsCount != 0)
         return 0;
 
-    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
+    std::lock_guard<std::mutex> lock(MiniDetour::Globals_t::Instance().HookMutex);
     return MiniDetour::ModuleManipulation::Implementation::RestoreModuleExports(moduleHandle, exportReplaceDetails, exportReplaceDetailsCount);
 }
 
@@ -1209,7 +1213,7 @@ MiniDetourModuleManipulationReplaceModuleIATs(void *moduleHandle, MiniDetourModu
     if (iatReplaceDetails == nullptr && iatReplaceDetailsCount != 0)
         return 0;
 
-    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
+    std::lock_guard<std::mutex> lock(MiniDetour::Globals_t::Instance().HookMutex);
     return MiniDetour::ModuleManipulation::Implementation::ReplaceModuleIATs(moduleHandle, iatReplaceDetails, iatReplaceDetailsCount);
 }
 
@@ -1219,7 +1223,7 @@ MiniDetourModuleManipulationRestoreModuleIATs(void *moduleHandle, MiniDetourModu
     if (iatReplaceDetails == nullptr && iatReplaceDetailsCount != 0)
         return 0;
 
-    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
+    std::lock_guard<std::mutex> lock(MiniDetour::Globals_t::Instance().HookMutex);
     return MiniDetour::ModuleManipulation::Implementation::RestoreModuleIATs(moduleHandle, iatReplaceDetails, iatReplaceDetailsCount);
 }
 
@@ -1233,7 +1237,7 @@ MINIDETOUR_EXPORT(minidetour_hook_handle_t) MiniDetourHookTAlloc()
 
 MINIDETOUR_EXPORT(void) MiniDetourHookTFree(minidetour_hook_handle_t handle)
 {
-    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
+    std::lock_guard<std::mutex> lock(MiniDetour::Globals_t::Instance().HookMutex);
     auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t *>(handle);
     delete hook;
 }
@@ -1253,7 +1257,7 @@ MINIDETOUR_EXPORT(int) MiniDetourHookTCanHook(minidetour_hook_handle_t handle, v
 
 MINIDETOUR_EXPORT(void *) MiniDetourHookTHookFunction(minidetour_hook_handle_t handle, void *function_to_hook, void *new_function)
 {
-    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
+    std::lock_guard<std::mutex> lock(MiniDetour::Globals_t::Instance().HookMutex);
     auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t *>(handle);
     if (hook == nullptr || function_to_hook == nullptr || new_function == nullptr)
         return nullptr;
@@ -1263,7 +1267,7 @@ MINIDETOUR_EXPORT(void *) MiniDetourHookTHookFunction(minidetour_hook_handle_t h
 
 MINIDETOUR_EXPORT(void *) MiniDetourHookTRestoreFunction(minidetour_hook_handle_t handle)
 {
-    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
+    std::lock_guard<std::mutex> lock(MiniDetour::Globals_t::Instance().HookMutex);
     auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t *>(handle);
     return hook != nullptr ? hook->RestoreFunc() : nullptr;
 }
@@ -1285,6 +1289,6 @@ MINIDETOUR_EXPORT(int) MiniDetourHookTReplaceFunction(void *function_to_replace,
     if (function_to_replace == nullptr || new_function == nullptr)
         return 0;
 
-    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
+    std::lock_guard<std::mutex> lock(MiniDetour::Globals_t::Instance().HookMutex);
     return MiniDetour::Implementation::Hook_t::ReplaceFunction(function_to_replace, new_function) ? 1 : 0;
 }
