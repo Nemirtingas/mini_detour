@@ -17,7 +17,8 @@ bool _AddressesAreRelativeJumpable(void *source, void *dest)
 {
     uintptr_t min_addr = reinterpret_cast<uintptr_t>(std::min(source, dest));
     uintptr_t max_addr = reinterpret_cast<uintptr_t>(std::max(source, dest));
-    return (max_addr - min_addr) <= 0x1FFFFFC;
+    // Thumb B.W reaches +-16 MB, ARM B +-32 MB: the jump mode isn't known here, use the smallest range.
+    return (max_addr - min_addr) <= 0xFFFFF0;
 }
 
 #pragma pack(push, 1)
