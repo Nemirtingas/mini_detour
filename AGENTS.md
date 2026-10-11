@@ -71,6 +71,14 @@ Instructions for AI coding agents (and humans) working on **mini_detour**, a min
 - Platform code goes in `src/mini_detour_<os>.h` (`windows`, `linux`, `macos`); architecture code in `src/mini_detour_<arch>.h` (`x86`, `x64`, `arm`, `arm64`). Keep `#if defined(MINIDETOUR_OS_*)` / `MINIDETOUR_ARCH_*` checks out of shared code when a per-platform header can hold the logic.
 - When changing behavior shared by several platforms or architectures, update **all** of them, or state clearly in the commit message which ones are not covered.
 
+### Static data
+- No static objects: separate statics are built in an order C++ doesn't guarantee. What the library keeps for the whole process goes in one singleton, `MiniDetour::Globals_t` (`src/mini_detour.cpp`), whose members are built in the order they are declared:
+  - objects with a constructor or a destructor (mutexes, containers, the memory manager);
+  - values computed once by code and cached because they never change while the process runs (page size, user address space bounds).
+- Values known at compile time (`constexpr` values, constant tables) stay plain statics.
+- A value only computed for one call stays a local variable: only what is cached goes in `Globals_t`.
+- `Globals_t` is never destroyed, so hooks with static storage can still be restored during static destruction. Its constructor must not call `Globals_t::Instance()`: it runs while the instance is being built.
+
 ### Naming
 - Types and public functions: `PascalCase` (`HookFunc`, `MemoryProtect`, `RegionInfos_t`).
 - Struct/typedef names end with `_t`.
