@@ -611,6 +611,20 @@ static void _RestoreCodeRights(void *address, size_t size, MiniDetour::MemoryMan
     MiniDetour::MemoryManipulation::MemoryProtect(address, size, oldRights);
 }
 
+// Makes an import table slot (IAT/GOT entry) writable. The other rights of its page are kept: the slot is data,
+// so execution is never added, but it may share a page with code that must stay executable.
+static bool _MakeImportSlotWritable(void *address, size_t size, MiniDetour::MemoryManipulation::MemoryRights *oldRights)
+{
+    MiniDetour::MemoryManipulation::RegionInfos_t infos;
+    MiniDetour::MemoryManipulation::GetRegionInfos(address, &infos);
+    if (infos.Rights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
+        return false;
+
+    *oldRights  = infos.Rights;
+    auto rights = static_cast<MiniDetour::MemoryManipulation::MemoryRights>(infos.Rights | MiniDetour::MemoryManipulation::MemoryRights::mem_w);
+    return MiniDetour::MemoryManipulation::MemoryProtect(address, size, rights, nullptr);
+}
+
 #if defined(MINIDETOUR_OS_WINDOWS)
 #include "mini_detour_windows.h"
 
