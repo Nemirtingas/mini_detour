@@ -498,6 +498,16 @@ static MemoryManager &GetMemoryManager()
     return *memoryManager;
 }
 
+// Gives back to hooked code the rights it had before being made writable: forcing mem_rx would remove the write
+// access of code that needs it (JIT buffers). If they couldn't be read, the code is at least made executable again.
+static void _RestoreCodeRights(void *address, size_t size, MiniDetour::MemoryManipulation::MemoryRights oldRights)
+{
+    if (oldRights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
+        oldRights = MiniDetour::MemoryManipulation::MemoryRights::mem_rx;
+
+    MiniDetour::MemoryManipulation::MemoryProtect(address, size, oldRights);
+}
+
 #if defined(MINIDETOUR_OS_WINDOWS)
 #include "mini_detour_windows.h"
 
@@ -761,14 +771,14 @@ class Hook_t
             void *jump_mem = GetMemoryManager().GetFreeJump(functionToReplace);
             if (jump_mem == nullptr)
             {
-                MemoryManipulation::MemoryProtect(functionToReplace, relocatableSize, functionOldRights);
+                _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
                 return false;
             }
 
             if (!MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rwx))
             {
                 GetMemoryManager().FreeJump(jump_mem);
-                MemoryManipulation::MemoryProtect(functionToReplace, relocatableSize, functionOldRights);
+                _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
                 return false;
             }
 
@@ -780,7 +790,7 @@ class Hook_t
             RelJump::WriteOpcodes(functionToReplace, functionToReplace, jump_mem, func_mode, hook_mode);
         }
 
-        MemoryManipulation::MemoryProtect(functionToReplace, relocatableSize, MemoryManipulation::MemoryRights::mem_rx);
+        _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
         MemoryManipulation::FlushInstructionCache(functionToReplace, relocatableSize);
 
         return true;
@@ -922,7 +932,7 @@ class Hook_t
         MemoryManipulation::MemoryProtect(_OriginalTrampolineAddress, totalOriginalTrampolineSize, MemoryManipulation::MemoryRights::mem_rx);
         MemoryManipulation::FlushInstructionCache(_OriginalTrampolineAddress, totalOriginalTrampolineSize);
 
-        MemoryManipulation::MemoryProtect(functionToHook, relocatableSize, MemoryManipulation::MemoryRights::mem_rx);
+        _RestoreCodeRights(functionToHook, relocatableSize, functionOldRights);
         MemoryManipulation::FlushInstructionCache(functionToHook, relocatableSize);
 
         _OriginalFuncAddress = functionToHook;
@@ -940,7 +950,7 @@ class Hook_t
     error:
         // The function code wasn't modified yet: only its rights.
         if (functionRightsChanged)
-            MemoryManipulation::MemoryProtect(functionToHook, relocatableSize, functionOldRights);
+            _RestoreCodeRights(functionToHook, relocatableSize, functionOldRights);
 
         _SavedCode.clear();
         _HookCode.clear();
@@ -983,12 +993,13 @@ class Hook_t
 
         if (detail::equal(buffer.begin(), buffer.end(), _HookCode.begin(), _HookCode.end()))
         { // Our hook code is still there, we can restore the old instructions.
-            if (!MemoryManipulation::MemoryProtect(_OriginalFuncAddress, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rwx))
+            MemoryManipulation::MemoryRights functionOldRights;
+            if (!MemoryManipulation::MemoryProtect(_OriginalFuncAddress, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rwx, &functionOldRights))
                 return res;
 
             memcpy(_OriginalFuncAddress, _SavedCode.data(), _SavedCode.size());
 
-            MemoryManipulation::MemoryProtect(_OriginalFuncAddress, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rx);
+            _RestoreCodeRights(_OriginalFuncAddress, _SavedCode.size(), functionOldRights);
             MemoryManipulation::FlushInstructionCache(_OriginalFuncAddress, _SavedCode.size());
 
             Reset(true);
