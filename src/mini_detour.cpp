@@ -918,8 +918,15 @@ class Hook_t
         if (!MemoryManipulation::MemoryProtect(functionToReplace, relocatableSize, MemoryManipulation::MemoryRights::mem_rwx, &functionOldRights))
             return false;
 
+        _OtherThreadsFreezer_t freezer;
         if (relocatableSize >= absoluteJumpSize)
         {
+            if (!freezer.Freeze(functionToReplace, relocatableSize))
+            {
+                _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
+                return false;
+            }
+
             AbsJump::WriteOpcodes(functionToReplace, newFunction, func_mode, hook_mode);
         }
         else
@@ -944,11 +951,20 @@ class Hook_t
             MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rx);
             MemoryManipulation::FlushInstructionCache(jump_mem, AbsJump::GetMaxOpcodeSize());
 
+            if (!freezer.Freeze(functionToReplace, relocatableSize))
+            {
+                GetMemoryManager().FreeJump(jump_mem);
+                _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
+                return false;
+            }
+
             RelJump::WriteOpcodes(functionToReplace, functionToReplace, jump_mem, func_mode, hook_mode);
         }
 
-        _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
         MemoryManipulation::FlushInstructionCache(functionToReplace, relocatableSize);
+        freezer.Unfreeze();
+
+        _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
 
         return true;
     }
@@ -1068,7 +1084,19 @@ class Hook_t
             // A shorter encoding than relativeJumpSize keeps the original bytes after it.
             _HookCode = _SavedCode;
             RelJump::WriteOpcodes(_HookCode.data(), functionToHook, jump_mem, func_mode, func_mode);
-            memcpy(functionToHook, _HookCode.data(), _HookCode.size());
+            {
+                // Nothing can be logged while the other threads are suspended: it would allocate.
+                _OtherThreadsFreezer_t freezer;
+                if (!freezer.Freeze(functionToHook, _HookCode.size()))
+                {
+                    GetMemoryManager().FreeJump(jump_mem);
+                    SPDLOG_ERROR("A thread is running the code to hook.");
+                    goto error;
+                }
+
+                memcpy(functionToHook, _HookCode.data(), _HookCode.size());
+                MemoryManipulation::FlushInstructionCache(functionToHook, _HookCode.size());
+            }
 
 #ifdef USE_SPDLOG
             {
@@ -1148,10 +1176,21 @@ class Hook_t
             if (!MemoryManipulation::MemoryProtect(_OriginalFuncAddress, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rwx, &functionOldRights))
                 return res;
 
-            memcpy(_OriginalFuncAddress, _SavedCode.data(), _SavedCode.size());
+            {
+                _OtherThreadsFreezer_t freezer;
+                if (!freezer.Freeze(_OriginalFuncAddress, _SavedCode.size()))
+                {
+                    // The hook stays in place: restoring it can be tried again.
+                    _RestoreCodeRights(_OriginalFuncAddress, _SavedCode.size(), functionOldRights);
+                    SPDLOG_ERROR("A thread is running the hooked code, it can't be restored.");
+                    return nullptr;
+                }
+
+                memcpy(_OriginalFuncAddress, _SavedCode.data(), _SavedCode.size());
+                MemoryManipulation::FlushInstructionCache(_OriginalFuncAddress, _SavedCode.size());
+            }
 
             _RestoreCodeRights(_OriginalFuncAddress, _SavedCode.size(), functionOldRights);
-            MemoryManipulation::FlushInstructionCache(_OriginalFuncAddress, _SavedCode.size());
 
             Reset(true);
             SPDLOG_INFO("Restored hook");

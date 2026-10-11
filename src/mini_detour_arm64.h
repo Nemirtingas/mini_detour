@@ -4,9 +4,9 @@
 // AArch64 // Need to align code on 4 bytes address (opcode are 4bytes fixed length)
 
 // Registers 	Description
-// X0 – X7     argumentsand return value
-// X8 – X18    temporary registers
-// X19 – X28   callee - saved registers
+// X0 - X7     argumentsand return value
+// X8 - X18    temporary registers
+// X19 - X28   callee - saved registers
 // X29         frame pointer
 // X30         link register
 // SP          stack pointer
@@ -54,6 +54,15 @@ bool _AddressesAreRelativeJumpable(void *source, void *dest)
 
     // intptr_t addr = reinterpret_cast<intptr_t>(source) - reinterpret_cast<intptr_t>(dest);
     // return addr >= -134217728 && addr <= 134217724; // 26 bits signed integer range
+}
+
+// An export table entry holds a 32 bits RVA: the address must be above the module base, within 4 GB.
+bool _AddressIsRepresentableAsRva(void *moduleBase, void *address)
+{
+    uintptr_t base = reinterpret_cast<uintptr_t>(moduleBase);
+    uintptr_t addr = reinterpret_cast<uintptr_t>(address);
+
+    return addr >= base && (addr - base) <= UINT32_MAX;
 }
 
 #pragma pack(push, 1)
@@ -176,8 +185,6 @@ struct RelJump
 
 #pragma pack(pop)
 
-// Follows PLT entries to the function they jump to, read from their GOT entry:
-//   [bti c]; adrp x16, page; ldr x17, [x16, #offset]; add x16, x16, #offset; br x17
 // The code mode is carried by the address on ARM (Thumb bit): ARM64 has a single mode.
 static inline int _GetCodeMode(void * /*address*/)
 {
@@ -201,16 +208,36 @@ static inline cs_err _InitDisasm(CodeDisasm &disasm, int /*mode*/)
     return disasm.Init(cs_arch::CS_ARCH_ARM64, (cs_mode)(cs_mode::CS_MODE_ARM | CodeDisasm::RuntimeEndianness()));
 }
 
+// Follows the thunks to the function they jump to: incremental linking thunks (b target), and the jumps through an
+// address slot, PLT entries (GOT entry) and Windows import thunks (IAT entry):
+//   [bti c]; adrp x16, page; ldr x17, [x16, #offset]; add x16, x16, #offset; br x17
+//   adrp x16, page; ldr x16, [x16, #offset]; br x16
 void _EnterRecursiveThunk(void *&_pCode)
 {
     // A longer chain is most likely a loop.
     for (int i = 0; i < 8; ++i)
     {
         const uint32_t *code = reinterpret_cast<const uint32_t *>(_pCode);
+
+        // b target: incremental linking thunk (MSVC /INCREMENTAL), signed 26 bits word offset.
+        if ((code[0] & 0xFC000000) == 0x14000000)
+        {
+            int64_t words = static_cast<int64_t>(code[0] & 0x3FFFFFF);
+            if (words & (int64_t(1) << 25))
+                words -= int64_t(1) << 26;
+
+            _pCode = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(code) + static_cast<uintptr_t>(words * 4));
+            continue;
+        }
+
         if (code[0] == 0xD503245F) // bti c
             ++code;
 
-        if ((code[0] & 0x9F00001F) != 0x90000010 || (code[1] & 0xFFC003FF) != 0xF9400211 || code[3] != 0xD61F0220)
+        // Both load the address from the slot adrp + ldr point to, into x17 (PLT entry) or x16 (Windows import thunk).
+        const bool isAdrpX16     = (code[0] & 0x9F00001F) == 0x90000010;
+        const bool isPltEntry    = isAdrpX16 && (code[1] & 0xFFC003FF) == 0xF9400211 && code[3] == 0xD61F0220;
+        const bool isImportThunk = isAdrpX16 && (code[1] & 0xFFC003FF) == 0xF9400210 && code[2] == 0xD61F0200;
+        if (!isPltEntry && !isImportThunk)
             return;
 
         // adrp: signed 21 bits page count, immhi (bits 5-23) and immlo (bits 29-30).
@@ -218,9 +245,9 @@ void _EnterRecursiveThunk(void *&_pCode)
         if (pages & (int64_t(1) << 20))
             pages -= int64_t(1) << 21;
 
-        const uintptr_t page     = (reinterpret_cast<uintptr_t>(code) & ~uintptr_t(0xFFF)) + static_cast<uintptr_t>(pages * 0x1000);
-        const uintptr_t gotEntry = page + ((code[1] >> 10) & 0xFFF) * 8;
-        _pCode                   = *reinterpret_cast<void **>(gotEntry);
+        const uintptr_t page = (reinterpret_cast<uintptr_t>(code) & ~uintptr_t(0xFFF)) + static_cast<uintptr_t>(pages * 0x1000);
+        const uintptr_t slot = page + ((code[1] >> 10) & 0xFFF) * 8;
+        _pCode               = *reinterpret_cast<void **>(slot);
     }
 }
 

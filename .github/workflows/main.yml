@@ -3,114 +3,83 @@ name: CI
 on: [push, pull_request, workflow_dispatch]
 jobs:
   job:
-    name: ${{ matrix.os }}-${{ matrix.platform }}-${{ matrix.build_type }}-cmake-build
-    runs-on: ${{ matrix.os }}
-    # ARM and AArch64 run under qemu on Linux: their failures are shown, but don't fail the workflow.
-    continue-on-error: ${{ matrix.os == 'ubuntu-latest' && (matrix.platform == 'arm' || matrix.platform == 'arm64') }}
+    name: ${{ matrix.target.name }}-${{ matrix.build_type }}
+    runs-on: ${{ matrix.target.os }}
+    # ARM runs under qemu: its failures are shown, but don't fail the workflow.
+    continue-on-error: ${{ matrix.target.optional }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        # arm and arm64 are cross compiled and run under qemu, on Linux only.
-        platform: [x32, x64, arm, arm64]
         # Release catches what only shows once optimized: small functions, inlined calls, tail calls...
         build_type: [Debug, Release]
-        exclude:
-        - os: windows-latest
-          platform: arm
-        - os: windows-latest
-          platform: arm64
-        include:
-        # macos-latest runs on Apple Silicon. macOS x64 is tested on a local machine.
-        - os: macos-latest
-          platform: arm64
-          build_type: Debug
-        - os: macos-latest
-          platform: arm64
-          build_type: Release
-            
+        # Each target gives what differs: its runner, the packages to install, the CMake arguments and how to run the tests.
+        # arm is cross compiled and runs under qemu; arm64 runs on native runners. macOS x64 is tested on a local machine.
+        target:
+        - name: linux-x32
+          os: ubuntu-latest
+          packages: gcc-multilib g++-multilib
+          cmake_args: -DCMAKE_TOOLCHAIN_FILE=tests/toolchains/linux_i386.toolchain
+          run: ./tests
+          optional: false
+        - name: linux-x64
+          os: ubuntu-latest
+          run: ./tests
+          optional: false
+        - name: linux-arm
+          os: ubuntu-latest
+          packages: gcc-arm-linux-gnueabi g++-arm-linux-gnueabi qemu-user
+          cmake_args: -DCMAKE_TOOLCHAIN_FILE=tests/toolchains/linux_arm.toolchain
+          run: qemu-arm -L /usr/arm-linux-gnueabi ./tests
+          optional: true
+        - name: linux-arm64
+          os: ubuntu-24.04-arm
+          run: ./tests
+          optional: false
+        - name: macos-arm64
+          os: macos-latest
+          run: ./macos_permission_fix tests && ./tests
+          optional: false
+        - name: windows-x32
+          os: windows-latest
+          cmake_args: -A Win32
+          run: ./tests.exe
+          optional: false
+        - name: windows-x64
+          os: windows-latest
+          cmake_args: -A x64
+          run: ./tests.exe
+          optional: false
+        - name: windows-arm64
+          os: windows-11-arm
+          cmake_args: -A ARM64
+          run: ./tests.exe
+          optional: false
+
+    defaults:
+      run:
+        shell: bash
+
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
           fetch-depth: 0
 
       - uses: lukka/get-cmake@latest
 
-      - name: Linux tests gcc (x32)
-        if: ${{ matrix.os == 'ubuntu-latest' && matrix.platform == 'x32' }}
-        shell: bash
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update
-          sudo apt install -y gcc-multilib g++-multilib # needed for 32-bit builds
-          
-          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_i386.toolchain" -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build
-          cmake --build build
-          #find build
-          cd ${{ github.workspace }}/build
-          ./tests
-
-      - name: Linux tests gcc (x64)
-        if: ${{ matrix.os == 'ubuntu-latest' && matrix.platform == 'x64' }}
-        shell: bash
-        run: |
-          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build
-          cmake --build build
-          cd ${{ github.workspace }}/build
-          ./tests
-
-      - name: Linux tests gcc (arm, qemu)
-        if: ${{ matrix.os == 'ubuntu-latest' && matrix.platform == 'arm' }}
-        shell: bash
+      - name: Install packages
+        if: ${{ matrix.target.packages }}
         run: |
           sudo apt-get update
-          sudo apt install -y gcc-arm-linux-gnueabi g++-arm-linux-gnueabi qemu-user
+          sudo apt-get install -y ${{ matrix.target.packages }}
 
-          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_arm.toolchain" -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build
-          cmake --build build
-          cd ${{ github.workspace }}/build
-          qemu-arm -L /usr/arm-linux-gnueabi ./tests
+      # The Visual Studio generator builds several configurations: the configuration is chosen with --config.
+      - name: Configure
+        run: cmake -S . -B build -DMINIDETOUR_BUILD_TESTS=ON ${{ runner.os != 'Windows' && format('-DCMAKE_BUILD_TYPE={0}', matrix.build_type) || '' }} ${{ matrix.target.cmake_args }}
 
-      - name: Linux tests gcc (arm64, qemu)
-        if: ${{ matrix.os == 'ubuntu-latest' && matrix.platform == 'arm64' }}
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu qemu-user
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build_type }}
 
-          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_TOOLCHAIN_FILE="tests/toolchains/linux_aarch64.toolchain" -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build
-          cmake --build build
-          cd ${{ github.workspace }}/build
-          qemu-aarch64 -L /usr/aarch64-linux-gnu ./tests
-
-      - name: MacOS tests (arm64)
-        if: matrix.os == 'macos-latest'
-        shell: bash
-        run: |
-          cmake ${{ github.workspace }}/CMakeLists.txt -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build
-          cmake --build build
-          #find build
-          cd ${{ github.workspace }}/build
-          ./macos_permission_fix tests
-          ./tests
-
-      - name: Windows tests (x32)
-        if: ${{ matrix.os == 'windows-latest' && matrix.platform == 'x32' }}
-        shell: powershell
-        run: |
-          cmake ${{ github.workspace }}\CMakeLists.txt -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build -A Win32
-          cmake --build build --config ${{ matrix.build_type }}
-          #Get-ChildItem -Recurse build
-          cd ${{ github.workspace }}\build\${{ matrix.build_type }}
-          .\tests.exe
-
-      - name: Windows tests (x64)
-        if: ${{ matrix.os == 'windows-latest' && matrix.platform == 'x64' }}
-        shell: powershell
-        run: |
-          cmake ${{ github.workspace }}\CMakeLists.txt -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DMINIDETOUR_BUILD_TESTS=ON -S . -B build -A x64
-          cmake --build build --config ${{ matrix.build_type }}
-          #Get-ChildItem -Recurse build
-          cd ${{ github.workspace }}\build\${{ matrix.build_type }}
-          .\tests.exe
+      - name: Test
+        working-directory: ${{ runner.os == 'Windows' && format('build/{0}', matrix.build_type) || 'build' }}
+        run: ${{ matrix.target.run }}
