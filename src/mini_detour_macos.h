@@ -211,13 +211,18 @@ class _OtherThreadsFreezer_t
         if (_Threads == nullptr)
             return;
 
+        // Every thread is resumed before anything else is called: those functions could be hooked, and their detour
+        // must not run while threads are still suspended (one of them could hold a lock it needs).
         for (mach_msg_type_number_t i = 0; i < _ThreadCount; ++i)
         {
-            if (_Threads[i] == MACH_PORT_NULL)
-                continue;
+            if (_Threads[i] != MACH_PORT_NULL)
+                thread_resume(_Threads[i]);
+        }
 
-            thread_resume(_Threads[i]);
-            mach_port_deallocate(mach_task_self(), _Threads[i]);
+        for (mach_msg_type_number_t i = 0; i < _ThreadCount; ++i)
+        {
+            if (_Threads[i] != MACH_PORT_NULL)
+                mach_port_deallocate(mach_task_self(), _Threads[i]);
         }
 
         vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(_Threads), _ThreadCount * sizeof(thread_act_t));

@@ -136,4 +136,72 @@ TEST_CASE("A function can be hooked while a thread runs other code", "[freeze_th
     CHECK(code.As<FreezeFunc_t>()() == 1);
 }
 
+#if defined(MINIDETOUR_OS_WINDOWS)
+static HANDLE g_ResumeOrderWorkers[2];
+static volatile LONG g_ResumeOrderStop;
+static volatile LONG g_ResumeOrderSuspendedSeen;
+static BOOL(WINAPI *g_ResumeOrderCloseHandle)(HANDLE);
+static LONG(NTAPI *g_ResumeOrderNtClose)(HANDLE);
+
+static DWORD WINAPI ResumeOrderWorker(LPVOID)
+{
+    while (g_ResumeOrderStop == 0)
+        Sleep(1);
+
+    return 0;
+}
+
+// Tells if a worker is still suspended by the hook being written while CloseHandle runs.
+static BOOL WINAPI ResumeOrderCloseHandleDetour(HANDLE handle)
+{
+    for (auto worker : g_ResumeOrderWorkers)
+    {
+        const DWORD previousCount = SuspendThread(worker);
+        if (previousCount == (DWORD)-1)
+            continue;
+
+        if (previousCount > 0)
+            InterlockedExchange(&g_ResumeOrderSuspendedSeen, 1);
+
+        ResumeThread(worker);
+    }
+
+    // The detour already runs when the hook writing it resumes the threads, before HookFunction returns the original.
+    if (g_ResumeOrderCloseHandle == nullptr)
+        return g_ResumeOrderNtClose(handle) >= 0;
+
+    return g_ResumeOrderCloseHandle(handle);
+}
+
+// The threads were resumed one by one, each thread handle closed right after: a hooked CloseHandle then ran while the
+// next threads were still suspended, and its detour could wait for a lock one of them held.
+TEST_CASE("Every thread is resumed before anything else runs", "[freeze_threads]")
+{
+    reinterpret_cast<FARPROC &>(g_ResumeOrderNtClose) = GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtClose");
+    REQUIRE(g_ResumeOrderNtClose != nullptr);
+    g_ResumeOrderCloseHandle = nullptr;
+    g_ResumeOrderStop        = 0;
+    for (auto &worker : g_ResumeOrderWorkers)
+    {
+        worker = CreateThread(nullptr, 0, &ResumeOrderWorker, nullptr, 0, nullptr);
+        REQUIRE(worker != nullptr);
+    }
+
+    // The hook is in place when the threads are resumed: its own write already goes through the detour.
+    MiniDetour::Hook_t hook;
+    g_ResumeOrderSuspendedSeen                          = 0;
+    reinterpret_cast<void *&>(g_ResumeOrderCloseHandle) = hook.HookFunction(reinterpret_cast<void *>(&CloseHandle), reinterpret_cast<void *>(&ResumeOrderCloseHandleDetour));
+    REQUIRE(g_ResumeOrderCloseHandle != nullptr);
+    CHECK(hook.RestoreFunction() != nullptr);
+    CHECK(g_ResumeOrderSuspendedSeen == 0);
+
+    g_ResumeOrderStop = 1;
+    for (auto worker : g_ResumeOrderWorkers)
+    {
+        WaitForSingleObject(worker, INFINITE);
+        CloseHandle(worker);
+    }
+}
+#endif
+
 #endif

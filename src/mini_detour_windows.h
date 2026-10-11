@@ -169,13 +169,15 @@ class _OtherThreadsFreezer_t
         return false;
     }
 
+    // Every thread is resumed before the handles are closed: CloseHandle can be hooked, and its detour must not run
+    // while threads are still suspended (one of them could hold a lock it needs).
     void Unfreeze()
     {
         for (auto thread : _Threads)
-        {
             ResumeThread(thread);
+
+        for (auto thread : _Threads)
             CloseHandle(thread);
-        }
 
         _Threads.clear();
     }
