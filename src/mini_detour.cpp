@@ -931,9 +931,13 @@ class Hook_t
 
         MiniDetour::MemoryManipulation::RegionInfos_t originalMemoryInfos;
         MemoryManipulation::GetRegionInfos(_OriginalFuncAddress, &originalMemoryInfos);
-        // Memory has been freed, don't try to restore it.
+        // Memory has been freed, don't try to restore it, but release our jump and trampoline so the hook can be reused.
         if (originalMemoryInfos.Rights == MemoryManipulation::MemoryRights::mem_unset || originalMemoryInfos.Rights == MemoryManipulation::MemoryRights::mem_none)
+        {
+            Reset(true);
+            SPDLOG_INFO("Hooked memory was freed, hook released");
             return nullptr;
+        }
 
         memcpy(buffer.data(), _OriginalFuncAddress, buffer.size());
 
