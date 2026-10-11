@@ -24,6 +24,8 @@ using ElfRela_t          = Elf64_Rela;
 using ElfDyn_t           = Elf64_Dyn;
 using ElfSxword_t        = Elf64_Sxword;
 using ElfRelocation_t    = ElfRela_t;
+#define DT_RELOCATIONS DT_RELA
+#define DT_RELOCATIONS_SIZE DT_RELASZ
 
 #define ELF_ST_BIND ELF64_ST_BIND
 #define ELF_ST_TYPE ELF64_ST_TYPE
@@ -51,6 +53,8 @@ using ElfRela_t          = Elf32_Rela;
 using ElfDyn_t           = Elf32_Dyn;
 using ElfSxword_t        = Elf32_Sxword;
 using ElfRelocation_t    = ElfRel_t;
+#define DT_RELOCATIONS DT_REL
+#define DT_RELOCATIONS_SIZE DT_RELSZ
 
 #define ELF_ST_BIND ELF32_ST_BIND
 #define ELF_ST_TYPE ELF32_ST_TYPE
@@ -610,11 +614,36 @@ static inline ElfAddr_t *_GetExportAddress(
     return nullptr;
 }
 
+// Import slots are in the lazy bound table (.rela.plt), and in the data relocations (.rela.dyn) for code built with -fno-plt.
+enum
+{
+    _ImportRelocationTableCount = 2,
+};
+
+struct _ImportRelocations_t
+{
+    ElfRelocation_t *Start[_ImportRelocationTableCount];
+    ElfRelocation_t *End[_ImportRelocationTableCount];
+};
+
+static void _LoadRelocationTable(ElfDyn_t *dynamicTableStart, ElfSxword_t tableTag, ElfSxword_t sizeTag, ElfRelocation_t **start, ElfRelocation_t **end)
+{
+    *start = nullptr;
+    *end   = nullptr;
+
+    auto tableEntry = _FindElfDynFromTag(dynamicTableStart, tableTag);
+    auto sizeEntry  = _FindElfDynFromTag(dynamicTableStart, sizeTag);
+    if (tableEntry == nullptr || sizeEntry == nullptr)
+        return;
+
+    *start = (ElfRelocation_t *)tableEntry->d_un.d_ptr;
+    *end   = (ElfRelocation_t *)((uintptr_t)*start + sizeEntry->d_un.d_val);
+}
+
 static bool _LoadModuleIATDetails(
     void *moduleHandle,
     void **moduleBase,
-    ElfRelocation_t **relSectionStart,
-    ElfRelocation_t **relSectionEnd,
+    _ImportRelocations_t *relocations,
     ElfSymbol_t **dynamicSymbolsStart,
     ElfSymbol_t **dynamicSymbolsEnd,
     size_t *dynamicSymbolSize,
@@ -632,51 +661,57 @@ static bool _LoadModuleIATDetails(
     if (!_LoadModuleExportSymbolsCount(dynamicTableStart, dynamicSymbolsStart, dynamicSymbolsEnd, dynamicSymbolSize))
         return false;
 
-    auto dynamicEntry = _FindElfDynFromTag(dynamicTableStart, DT_JMPREL);
-    if (dynamicEntry == nullptr)
-        return false;
+    _LoadRelocationTable(dynamicTableStart, DT_JMPREL, DT_PLTRELSZ, &relocations->Start[0], &relocations->End[0]);
+    _LoadRelocationTable(dynamicTableStart, DT_RELOCATIONS, DT_RELOCATIONS_SIZE, &relocations->Start[1], &relocations->End[1]);
 
-    *relSectionStart = (ElfRelocation_t *)dynamicEntry->d_un.d_ptr;
+    return relocations->Start[0] != nullptr || relocations->Start[1] != nullptr;
+}
 
-    dynamicEntry = _FindElfDynFromTag(dynamicTableStart, DT_PLTRELSZ);
-    if (dynamicEntry == nullptr)
-        return false;
+// Returns the imported symbol name if the relocation fills an import slot, nullptr otherwise.
+static const char *
+_GetImportSlotName(ElfRelocation_t *relocation, ElfSymbol_t *dynamicSymbolsStart, size_t dynamicSymbolSize, const char *dynamicSymbolsNames, size_t dynamicSymbolsNamesSize)
+{
+    size_t symbolType         = ELF_R_TYPE(relocation->r_info);
+    size_t dynamicSymbolIndex = ELF_R_SYM(relocation->r_info);
+    auto symbol               = (ElfSymbol_t *)((uintptr_t)dynamicSymbolsStart + dynamicSymbolIndex * dynamicSymbolSize);
 
-    *relSectionEnd = (ElfRelocation_t *)((uintptr_t)*relSectionStart + dynamicEntry->d_un.d_val);
+    if (symbolType == R_GLOBAL_DATA)
+    {
+        // Data relocations also fill pointers to data and local symbols: only keep imported functions.
+        if (dynamicSymbolIndex == 0 || symbol->st_shndx != SHN_UNDEF || ELF_ST_TYPE(symbol->st_info) != STT_FUNC)
+            return nullptr;
+    }
+    else if (symbolType != R_JUMP_SLOT)
+    {
+        return nullptr;
+    }
 
-    return true;
+    if (symbol->st_name + 1 > dynamicSymbolsNamesSize)
+    {
+        SPDLOG_WARN("Symbol name index exceeds symbols string table.");
+        return nullptr;
+    }
+
+    return dynamicSymbolsNames + symbol->st_name;
 }
 
 static inline void **_GetIATAddress(
     void *moduleBase,
-    ElfRelocation_t *iatSymbolsStart,
-    ElfRelocation_t *iatSymbolsEnd,
+    _ImportRelocations_t const &relocations,
     ElfSymbol_t *dynamicSymbolsStart,
     size_t dynamicSymbolSize,
     const char *dynamicSymbolsNames,
     size_t dynamicSymbolsNamesSize,
     const char *symbolName)
 {
-    for (auto relocation = iatSymbolsStart; relocation < iatSymbolsEnd; ++relocation)
+    for (int table = 0; table < _ImportRelocationTableCount; ++table)
     {
-        size_t symbolType             = ELF_R_TYPE(relocation->r_info);
-        size_t dynamicSymbolIndex     = ELF_R_SYM(relocation->r_info);
-        size_t dynamicSymbolNameIndex = ((ElfSymbol_t *)((uintptr_t)dynamicSymbolsStart + dynamicSymbolIndex * dynamicSymbolSize))->st_name;
-
-        if (symbolType != R_JUMP_SLOT)
+        for (auto relocation = relocations.Start[table]; relocation < relocations.End[table]; ++relocation)
         {
-            SPDLOG_INFO("Symbol is not a jump slot");
-            continue;
+            auto importName = _GetImportSlotName(relocation, dynamicSymbolsStart, dynamicSymbolSize, dynamicSymbolsNames, dynamicSymbolsNamesSize);
+            if (importName != nullptr && strcmp(symbolName, importName) == 0)
+                return (void **)((uintptr_t)moduleBase + relocation->r_offset);
         }
-
-        if (dynamicSymbolNameIndex + 1 > dynamicSymbolsNamesSize)
-        {
-            SPDLOG_WARN("Symbol name index exceeds symbols string table.");
-            continue;
-        }
-
-        if (strcmp(symbolName, dynamicSymbolsNames + dynamicSymbolNameIndex) == 0)
-            return (void **)((uintptr_t)moduleBase + relocation->r_offset);
     }
 
     return nullptr;
@@ -743,61 +778,34 @@ size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *iatDetails, size_t iat
     size_t dynamicSymbolSize         = 0;
     const char *dynStr;
     size_t dynStrSize;
-    ElfRelocation_t *relocationsStart;
-    ElfRelocation_t *relocationsEnd;
-    size_t result = 0;
+    _ImportRelocations_t relocations;
+    size_t result  = 0;
+    size_t ordinal = 0;
 
-    if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &relocationsStart, &relocationsEnd, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolSize, &dynStr, &dynStrSize))
+    if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &relocations, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolSize, &dynStr, &dynStrSize))
         return result;
 
-    if (iatDetails == nullptr)
+    for (int table = 0; table < _ImportRelocationTableCount; ++table)
     {
-        for (auto relocation = relocationsStart; relocation < relocationsEnd; ++relocation)
+        for (auto relocation = relocations.Start[table]; relocation < relocations.End[table]; ++relocation, ++ordinal)
         {
-            size_t symbolType             = ELF_R_TYPE(relocation->r_info);
-            size_t dynamicSymbolIndex     = ELF_R_SYM(relocation->r_info);
-            size_t dynamicSymbolNameIndex = dynamicSymbolsStart[dynamicSymbolIndex].st_name;
-
-            if (symbolType != R_JUMP_SLOT)
-            {
-                SPDLOG_INFO("Symbol is not a jump slot");
+            auto importName = _GetImportSlotName(relocation, dynamicSymbolsStart, dynamicSymbolSize, dynStr, dynStrSize);
+            if (importName == nullptr)
                 continue;
-            }
 
-            if (dynamicSymbolNameIndex + 1 > dynStrSize)
+            if (iatDetails != nullptr)
             {
-                SPDLOG_WARN("Symbol name index exceeds symbols string table.");
-                continue;
+                if (result >= iatDetailsCount)
+                    return result;
+
+                iatDetails[result].ImportOrdinal     = ordinal;
+                iatDetails[result].ImportName        = importName;
+                iatDetails[result].ImportCallAddress = *reinterpret_cast<void **>(reinterpret_cast<char *>(moduleBase) + relocation->r_offset);
+                iatDetails[result].ImportModuleName  = "";
             }
 
             ++result;
         }
-
-        return result;
-    }
-
-    for (auto relocation = relocationsStart; relocation < relocationsEnd; ++relocation)
-    {
-        size_t symbolType             = ELF_R_TYPE(relocation->r_info);
-        size_t dynamicSymbolIndex     = ELF_R_SYM(relocation->r_info);
-        size_t dynamicSymbolNameIndex = dynamicSymbolsStart[dynamicSymbolIndex].st_name;
-
-        if (symbolType != R_JUMP_SLOT)
-        {
-            SPDLOG_INFO("Symbol is not a jump slot");
-            continue;
-        }
-
-        if (dynamicSymbolNameIndex + 1 > dynStrSize)
-        {
-            SPDLOG_WARN("Symbol name index exceeds symbols string table.");
-            continue;
-        }
-
-        iatDetails[result].ImportOrdinal      = relocation - relocationsStart;
-        iatDetails[result].ImportName         = dynStr + dynamicSymbolNameIndex;
-        iatDetails[result].ImportCallAddress  = *reinterpret_cast<void **>(reinterpret_cast<char *>(moduleBase) + relocation->r_offset);
-        iatDetails[result++].ImportModuleName = "";
     }
 
     return result;
@@ -905,19 +913,18 @@ size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDe
     size_t dynamicSymbolSize;
     const char *dynStr;
     size_t dynStrSize;
-    ElfRelocation_t *iatStart;
-    ElfRelocation_t *iatEnd;
+    _ImportRelocations_t relocations;
     size_t result = 0;
 
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
         iatReplaceDetails[i].IATCallAddress = nullptr;
 
-    if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &iatStart, &iatEnd, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolSize, &dynStr, &dynStrSize))
+    if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &relocations, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolSize, &dynStr, &dynStrSize))
         return result;
 
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
     {
-        auto iatAddress = _GetIATAddress(moduleBase, iatStart, iatEnd, dynamicSymbolsStart, dynamicSymbolSize, dynStr, dynStrSize, iatReplaceDetails[i].IATName);
+        auto iatAddress = _GetIATAddress(moduleBase, relocations, dynamicSymbolsStart, dynamicSymbolSize, dynStr, dynStrSize, iatReplaceDetails[i].IATName);
         if (iatAddress == nullptr)
         {
             iatReplaceDetails[i].IATCallAddress = nullptr;
@@ -948,20 +955,19 @@ size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDe
     size_t dynamicSymbolSize;
     const char *dynStr;
     size_t dynStrSize;
-    ElfRelocation_t *iatStart;
-    ElfRelocation_t *iatEnd;
+    _ImportRelocations_t relocations;
     size_t iatEntrySize;
     size_t result = 0;
 
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
         iatReplaceDetails[i].NewIATAddress = nullptr;
 
-    if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &iatStart, &iatEnd, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolSize, &dynStr, &dynStrSize))
+    if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &relocations, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolSize, &dynStr, &dynStrSize))
         return result;
 
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
     {
-        auto iatAddress = _GetIATAddress(moduleBase, iatStart, iatEnd, dynamicSymbolsStart, dynamicSymbolSize, dynStr, dynStrSize, iatReplaceDetails[i].IATName);
+        auto iatAddress = _GetIATAddress(moduleBase, relocations, dynamicSymbolsStart, dynamicSymbolSize, dynStr, dynStrSize, iatReplaceDetails[i].IATName);
         if (iatAddress == nullptr)
         {
             iatReplaceDetails[i].NewIATAddress = nullptr;

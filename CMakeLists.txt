@@ -208,6 +208,12 @@ if(MINIDETOUR_BUILD_TESTS)
     minidetour_add_test_library(no_export_test_library tests/no_export_test_library.c)
   endif()
 
+  if(UNIX AND NOT APPLE)
+    # Imports reached through GOT entries (GLOB_DAT relocations) instead of PLT stubs.
+    minidetour_add_test_library(no_plt_test_library tests/no_plt_test_library.c)
+    target_compile_options(no_plt_test_library PRIVATE -fno-plt)
+  endif()
+
   # Same library, with logs.
   minidetour_add_library(mini_detour_test)
 
