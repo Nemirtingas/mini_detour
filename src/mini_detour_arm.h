@@ -50,33 +50,23 @@ struct AbsJump
     {
         uint16_t *opcode = reinterpret_cast<uint16_t *>(buffer);
 
-        // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/MOV--immediate-?lang=en
-        // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/MOVT?lang=en
+        // ldr.w pc, [pc, #0] followed by the address: no register or stack use (writing below sp without reserving
+        // it could be overwritten by a signal handler). The literal is read at Align(instruction + 4, 4), so it must
+        // be 4 bytes aligned: a nop is put before the load when the buffer isn't, after the literal otherwise.
+        // https://developer.arm.com/documentation/ddi0406/c/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/LDR--literal-
+        const bool aligned = (reinterpret_cast<uintptr_t>(buffer) & 3) == 0;
+        if (!aligned)
+            *opcode++ = 0xbf00; // nop
 
-        uint16_t addr16 = uint16_t(addr);
+        *opcode++ = 0xf8df;
+        *opcode++ = 0xf000; // ldr.w pc, [pc, #0]
+        *opcode++ = uint16_t(addr);
+        *opcode++ = uint16_t(addr >> 16);
 
-        opcode[0] = 0xf84d;
-        opcode[1] = 0x0c08; // str r0, [sp, #-8]
+        if (aligned)
+            *opcode++ = 0xbf00; // nop, never run: keeps the size constant
 
-        opcode[2] = 0xf240 | ((addr16 & 0x800) >> 1) | ((addr16 & 0xf000) >> 12); // movw r0, imm16
-        opcode[3] = (addr16 & 0xff) | ((addr16 & 0x700) << 4);                    // movw r0, imm16
-
-        addr16    = uint16_t(addr >> 16);
-        opcode[4] = 0xf2C0 | ((addr16 & 0x800) >> 1) | ((addr16 & 0xf000) >> 12); // movt r0, addr & 0xffff0000
-        opcode[5] = (addr16 & 0xff) | ((addr16 & 0x700) << 4);                    // movt r0, addr & 0xffff0000
-
-        opcode[6] = 0xb401; // push {r0}
-
-        opcode[7] = 0xf85d;
-        opcode[8] = 0x0c04; // ldr r0, [sp, #-4]
-
-        opcode[9] = 0xbd00; // pop {pc}
-
-        // opcode[0] = 0xf8df; // ldr pc, [pc, #2]
-        // opcode[1] = 0xf002; // ldr pc, [pc, #2]
-        //*reinterpret_cast<uint32_t*>(&opcode[2]) = addr;
-
-        return 20;
+        return 10;
     }
 
     static inline size_t WriteARMOpcodes(void *buffer, uint32_t addr)
@@ -95,9 +85,10 @@ struct AbsJump
         return source_mode ? WriteThumbOpcodes(buffer, addr) : WriteARMOpcodes(buffer, addr);
     }
 
-    static constexpr size_t GetOpcodeSize(void *jump_destination, int source_mode, int dest_mode) { return source_mode ? 20 : 8; }
+    static constexpr size_t GetOpcodeSize(void *jump_destination, int source_mode, int dest_mode) { return source_mode ? 10 : 8; }
 
-    static constexpr size_t GetMaxOpcodeSize() { return 20; }
+    // Jump slots are spaced by this size: it must keep them 4 bytes aligned for ARM code.
+    static constexpr size_t GetMaxOpcodeSize() { return 12; }
 };
 
 struct RelJump
