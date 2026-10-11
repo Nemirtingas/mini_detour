@@ -69,7 +69,7 @@ struct AbsJump
         return source_mode ? WriteThumbOpcodes(buffer, addr) : WriteARMOpcodes(buffer, addr);
     }
 
-    static constexpr size_t GetOpcodeSize(void *jump_destination, int source_mode, int dest_mode) { return source_mode ? 10 : 8; }
+    static constexpr size_t GetOpcodeSize(void * /*jump_destination*/, int source_mode, int /*dest_mode*/) { return source_mode ? 10 : 8; }
 
     // Jump slots are spaced by this size: it must keep them 4 bytes aligned for ARM code.
     static constexpr size_t GetMaxOpcodeSize() { return 12; }
@@ -77,7 +77,7 @@ struct AbsJump
 
 struct RelJump
 {
-    static inline size_t WriteOpcodes(void *buffer, void *source, void *jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void *buffer, void *source, void *jump_destination, int source_mode, int /*dest_mode*/)
     {
         int32_t rel_addr = static_cast<int32_t>(reinterpret_cast<uintptr_t>(jump_destination) - reinterpret_cast<uintptr_t>(source));
         if (source_mode)
@@ -151,7 +151,7 @@ struct RelJump
         return 4;
     }
 
-    static inline size_t GetOpcodeSize(void *source, void *jump_destination, int source_mode, int dest_mode)
+    static inline size_t GetOpcodeSize(void *source, void *jump_destination, int source_mode, int /*dest_mode*/)
     {
         if (source_mode)
         {

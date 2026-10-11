@@ -360,13 +360,13 @@ size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t re
                     region.ModuleName[0] = '\0';
 
                     if (infos.protection & VM_PROT_READ)
-                        (int &)region.Rights |= (int)MemoryRights::mem_r;
+                        region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_r);
 
                     if (infos.protection & VM_PROT_WRITE)
-                        (int &)region.Rights |= (int)MemoryRights::mem_w;
+                        region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_w);
 
                     if (infos.protection & VM_PROT_EXECUTE)
-                        (int &)region.Rights |= (int)MemoryRights::mem_x;
+                        region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_x);
 
                     ++writtenRegionCount;
                 }
@@ -415,13 +415,13 @@ void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *re
             regionInfos->ModuleName[0] = '\0';
 
             if (infos.protection & VM_PROT_READ)
-                (int &)regionInfos->Rights |= (int)MemoryRights::mem_r;
+                regionInfos->Rights = static_cast<MemoryRights>(regionInfos->Rights | MemoryRights::mem_r);
 
             if (infos.protection & VM_PROT_WRITE)
-                (int &)regionInfos->Rights |= (int)MemoryRights::mem_w;
+                regionInfos->Rights = static_cast<MemoryRights>(regionInfos->Rights | MemoryRights::mem_w);
 
             if (infos.protection & VM_PROT_EXECUTE)
-                (int &)regionInfos->Rights |= (int)MemoryRights::mem_x;
+                regionInfos->Rights = static_cast<MemoryRights>(regionInfos->Rights | MemoryRights::mem_x);
         }
     }
 }
@@ -563,7 +563,7 @@ static bool _LoadModuleExportDetails(void *moduleHandle, uintptr_t *slide, NList
     void *cacheBase             = nullptr;
     void *foundModuleBase       = nullptr;
 
-    for (int i = 0; i < infos->infoArrayCount && (foundModuleBase == nullptr || cacheBase == nullptr); ++i)
+    for (uint32_t i = 0; i < infos->infoArrayCount && (foundModuleBase == nullptr || cacheBase == nullptr); ++i)
     {
         if (foundModuleBase == nullptr)
         {
@@ -700,12 +700,12 @@ size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails,
     return result;
 }
 
-size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *exportDetails, size_t iatDetailsCount)
+size_t GetAllIATSymbols(void * /*moduleHandle*/, IATDetails_t * /*exportDetails*/, size_t /*iatDetailsCount*/)
 {
     return 0;
 }
 
-size_t ReplaceModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
+size_t ReplaceModuleExports(void * /*moduleHandle*/, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
 {
     // TODO: Read MachO and modify export address
     for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
@@ -714,7 +714,7 @@ size_t ReplaceModuleExports(void *moduleHandle, ExportReplaceParameter_t *export
     return 0;
 }
 
-size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
+size_t RestoreModuleExports(void * /*moduleHandle*/, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
 {
     // TODO: Read MachO and modify export address
     for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
@@ -723,7 +723,7 @@ size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t *export
     return 0;
 }
 
-size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+size_t ReplaceModuleIATs(void * /*moduleHandle*/, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
         iatReplaceDetails[i].IATCallAddress = nullptr;
@@ -731,7 +731,7 @@ size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDe
     return 0;
 }
 
-size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+size_t RestoreModuleIATs(void * /*moduleHandle*/, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
         iatReplaceDetails[i].NewIATAddress = nullptr;
