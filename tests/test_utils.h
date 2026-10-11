@@ -77,4 +77,11 @@ class CodeBuffer
     }
 };
 
+#if defined(MINIDETOUR_ARCH_X86)
+// First integer argument in ecx on x86, so generated code doesn't depend on the stack layout.
+#define TEST_CALL MINIDETOUR_CALL_FAST
+#else
+#define TEST_CALL
+#endif
+
 #endif // MINI_DETOUR_TEST_UTILS_H
