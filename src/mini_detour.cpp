@@ -271,10 +271,30 @@ static size_t _ReadCode(const void *pCode, uint8_t *buffer, size_t size)
     }
 
     memcpy(buffer, pCode, inPageSize);
-    if (!MiniDetour::MemoryManipulation::SafeMemoryRead(const_cast<uint8_t *>(reinterpret_cast<const uint8_t *>(pCode)) + inPageSize, buffer + inPageSize, size - inPageSize))
-        return inPageSize;
+    return inPageSize +
+           MiniDetour::MemoryManipulation::SafeMemoryRead(const_cast<uint8_t *>(reinterpret_cast<const uint8_t *>(pCode)) + inPageSize, buffer + inPageSize, size - inPageSize);
+}
 
-    return size;
+// Copies size bytes from address page by page, and returns how many were copied. The platforms copy a range all or
+// nothing, but the rights are set per page: stopping at the first page that fails gives the exact count.
+// copy(pageAddress, offset, chunkSize) copies one chunk, which never crosses a page.
+template <typename Copy>
+static size_t _CopyPageByPage(void *address, size_t size, Copy copy)
+{
+    const size_t pageSize = MiniDetour::MemoryManipulation::PageSize();
+    const uintptr_t start = reinterpret_cast<uintptr_t>(address);
+    size_t copied         = 0;
+    while (copied < size)
+    {
+        const uintptr_t current = start + copied;
+        const size_t chunkSize  = (std::min)(size - copied, pageSize - current % pageSize);
+        if (!copy(reinterpret_cast<void *>(current), copied, chunkSize))
+            break;
+
+        copied += chunkSize;
+    }
+
+    return copied;
 }
 
 // Distance between an address and a free region (0 if the region contains it), to try the closest regions first.
@@ -1197,14 +1217,14 @@ MINIDETOUR_EXPORT(size_t) MiniDetourMemoryManipulationGetFreeRegions(MiniDetourM
     return MiniDetour::MemoryManipulation::Implementation::GetFreeRegions(regions, regionCount);
 }
 
-MINIDETOUR_EXPORT(bool)
+MINIDETOUR_EXPORT(int)
 MiniDetourMemoryManipulationMemoryProtect(void *address, size_t size, MiniDetourMemoryManipulationMemoryRights rights, MiniDetourMemoryManipulationMemoryRights *old_rights)
 {
     // mem_unset is what GetRegionInfos reports for an unknown region: restoring it would make the pages inaccessible.
     if (rights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
-        return false;
+        return 0;
 
-    return MiniDetour::MemoryManipulation::Implementation::MemoryProtect(address, size, rights, old_rights);
+    return MiniDetour::MemoryManipulation::Implementation::MemoryProtect(address, size, rights, old_rights) ? 1 : 0;
 }
 
 MINIDETOUR_EXPORT(void) MiniDetourMemoryManipulationMemoryFree(void *address, size_t size)
@@ -1217,14 +1237,26 @@ MINIDETOUR_EXPORT(void *) MiniDetourMemoryManipulationMemoryAlloc(void *address_
     return MiniDetour::MemoryManipulation::Implementation::MemoryAlloc(address_hint, size, rights);
 }
 
-MINIDETOUR_EXPORT(bool) MiniDetourMemoryManipulationSafeMemoryRead(void *address, uint8_t *buffer, size_t size)
+MINIDETOUR_EXPORT(size_t) MiniDetourMemoryManipulationSafeMemoryRead(void *address, uint8_t *buffer, size_t size)
 {
-    return MiniDetour::MemoryManipulation::Implementation::SafeMemoryRead(address, buffer, size);
+    if (buffer == nullptr)
+        return 0;
+
+    return _CopyPageByPage(
+        address,
+        size,
+        [buffer](void *chunk, size_t offset, size_t chunkSize) { return MiniDetour::MemoryManipulation::Implementation::SafeMemoryRead(chunk, buffer + offset, chunkSize); });
 }
 
-MINIDETOUR_EXPORT(bool) MiniDetourMemoryManipulationSafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
+MINIDETOUR_EXPORT(size_t) MiniDetourMemoryManipulationSafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
 {
-    return MiniDetour::MemoryManipulation::Implementation::SafeMemoryWrite(address, buffer, size);
+    if (buffer == nullptr)
+        return 0;
+
+    return _CopyPageByPage(
+        address,
+        size,
+        [buffer](void *chunk, size_t offset, size_t chunkSize) { return MiniDetour::MemoryManipulation::Implementation::SafeMemoryWrite(chunk, buffer + offset, chunkSize); });
 }
 
 MINIDETOUR_EXPORT(size_t) MiniDetourMemoryManipulationWriteAbsoluteJump(void *address, void *destination)
@@ -1292,16 +1324,16 @@ MINIDETOUR_EXPORT(void) MiniDetourHookTFree(minidetour_hook_handle_t handle)
     delete hook;
 }
 
-MINIDETOUR_EXPORT(void) MiniDetourHookTRestoreOnDestroy(minidetour_hook_handle_t handle, bool restore)
+MINIDETOUR_EXPORT(void) MiniDetourHookTRestoreOnDestroy(minidetour_hook_handle_t handle, int restore)
 {
     auto hook               = reinterpret_cast<MiniDetour::Implementation::Hook_t *>(handle);
-    hook->_RestoreOnDestroy = restore;
+    hook->_RestoreOnDestroy = restore != 0;
 }
 
-MINIDETOUR_EXPORT(bool) MiniDetourHookTCanHook(minidetour_hook_handle_t handle, void *function)
+MINIDETOUR_EXPORT(int) MiniDetourHookTCanHook(minidetour_hook_handle_t handle, void *function)
 {
     auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t *>(handle);
-    return hook->CanHook(function);
+    return hook->CanHook(function) ? 1 : 0;
 }
 
 MINIDETOUR_EXPORT(void *) MiniDetourHookTHookFunction(minidetour_hook_handle_t handle, void *function_to_hook, void *new_function)
@@ -1330,8 +1362,8 @@ MINIDETOUR_EXPORT(void *) MiniDetourHookTGetOriginalFunction(minidetour_hook_han
     return hook->_OriginalTrampolineCallAddress;
 }
 
-MINIDETOUR_EXPORT(bool) MiniDetourHookTReplaceFunction(void *function_to_replace, void *new_function)
+MINIDETOUR_EXPORT(int) MiniDetourHookTReplaceFunction(void *function_to_replace, void *new_function)
 {
     std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
-    return MiniDetour::Implementation::Hook_t::ReplaceFunction(function_to_replace, new_function);
+    return MiniDetour::Implementation::Hook_t::ReplaceFunction(function_to_replace, new_function) ? 1 : 0;
 }
