@@ -134,12 +134,69 @@ size_t _MemoryProtectRightsToNative(MemoryRights rights)
     }
 }
 
+// __PAGEZERO is reserved from 0 up to the main executable (its end moves with the ASLR slide), but mach_vm_region
+// doesn't report it: nothing can be allocated there.
+static mach_vm_address_t _PageZeroEnd()
+{
+    // The executable isn't always image 0: libraries inserted with DYLD_INSERT_LIBRARIES come first.
+    const MachHeader_t *header = nullptr;
+    uint32_t imageIndex        = 0;
+    for (uint32_t i = 0; i < _dyld_image_count(); ++i)
+    {
+        auto imageHeader = reinterpret_cast<const MachHeader_t *>(_dyld_get_image_header(i));
+        if (imageHeader != nullptr && imageHeader->filetype == MH_EXECUTE)
+        {
+            header     = imageHeader;
+            imageIndex = i;
+            break;
+        }
+    }
+
+    if (header == nullptr)
+        return 0;
+
+    auto loadCommand = reinterpret_cast<const LoadCommand_t *>(header + 1);
+    for (uint32_t i = 0; i < header->ncmds; ++i, loadCommand = reinterpret_cast<const LoadCommand_t *>(reinterpret_cast<uintptr_t>(loadCommand) + loadCommand->cmdsize))
+    {
+        if (loadCommand->cmd == LC_SEGMENT_64)
+        {
+            auto segment = reinterpret_cast<const segment_command_64 *>(loadCommand);
+            if (strncmp(segment->segname, SEG_PAGEZERO, sizeof(segment->segname)) == 0)
+                return segment->vmaddr + segment->vmsize + _dyld_get_image_vmaddr_slide(imageIndex);
+        }
+        else if (loadCommand->cmd == LC_SEGMENT)
+        {
+            auto segment = reinterpret_cast<const segment_command *>(loadCommand);
+            if (strncmp(segment->segname, SEG_PAGEZERO, sizeof(segment->segname)) == 0)
+                return segment->vmaddr + segment->vmsize + _dyld_get_image_vmaddr_slide(imageIndex);
+        }
+    }
+
+    return 0;
+}
+
 size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
 {
     mach_port_t self_task     = mach_task_self();
-    mach_vm_address_t oldEnd  = 0;
+    mach_vm_address_t oldEnd  = _PageZeroEnd();
     size_t writtenRegionCount = 0;
     size_t currentRegionCount = 0;
+
+    if (!onlyFree && oldEnd != 0)
+    {
+        if (regions != nullptr && writtenRegionCount < regionCount && regions->StructSize >= sizeof(*regions))
+        {
+            auto &region = *regions;
+            regions      = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t *>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
+
+            region.Rights        = MemoryRights::mem_none;
+            region.Start         = 0;
+            region.End           = static_cast<uintptr_t>(oldEnd);
+            region.ModuleName[0] = '\0';
+            ++writtenRegionCount;
+        }
+        ++currentRegionCount;
+    }
 
     mach_vm_address_t vm_address = 0;
     mach_vm_size_t size;
@@ -149,7 +206,7 @@ size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t re
 
     while (mach_vm_region(self_task, &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name) == KERN_SUCCESS)
     {
-        if (oldEnd != vm_address)
+        if (vm_address > oldEnd)
         {
             if (regions != nullptr && writtenRegionCount < regionCount)
             {
