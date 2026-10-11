@@ -1,5 +1,6 @@
 #define CATCH_CONFIG_RUNNER
 #include "catch.hpp"
+#include "test_utils.h"
 
 #include <mini_detour/mini_detour.h>
 #include <spdlog/spdlog-inl.h>
@@ -670,8 +671,6 @@ TEST_CASE("Hook function", "[Hook function]")
 }
 
 #if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
-auto test_func = (void (*)())((void *)"\x50\xE8\x00\x00\x00\x00\x58\xc3");
-
 void (*bkp)();
 
 void nothing()
@@ -688,20 +687,28 @@ void my_test_func()
 TEST_CASE("Hook small function with call", "[Hook function]")
 {
 
-    MiniDetour::Hook_t test_hook;
-
-    MiniDetour::MemoryManipulation::MemoryProtect((void *)test_func, 8, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
     void *nothing_addr = (void *)nothing;
 
     _EnterRecursiveThunk(nothing_addr);
 
-    int32_t jump_addr                                                        = reinterpret_cast<uint8_t *>(nothing_addr) - (reinterpret_cast<uint8_t *>(test_func) + 1 + 5);
-    *reinterpret_cast<int32_t *>(reinterpret_cast<uintptr_t>(test_func) + 2) = jump_addr;
+    // Executable copy of: push eax/rax; call nothing; pop eax/rax; ret
+    // (the code used to be a string literal, modified in place in read-only data).
+    // Allocated near nothing for the rel32 call, and before the hook so it outlives it.
+    CodeBuffer code(4096, nothing_addr);
+    REQUIRE(code.IsValid());
+    code.Write(0, {0x50, 0xE8, 0x00, 0x00, 0x00, 0x00, 0x58, 0xC3});
+    auto test_func = code.As<void (*)()>();
+
+    int32_t jump_addr = static_cast<int32_t>(reinterpret_cast<uint8_t *>(nothing_addr) - (reinterpret_cast<uint8_t *>(test_func) + 1 + 5));
+    code.WriteValue<int32_t>(2, jump_addr);
+
+    MiniDetour::Hook_t test_hook;
 
     SPDLOG_INFO("Calling test_func");
     test_func();
 
     (void *&)bkp = test_hook.HookFunction((void *)test_func, (void *)my_test_func);
+    REQUIRE(bkp != nullptr);
 
     SPDLOG_INFO("Calling test_func");
     test_func();
