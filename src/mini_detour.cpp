@@ -822,6 +822,9 @@ class Hook_t
         int code_mode = 0;
         cs_err disasm_err;
         CodeDisasm disasm;
+
+        // Before reading the mode: on ARM, a PLT entry and the function it leads to can use different modes.
+        _EnterRecursiveThunk(func);
 #if defined(MINIDETOUR_ARCH_X86)
         disasm_err = disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_32 | CodeDisasm::RuntimeEndianness()));
 #elif defined(MINIDETOUR_ARCH_X64)
@@ -845,7 +848,6 @@ class Hook_t
         size_t smallest_jump_size        = std::min(relativeJumpSize, absoluteJumpSize);
         size_t relocatedOriginalCodeSize = 0;
 
-        _EnterRecursiveThunk(func);
         return _GetRelocatableSize(func, relocatedOriginalCodeSize, false, disasm, absoluteJumpSize) >= smallest_jump_size;
     }
 
@@ -864,6 +866,9 @@ class Hook_t
         func_mode = 0;
         hook_mode = 0;
         cs_err disasm_err;
+
+        // Before reading the mode: on ARM, a PLT entry and the function it leads to can use different modes.
+        _EnterRecursiveThunk(functionToHook);
 #if defined(MINIDETOUR_ARCH_X86)
         disasm_err = disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_32 | CodeDisasm::RuntimeEndianness()));
 #elif defined(MINIDETOUR_ARCH_X64)
@@ -883,8 +888,6 @@ class Hook_t
 
         if (disasm_err != cs_err::CS_ERR_OK)
             return false;
-
-        _EnterRecursiveThunk(functionToHook);
 
         // The relative jump goes to a jump slot that isn't allocated yet, not to newFunction: its size can't be known here
         // (Thumb has 2 and 4 bytes encodings), so the bytes of the longest encoding are relocated.
