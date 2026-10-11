@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <mutex>
 #include <utility>
 #include <type_traits> // std::move
 #include <fstream>
@@ -308,8 +309,13 @@ class MemoryManager
     std::vector<JumpRegion_t> jumps_regions;     // Jumps next to functions addresses
     std::vector<memory_t *> trampolines_regions; // memory regions for trampolines
 
+    // Guards the regions, and the pages they share between hooks: hooks can be set from several threads.
+    std::recursive_mutex _Mutex;
+
   public:
     MemoryManager() {}
+
+    std::recursive_mutex &Mutex() { return _Mutex; }
 
     ~MemoryManager()
     {
@@ -358,6 +364,8 @@ class MemoryManager
 
     void *GetFreeJump(void *address_hint)
     {
+        std::lock_guard<std::recursive_mutex> lock(_Mutex);
+
         for (auto &region : jumps_regions)
         {
             for (int i = 0; i < region.bitmap.size(); ++i)
@@ -385,6 +393,8 @@ class MemoryManager
 
     void FreeJump(void *jump)
     {
+        std::lock_guard<std::recursive_mutex> lock(_Mutex);
+
         SPDLOG_DEBUG("Freeing jump {}", jump);
 
         JumpRegion_t::jump_t *jump_addr = reinterpret_cast<JumpRegion_t::jump_t *>(jump);
@@ -414,6 +424,8 @@ class MemoryManager
 
     uint8_t *GetFreeTrampoline(size_t mem_size)
     {
+        std::lock_guard<std::recursive_mutex> lock(_Mutex);
+
         assert(mem_size <= sizeof(memory_t::data));
         uint8_t *res = nullptr;
         for (auto memory : trampolines_regions)
@@ -446,6 +458,8 @@ class MemoryManager
 
     void FreeTrampoline(void *trampoline)
     {
+        std::lock_guard<std::recursive_mutex> lock(_Mutex);
+
         SPDLOG_DEBUG("Freeing trampoline {}", trampoline);
         memory_t *mem = reinterpret_cast<memory_t *>(reinterpret_cast<uint8_t *>(trampoline) - offsetof(memory_t, data));
 
@@ -1043,24 +1057,28 @@ MINIDETOUR_EXPORT(size_t) MiniDetourModuleManipulationGetAllIATSymbols(void *mod
 MINIDETOUR_EXPORT(size_t)
 MiniDetourModuleManipulationReplaceModuleExports(void *moduleHandle, MiniDetourModuleManipulationExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
 {
+    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
     return MiniDetour::ModuleManipulation::Implementation::ReplaceModuleExports(moduleHandle, exportReplaceDetails, exportReplaceDetailsCount);
 }
 
 MINIDETOUR_EXPORT(size_t)
 MiniDetourModuleManipulationRestoreModuleExports(void *moduleHandle, MiniDetourModuleManipulationExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
 {
+    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
     return MiniDetour::ModuleManipulation::Implementation::RestoreModuleExports(moduleHandle, exportReplaceDetails, exportReplaceDetailsCount);
 }
 
 MINIDETOUR_EXPORT(size_t)
 MiniDetourModuleManipulationReplaceModuleIATs(void *moduleHandle, MiniDetourModuleManipulationIATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
+    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
     return MiniDetour::ModuleManipulation::Implementation::ReplaceModuleIATs(moduleHandle, iatReplaceDetails, iatReplaceDetailsCount);
 }
 
 MINIDETOUR_EXPORT(size_t)
 MiniDetourModuleManipulationRestoreModuleIATs(void *moduleHandle, MiniDetourModuleManipulationIATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
+    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
     return MiniDetour::ModuleManipulation::Implementation::RestoreModuleIATs(moduleHandle, iatReplaceDetails, iatReplaceDetailsCount);
 }
 
@@ -1073,6 +1091,7 @@ MINIDETOUR_EXPORT(minidetour_hook_handle_t) MiniDetourHookTAlloc()
 
 MINIDETOUR_EXPORT(void) MiniDetourHookTFree(minidetour_hook_handle_t handle)
 {
+    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
     auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t *>(handle);
     delete hook;
 }
@@ -1091,12 +1110,14 @@ MINIDETOUR_EXPORT(bool) MiniDetourHookTCanHook(minidetour_hook_handle_t handle, 
 
 MINIDETOUR_EXPORT(void *) MiniDetourHookTHookFunction(minidetour_hook_handle_t handle, void *function_to_hook, void *new_function)
 {
+    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
     auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t *>(handle);
     return hook->HookFunc(function_to_hook, new_function);
 }
 
 MINIDETOUR_EXPORT(void *) MiniDetourHookTRestoreFunction(minidetour_hook_handle_t handle)
 {
+    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
     auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t *>(handle);
     return hook->RestoreFunc();
 }
@@ -1115,5 +1136,6 @@ MINIDETOUR_EXPORT(void *) MiniDetourHookTGetOriginalFunction(minidetour_hook_han
 
 MINIDETOUR_EXPORT(bool) MiniDetourHookTReplaceFunction(void *function_to_replace, void *new_function)
 {
+    std::lock_guard<std::recursive_mutex> lock(GetMemoryManager().Mutex());
     return MiniDetour::Implementation::Hook_t::ReplaceFunction(function_to_replace, new_function);
 }
