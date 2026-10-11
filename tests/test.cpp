@@ -5,7 +5,9 @@
 #include <mini_detour/mini_detour.h>
 #include <spdlog/spdlog-inl.h>
 #include <iostream>
+#include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 #include <string>
 
 #if defined(MINIDETOUR_OS_WINDOWS)
@@ -533,28 +535,77 @@ TEST_CASE("Memory protect", "[memprotect]")
     MiniDetour::MemoryManipulation::MemoryFree(mem, alloc_size);
 }
 
+// qemu user mode doesn't implement process_vm_readv/process_vm_writev (ENOSYS), used by SafeMemoryRead/Write on Linux.
+// The tests then fall back to a less safe access: a plain copy, only done if the region has the needed right.
+// The library keeps the real calls.
+static bool SafeMemoryAccessUnsupported()
+{
+#if defined(MINIDETOUR_OS_LINUX)
+    uint8_t value = 0;
+    uint8_t copy  = 0;
+    errno         = 0;
+    return !MiniDetour::MemoryManipulation::SafeMemoryRead(&value, &copy, 1) && errno == ENOSYS;
+#else
+    return false;
+#endif
+}
+
+static bool TestMemoryAccess(void *address, size_t size, MiniDetour::MemoryManipulation::MemoryRights right)
+{
+    MiniDetour::MemoryManipulation::RegionInfos_t infos;
+    MiniDetour::MemoryManipulation::GetRegionInfos(address, &infos);
+    return infos.Rights != MiniDetour::MemoryManipulation::MemoryRights::mem_unset && (infos.Rights & right) == right && reinterpret_cast<uintptr_t>(address) + size <= infos.End;
+}
+
+static bool TestSafeMemoryRead(void *address, uint8_t *buffer, size_t size)
+{
+    if (!SafeMemoryAccessUnsupported())
+        return MiniDetour::MemoryManipulation::SafeMemoryRead(address, buffer, size);
+
+    if (!TestMemoryAccess(address, size, MiniDetour::MemoryManipulation::MemoryRights::mem_r))
+        return false;
+
+    memcpy(buffer, address, size);
+    return true;
+}
+
+static bool TestSafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
+{
+    if (!SafeMemoryAccessUnsupported())
+        return MiniDetour::MemoryManipulation::SafeMemoryWrite(address, buffer, size);
+
+    if (!TestMemoryAccess(address, size, MiniDetour::MemoryManipulation::MemoryRights::mem_w))
+        return false;
+
+    memcpy(address, buffer, size);
+    return true;
+}
+
 TEST_CASE("Memory read/write", "[memread/memwrite]")
 {
+    if (SafeMemoryAccessUnsupported())
+        WARN("process_vm_readv/writev not implemented (qemu user mode): checking the regions rights with a plain copy.");
+
     const int alloc_size = 50;
     void *mem            = MiniDetour::MemoryManipulation::MemoryAlloc(nullptr, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_r);
     uint8_t buffer[30];
 
     CHECK(mem != nullptr);
 
-    CHECK(MiniDetour::MemoryManipulation::SafeMemoryWrite(mem, (const uint8_t *)"0123456789ABCDEFabcdef", 22) == false);
+    CHECK(TestSafeMemoryWrite(mem, (const uint8_t *)"0123456789ABCDEFabcdef", 22) == false);
 
     MiniDetour::MemoryManipulation::MemoryProtect(mem, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_rw);
-    CHECK(MiniDetour::MemoryManipulation::SafeMemoryWrite(mem, (const uint8_t *)"0123456789ABCDEFabcdef", 22) == true);
+    CHECK(TestSafeMemoryWrite(mem, (const uint8_t *)"0123456789ABCDEFabcdef", 22) == true);
 
     MiniDetour::MemoryManipulation::MemoryProtect(mem, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_r);
-    CHECK(MiniDetour::MemoryManipulation::SafeMemoryRead(mem, buffer, 22) == true);
+    CHECK(TestSafeMemoryRead(mem, buffer, 22) == true);
 
     CHECK(memcmp(buffer, "0123456789ABCDEFabcdef", 22) == 0);
 
     MiniDetour::MemoryManipulation::MemoryFree(mem, alloc_size);
 
     memset(buffer, 0, 30);
-    CHECK(MiniDetour::MemoryManipulation::SafeMemoryRead(mem, buffer, 30) == false);
+    CHECK(TestSafeMemoryRead(mem, buffer, 30) == false);
     CHECK(memcmp(buffer, "\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0\x0", 30) == 0);
 }
 
