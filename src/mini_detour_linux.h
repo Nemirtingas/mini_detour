@@ -83,13 +83,6 @@ namespace MemoryManipulation
 {
 namespace Implementation
 {
-#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
-const void *max_user_address = reinterpret_cast<void *>(0x7ffefffff000);
-#elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
-// 32 bits process on 64 bits kernel gets the whole 4GB
-const void *max_user_address = reinterpret_cast<void *>(0xfffff000);
-#endif
-
 int _MemoryProtectRightsToNative(MemoryRights rights)
 {
     switch (rights)
@@ -151,12 +144,86 @@ bool _GetRegionInfo(uintptr_t target, const char *mapLine, size_t mapLineLength,
     return true;
 }
 
+// mmap refuses the addresses below vm.mmap_min_addr.
+static inline uintptr_t _MinUserAddress()
+{
+    unsigned long minAddress = 0;
+    std::ifstream f("/proc/sys/vm/mmap_min_addr");
+    if (!(f >> minAddress))
+        minAddress = 0x10000; // Default value
+
+    return static_cast<uintptr_t>(minAddress);
+}
+
+// The end of the user address space (TASK_SIZE) depends on the kernel: 47, 48 or 39 bits on 64 bits, 3 or 4 GB
+// on 32 bits. It isn't exposed, so it is searched with mmap, which fails with ENOMEM above it.
+static uintptr_t _FindMaxUserAddress()
+{
+    const uintptr_t pageSize = sysconf(_SC_PAGESIZE);
+
+    // The stack is in the user address space. The search ends below 2^57 (5 levels paging) on 64 bits, and below the
+    // last page on 32 bits (it is never available).
+    uintptr_t inside  = reinterpret_cast<uintptr_t>(&pageSize) & ~(pageSize - 1);
+    uintptr_t outside = sizeof(void *) == 8 ? static_cast<uintptr_t>(uint64_t(1) << 57) : ~(pageSize - 1);
+
+    while (outside - inside > pageSize)
+    {
+        const uintptr_t middle = (inside + (outside - inside) / 2) & ~(pageSize - 1);
+        void *mapped           = mmap(reinterpret_cast<void *>(middle), pageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        const int error        = errno;
+        if (mapped != MAP_FAILED)
+            munmap(mapped, pageSize);
+
+        // Kernels older than 4.17 treat MAP_FIXED_NOREPLACE as a hint: another address means outside too.
+        if ((mapped == MAP_FAILED && error == ENOMEM) || (mapped != MAP_FAILED && mapped != reinterpret_cast<void *>(middle)))
+            outside = middle;
+        else
+            inside = middle;
+    }
+
+    return outside;
+}
+
+// End of the user address space.
+static inline uintptr_t _MaxUserAddress()
+{
+    static const uintptr_t maxAddress = _FindMaxUserAddress();
+    return maxAddress;
+}
+
 size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
 {
-    uintptr_t start;
     uintptr_t oldEnd(0);
     size_t writtenRegionCount = 0;
     size_t currentRegionCount = 0;
+
+    // Free memory is only listed inside the user address space: the gap below [vsyscall] (x64) or [vectors] (ARM),
+    // which the kernel maps above it, isn't free. The free memory above the last mapping is listed.
+    const uintptr_t minAddress = _MinUserAddress();
+    const uintptr_t maxAddress = _MaxUserAddress();
+    auto addFreeRegion         = [&](uintptr_t start, uintptr_t end)
+    {
+        start = std::max(start, minAddress);
+        end   = std::min(end, maxAddress);
+        if (start >= end)
+            return;
+
+        if (regions != nullptr && writtenRegionCount < regionCount)
+        {
+            auto &region = *regions;
+            if (region.StructSize >= sizeof(region))
+            {
+                regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t *>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
+
+                region.Rights        = MemoryRights::mem_unset;
+                region.Start         = start;
+                region.End           = end;
+                region.ModuleName[0] = '\0';
+                ++writtenRegionCount;
+            }
+        }
+        ++currentRegionCount;
+    };
 
     std::ifstream f("/proc/self/maps");
     std::string s;
@@ -172,23 +239,7 @@ size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t re
             if (start != 0 && end != 0)
             {
                 if (oldEnd != start)
-                {
-                    if (regions != nullptr && writtenRegionCount < regionCount)
-                    {
-                        auto &region = *regions;
-                        if (region.StructSize >= sizeof(region))
-                        {
-                            regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t *>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
-
-                            region.Rights        = MemoryRights::mem_unset;
-                            region.Start         = oldEnd;
-                            region.End           = start;
-                            region.ModuleName[0] = '\0';
-                            ++writtenRegionCount;
-                        }
-                    }
-                    ++currentRegionCount;
-                }
+                    addFreeRegion(oldEnd, start);
 
                 if (!onlyFree)
                 {
@@ -212,6 +263,8 @@ size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t re
             }
         }
     }
+
+    addFreeRegion(oldEnd, maxAddress);
 
     return currentRegionCount;
 }

@@ -61,12 +61,6 @@ namespace MemoryManipulation
 {
 namespace Implementation
 {
-#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
-const void *max_user_address = reinterpret_cast<void *>(0x7ffffffff000);
-#elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
-const void *max_user_address = reinterpret_cast<void *>(0x7ffff000);
-#endif
-
 struct ThreadStackInfos_t
 {
     DWORD threadId;
@@ -347,6 +341,22 @@ static inline void *_MemoryAllocAnywhere(size_t size, MemoryRights rights)
     LPVOID address = nullptr;
     MemoryAllocWithProtection(GetCurrentProcess(), &address, size, rights);
     return (void *)address;
+}
+
+// The user address space bounds depend on the system and on /LARGEADDRESSAWARE for 32 bits processes.
+static inline uintptr_t _MinUserAddress()
+{
+    SYSTEM_INFO systemInfo;
+    GetSystemInfo(&systemInfo);
+    return reinterpret_cast<uintptr_t>(systemInfo.lpMinimumApplicationAddress);
+}
+
+// End of the user address space (lpMaximumApplicationAddress is its last byte).
+static inline uintptr_t _MaxUserAddress()
+{
+    SYSTEM_INFO systemInfo;
+    GetSystemInfo(&systemInfo);
+    return reinterpret_cast<uintptr_t>(systemInfo.lpMaximumApplicationAddress) + 1;
 }
 
 // VirtualAlloc rounds the reserved address down to the allocation granularity (64 KB), not to a page.
