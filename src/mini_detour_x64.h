@@ -193,6 +193,29 @@ static bool _GetJccConditionCode(cs_insn const &instruction, uint8_t &conditionC
     return false;
 }
 
+// The code mode is carried by the address on ARM (Thumb bit): x64 has a single mode.
+static inline int _GetCodeMode(void * /*address*/)
+{
+    return 0;
+}
+
+// Address of the code bytes, without the mode.
+static inline void *_GetCodeAddress(void *address)
+{
+    return address;
+}
+
+// Address to call code written in the given mode.
+static inline void *_GetCallAddress(void *code, int /*mode*/)
+{
+    return code;
+}
+
+static inline cs_err _InitDisasm(CodeDisasm &disasm, int /*mode*/)
+{
+    return disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_64 | CodeDisasm::RuntimeEndianness()));
+}
+
 void _EnterRecursiveThunk(void *&_pCode)
 {
     uint8_t *pCode = reinterpret_cast<uint8_t *>(_pCode);

@@ -694,13 +694,8 @@ void *MemoryAlloc(void *_addressHint, size_t size, MemoryRights rights)
 
 size_t WriteAbsoluteJump(void *address, void *destination)
 {
-#if defined(MINIDETOUR_ARCH_ARM)
-    int source_mode      = reinterpret_cast<uintptr_t>(address) & 1;
-    int destination_mode = reinterpret_cast<uintptr_t>(destination) & 1;
-#else
-    int source_mode      = 0;
-    int destination_mode = 0;
-#endif
+    int source_mode      = _GetCodeMode(address);
+    int destination_mode = _GetCodeMode(destination);
 
     if (address == nullptr)
         return AbsJump::GetOpcodeSize(destination, source_mode, destination_mode);
@@ -819,28 +814,14 @@ class Hook_t
         if (_OriginalFuncAddress != nullptr)
             return false;
 
-        int code_mode = 0;
-        cs_err disasm_err;
         CodeDisasm disasm;
 
         // Before reading the mode: on ARM, a PLT entry and the function it leads to can use different modes.
         _EnterRecursiveThunk(func);
-#if defined(MINIDETOUR_ARCH_X86)
-        disasm_err = disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_32 | CodeDisasm::RuntimeEndianness()));
-#elif defined(MINIDETOUR_ARCH_X64)
-        disasm_err = disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_64 | CodeDisasm::RuntimeEndianness()));
-#elif defined(MINIDETOUR_ARCH_ARM)
-        code_mode  = reinterpret_cast<uintptr_t>(func) & 1;
-        disasm_err = disasm.Init(cs_arch::CS_ARCH_ARM, (cs_mode)((code_mode ? cs_mode::CS_MODE_THUMB : cs_mode::CS_MODE_ARM) | CodeDisasm::RuntimeEndianness()));
+        const int code_mode = _GetCodeMode(func);
+        func                = _GetCodeAddress(func);
 
-        // Sanitize address for ARM/THUMB valid opcodes.
-        func = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(func) & ~1);
-
-#elif defined(MINIDETOUR_ARCH_ARM64)
-        disasm_err = disasm.Init(cs_arch::CS_ARCH_ARM64, (cs_mode)(cs_mode::CS_MODE_ARM | CodeDisasm::RuntimeEndianness()));
-#endif
-
-        if (disasm_err != cs_err::CS_ERR_OK)
+        if (_InitDisasm(disasm, code_mode) != cs_err::CS_ERR_OK)
             return false;
 
         size_t relativeJumpSize          = RelJump::GetOpcodeSize(func, reinterpret_cast<void *>(static_cast<uintptr_t>(0xfffffff0)), code_mode, code_mode);
@@ -863,30 +844,14 @@ class Hook_t
         int &func_mode,
         int &hook_mode)
     {
-        func_mode = 0;
-        hook_mode = 0;
-        cs_err disasm_err;
-
         // Before reading the mode: on ARM, a PLT entry and the function it leads to can use different modes.
         _EnterRecursiveThunk(functionToHook);
-#if defined(MINIDETOUR_ARCH_X86)
-        disasm_err = disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_32 | CodeDisasm::RuntimeEndianness()));
-#elif defined(MINIDETOUR_ARCH_X64)
-        disasm_err = disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_64 | CodeDisasm::RuntimeEndianness()));
-#elif defined(MINIDETOUR_ARCH_ARM)
-        func_mode  = reinterpret_cast<uintptr_t>(functionToHook) & 1;
-        hook_mode  = reinterpret_cast<uintptr_t>(newFunction) & 1;
-        disasm_err = disasm.Init(cs_arch::CS_ARCH_ARM, (cs_mode)((func_mode ? cs_mode::CS_MODE_THUMB : cs_mode::CS_MODE_ARM) | CodeDisasm::RuntimeEndianness()));
+        func_mode      = _GetCodeMode(functionToHook);
+        hook_mode      = _GetCodeMode(newFunction);
+        functionToHook = _GetCodeAddress(functionToHook);
+        newFunction    = _GetCodeAddress(newFunction);
 
-        // Sanitize address for ARM/THUMB valid opcodes.
-        functionToHook = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(functionToHook) & ~1);
-        newFunction    = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(newFunction) & ~1);
-
-#elif defined(MINIDETOUR_ARCH_ARM64)
-        disasm_err = disasm.Init(cs_arch::CS_ARCH_ARM64, (cs_mode)(cs_mode::CS_MODE_ARM | CodeDisasm::RuntimeEndianness()));
-#endif
-
-        if (disasm_err != cs_err::CS_ERR_OK)
+        if (_InitDisasm(disasm, func_mode) != cs_err::CS_ERR_OK)
             return false;
 
         // The relative jump goes to a jump slot that isn't allocated yet, not to newFunction: its size can't be known here
@@ -1108,13 +1073,8 @@ class Hook_t
         _OriginalFuncAddress = functionToHook;
         _DetourFunc          = newFunction;
 
-#if defined(MINIDETOUR_ARCH_ARM)
-        _OriginalTrampolineCallAddress = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(_OriginalTrampolineAddress) | (func_mode ? 1 : 0));
-        _DetourCallFunc                = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(_DetourFunc) | (hook_mode ? 1 : 0));
-#else
-        _OriginalTrampolineCallAddress = _OriginalTrampolineAddress;
-        _DetourCallFunc                = _DetourFunc;
-#endif
+        _OriginalTrampolineCallAddress = _GetCallAddress(_OriginalTrampolineAddress, func_mode);
+        _DetourCallFunc                = _GetCallAddress(_DetourFunc, hook_mode);
 
         return _OriginalTrampolineCallAddress;
     error:
@@ -1183,12 +1143,8 @@ class Hook_t
             if (!MemoryManipulation::MemoryProtect(_TrampolineAddress, jumpSize, MemoryManipulation::MemoryRights::mem_rwx))
                 return res;
 
-            int func_mode = 0;
-
-#if defined(MINIDETOUR_ARCH_ARM)
             // The jump is reached from the hooked function and goes to its relocated code: both use the function mode.
-            func_mode = reinterpret_cast<uintptr_t>(_OriginalTrampolineCallAddress) & 1;
-#endif
+            const int func_mode = _GetCodeMode(_OriginalTrampolineCallAddress);
 
             AbsJump::WriteOpcodes(_TrampolineAddress, _OriginalTrampolineAddress, func_mode, func_mode);
 
