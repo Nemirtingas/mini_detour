@@ -359,8 +359,6 @@ TEST_CASE("Memory allocation", "[mem alloc]")
     MiniDetour::MemoryManipulation::MemoryFree(mem, alloc_size);
 }
 
-#ifndef MINIDETOUR_OS_APPLE
-
 TEST_CASE("Memory protect", "[memprotect]")
 {
     MiniDetour::MemoryManipulation::MemoryRights old_rights;
@@ -369,6 +367,9 @@ TEST_CASE("Memory protect", "[memprotect]")
     void *mem            = MiniDetour::MemoryManipulation::MemoryAlloc(nullptr, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_none);
 
     CHECK(mem != nullptr);
+
+    // The rights left by the last change.
+    auto finalRights = MiniDetour::MemoryManipulation::MemoryRights::mem_rwx;
 
 #if defined(MINIDETOUR_OS_WINDOWS)
     CHECK(MiniDetour::MemoryManipulation::MemoryProtect(mem, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_r, &old_rights) == true);
@@ -428,18 +429,25 @@ TEST_CASE("Memory protect", "[memprotect]")
     CHECK(MiniDetour::MemoryManipulation::MemoryProtect(mem, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_rx, &old_rights) == true);
     CHECK(old_rights == MiniDetour::MemoryManipulation::MemoryRights::mem_rw);
 
+#if defined(MINIDETOUR_ARCH_ARM64)
+    // Apple Silicon never makes memory writable and executable at the same time (W^X).
+    CHECK(MiniDetour::MemoryManipulation::MemoryProtect(mem, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_wx, &old_rights) == false);
+    CHECK(MiniDetour::MemoryManipulation::MemoryProtect(mem, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &old_rights) == false);
+    finalRights = MiniDetour::MemoryManipulation::MemoryRights::mem_rx;
+#else
     CHECK(MiniDetour::MemoryManipulation::MemoryProtect(mem, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_wx, &old_rights) == true);
     CHECK(old_rights == MiniDetour::MemoryManipulation::MemoryRights::mem_rx);
 
     CHECK(MiniDetour::MemoryManipulation::MemoryProtect(mem, alloc_size, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &old_rights) == true);
     CHECK(old_rights == MiniDetour::MemoryManipulation::MemoryRights::mem_wx);
 #endif
+#endif
 
     MiniDetour::MemoryManipulation::RegionInfos_t infos;
     MiniDetour::MemoryManipulation::GetRegionInfos(mem, &infos);
     CHECK(infos.Start != 0);
     CHECK(infos.End != 0);
-    CHECK(infos.Rights == MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
+    CHECK(infos.Rights == finalRights);
 
     MiniDetour::MemoryManipulation::MemoryFree(mem, alloc_size);
 }
@@ -523,9 +531,9 @@ int Mydo_something2(int a, int b)
 static int (*volatile do_something_ptr)(int, int)  = &do_something;
 static int (*volatile do_something2_ptr)(int, int) = &do_something2;
 
-TEST_CASE("Hook function", "[Hook function]")
+#if defined(TEST_HOOKS_CODE)
+TEST_CASE("Hook a C library function", "[Hook function]")
 {
-
     puts("Unhooked Test");
     CHECK(Myputs_called == false);
 
@@ -548,7 +556,10 @@ TEST_CASE("Hook function", "[Hook function]")
     SPDLOG_INFO("Calling puts...");
     puts("Unhooked Test");
     CHECK(Myputs_called == false);
+}
 
+TEST_CASE("Hook function", "[Hook function]")
+{
     SPDLOG_INFO("Calling do_something...");
     CHECK(do_something_ptr(5, 8) == 13);
 
@@ -597,6 +608,7 @@ TEST_CASE("Hook function", "[Hook function]")
         CHECK(r == 4);
     }
 }
+#endif
 
 #if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
 void (*bkp)();
@@ -653,5 +665,3 @@ TEST_CASE("Hook small function with call", "[Hook function]")
     CHECK(nothing_calls == 1);
 }
 #endif
-
-#endif // MINIDETOUR_OS_APPLE

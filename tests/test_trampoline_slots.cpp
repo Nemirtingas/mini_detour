@@ -3,7 +3,7 @@
 
 #include <vector>
 
-#if defined(TEST_HOOKS_GENERATED_CODE)
+#if defined(TEST_HOOKS_CODE)
 
 static int TrampolineSlotsDetour()
 {
