@@ -394,7 +394,7 @@ static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, si
     return currentRegionCount;
 }
 
-static size_t PageSize()
+static size_t _QueryPageSize()
 {
     SYSTEM_INFO sysInfo;
     GetSystemInfo(&sysInfo);
@@ -487,7 +487,7 @@ static inline void *_MemoryAllocAnywhere(size_t size, MemoryRights rights)
 }
 
 // The user address space bounds depend on the system and on /LARGEADDRESSAWARE for 32 bits processes.
-static inline uintptr_t _MinUserAddress()
+static inline uintptr_t _QueryMinUserAddress()
 {
     SYSTEM_INFO systemInfo;
     GetSystemInfo(&systemInfo);
@@ -495,7 +495,7 @@ static inline uintptr_t _MinUserAddress()
 }
 
 // End of the user address space (lpMaximumApplicationAddress is its last byte).
-static inline uintptr_t _MaxUserAddress()
+static inline uintptr_t _QueryMaxUserAddress()
 {
     SYSTEM_INFO systemInfo;
     GetSystemInfo(&systemInfo);
@@ -503,7 +503,7 @@ static inline uintptr_t _MaxUserAddress()
 }
 
 // VirtualAlloc rounds the reserved address down to the allocation granularity (64 KB), not to a page.
-static inline size_t _AllocationGranularity()
+static inline size_t _QueryAllocationGranularity()
 {
     SYSTEM_INFO systemInfo;
     GetSystemInfo(&systemInfo);
@@ -607,13 +607,13 @@ static bool _ReplaceModuleExport(void *moduleBase, PDWORD exportAddress, void *n
     {
         auto imageNTHeaders = (PIMAGE_NT_HEADERS)((char *)moduleBase + ((PIMAGE_DOS_HEADER)moduleBase)->e_lfanew);
         auto moduleEnd      = (void *)((char *)moduleBase + imageNTHeaders->OptionalHeader.SizeOfImage);
-        jump                = GetMemoryManager().GetFreeJump(moduleEnd, moduleBase, _AddressIsRepresentableAsRva);
+        jump                = Globals_t::Instance().Memory.GetFreeJump(moduleEnd, moduleBase, _AddressIsRepresentableAsRva);
         if (jump == nullptr)
             return false;
 
         if (!_WriteJumpSlot(jump, newExportAddress, _GetCodeMode(jump), _GetCodeMode(newExportAddress)))
         {
-            GetMemoryManager().FreeJump(jump);
+            Globals_t::Instance().Memory.FreeJump(jump);
             return false;
         }
 
@@ -624,7 +624,7 @@ static bool _ReplaceModuleExport(void *moduleBase, PDWORD exportAddress, void *n
     if (!_ExchangeTableEntry(exportAddress, static_cast<DWORD>((uintptr_t)target - (uintptr_t)moduleBase), &previous))
     {
         if (jump != nullptr)
-            GetMemoryManager().FreeJump(jump);
+            Globals_t::Instance().Memory.FreeJump(jump);
 
         return false;
     }
@@ -902,7 +902,7 @@ static size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t 
 
         exportReplaceDetails[i].NewExportAddress = (void *)((uintptr_t)moduleBase + previous);
         // Does nothing when the export didn't go through a jump.
-        GetMemoryManager().FreeJump(exportReplaceDetails[i].NewExportAddress);
+        Globals_t::Instance().Memory.FreeJump(exportReplaceDetails[i].NewExportAddress);
         ++result;
     }
 
