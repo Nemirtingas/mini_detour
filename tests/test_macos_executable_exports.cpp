@@ -36,5 +36,11 @@ TEST_CASE("Exports of the main executable", "[macos_executable_exports]")
 
     CHECK(found == (void *)&MiniDetourExecutableExport);
     dlclose(h);
+
+    // dlopen(NULL) gives the main executable too, as on Linux.
+    void *mainHandle = dlopen(nullptr, RTLD_NOW);
+    REQUIRE(mainHandle != nullptr);
+    CHECK(MiniDetour::ModuleManipulation::GetAllExportedSymbols(mainHandle, nullptr, 0) == count);
+    dlclose(mainHandle);
 }
 #endif

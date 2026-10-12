@@ -614,11 +614,16 @@ namespace Implementation
 {
 // Finds the loaded image whose dlopen handle is moduleHandle. Only dyld's public API is used: its internal structures
 // and the shared cache format change between macOS versions. An image's handle is the one dlopen returns for its path
-// (RTLD_NOLOAD never loads anything). slide can be null.
+// (RTLD_NOLOAD never loads anything), and dlopen(NULL) gives the main executable, as on Linux. slide can be null.
 static bool _FindLoadedImage(void *moduleHandle, const MachHeader_t **header, uintptr_t *slide)
 {
     if (moduleHandle == nullptr)
         return false;
+
+    // dlopen(NULL) gives a handle of its own, not the one of the executable path. The main executable is image 0.
+    void *mainHandle = dlopen(nullptr, RTLD_NOW | RTLD_NOLOAD);
+    if (mainHandle != nullptr)
+        dlclose(mainHandle);
 
     const uint32_t imageCount = _dyld_image_count();
     for (uint32_t i = 0; i < imageCount; ++i)
@@ -627,13 +632,16 @@ static bool _FindLoadedImage(void *moduleHandle, const MachHeader_t **header, ui
         if (path == nullptr)
             continue;
 
-        void *handle = dlopen(path, RTLD_NOW | RTLD_NOLOAD);
-        if (handle == nullptr)
-            continue;
+        if (i != 0 || moduleHandle != mainHandle)
+        {
+            void *handle = dlopen(path, RTLD_NOW | RTLD_NOLOAD);
+            if (handle == nullptr)
+                continue;
 
-        dlclose(handle);
-        if (handle != moduleHandle)
-            continue;
+            dlclose(handle);
+            if (handle != moduleHandle)
+                continue;
+        }
 
         *header = reinterpret_cast<const MachHeader_t *>(_dyld_get_image_header(i));
         if (slide != nullptr)
@@ -642,7 +650,7 @@ static bool _FindLoadedImage(void *moduleHandle, const MachHeader_t **header, ui
         return *header != nullptr && (*header)->magic == MachHeaderMagic;
     }
 
-    // No loaded image has this handle (dlopen(NULL) handle, invalid handle).
+    // No loaded image has this handle.
     return false;
 }
 
