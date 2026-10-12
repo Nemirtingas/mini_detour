@@ -248,7 +248,6 @@ TEST_CASE("Module IAT hook", "[module_iat_hook]")
 TEST_CASE("Module export hook", "[module_export_hook]")
 {
     SPDLOG_INFO("Test module export hook");
-#if defined(MINIDETOUR_OS_WINDOWS) || defined(MINIDETOUR_OS_LINUX)
     auto h = LOAD_LIBRARY(EXPORT_HOOK_TEST_LIBRARY);
     if (h != nullptr)
     {
@@ -276,9 +275,6 @@ TEST_CASE("Module export hook", "[module_export_hook]")
 
         FREE_LIBRARY(h);
     }
-#elif defined(MINIDETOUR_OS_APPLE)
-    // MacOS (MachO) not implemented.
-#endif
 }
 
 int AbsoluteJumpWriteTest(int x)

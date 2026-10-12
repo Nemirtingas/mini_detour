@@ -9,33 +9,37 @@
 #include <mach/vm_param.h>
 #include <mach-o/loader.h>
 #include <mach-o/dyld.h>
-#include <mach-o/dyld_images.h>
 #include <mach-o/nlist.h>
 #include <dlfcn.h>
 #include <libkern/OSCacheControl.h>
 
 #include <unistd.h>
 #include <errno.h>
+#include <string.h>
 
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
 
-using MachHeader_t    = mach_header_64;
-using LoadCommand_t   = load_command;
-using Section_t       = section_64;
-using SymTabCommand_t = symtab_command;
-using NList_t         = nlist_64;
+using MachHeader_t     = mach_header_64;
+using LoadCommand_t    = load_command;
+using SegmentCommand_t = segment_command_64;
+using Section_t        = section_64;
+using SymTabCommand_t  = symtab_command;
+using NList_t          = nlist_64;
 
 #define MachHeaderMagic MH_MAGIC_64
+#define LC_SEGMENT_ARCH LC_SEGMENT_64
 
 #elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
 
-using MachHeader_t    = mach_header;
-using LoadCommand_t   = load_command;
-using Section_t       = section;
-using SymTabCommand_t = symtab_command;
-using NList_t         = nlist;
+using MachHeader_t     = mach_header;
+using LoadCommand_t    = load_command;
+using SegmentCommand_t = segment_command;
+using Section_t        = section;
+using SymTabCommand_t  = symtab_command;
+using NList_t          = nlist;
 
 #define MachHeaderMagic MH_MAGIC
+#define LC_SEGMENT_ARCH LC_SEGMENT
 
 #endif
 
@@ -548,48 +552,48 @@ namespace ModuleManipulation
 {
 namespace Implementation
 {
-// slide: what the image was moved by from its link address, to add to symbol values.
-static bool _LoadModuleExportDetails(void *moduleHandle, uintptr_t *slide, NList_t **dynamicSymbols, const char **dynamicSymbolsNames, uint32_t *dynamicSymbolsCount)
+// Finds the loaded image whose dlopen handle is moduleHandle. Only dyld's public API is used: its internal structures
+// and the shared cache format change between macOS versions. An image's handle is the one dlopen returns for its path
+// (RTLD_NOLOAD never loads anything). slide can be null.
+static bool _FindLoadedImage(void *moduleHandle, const MachHeader_t **header, uintptr_t *slide)
 {
-    task_dyld_info dyld_info;
-    mach_msg_type_number_t count = TASK_DYLD_INFO_COUNT;
-    kern_return_t ret;
-    ret = task_info(mach_task_self_, TASK_DYLD_INFO, (task_info_t)&dyld_info, &count);
-    if (ret != KERN_SUCCESS)
+    if (moduleHandle == nullptr)
         return false;
 
-    // This is the most reliable and safest way to find the module base address. dyld seems to change its internal structure quite often.
-    dyld_all_image_infos *infos = (dyld_all_image_infos *)dyld_info.all_image_info_addr;
-    void *cacheBase             = nullptr;
-    void *foundModuleBase       = nullptr;
-
-    for (uint32_t i = 0; i < infos->infoArrayCount && (foundModuleBase == nullptr || cacheBase == nullptr); ++i)
+    const uint32_t imageCount = _dyld_image_count();
+    for (uint32_t i = 0; i < imageCount; ++i)
     {
-        if (foundModuleBase == nullptr)
-        {
-            // RTLD_NOLOAD: only get the handle of images already loaded, never load a new one.
-            void *loadedHandle = dlopen(infos->infoArray[i].imageFilePath, RTLD_NOW | RTLD_NOLOAD);
-            if (loadedHandle != nullptr)
-            {
-                if (loadedHandle == moduleHandle)
-                    foundModuleBase = (void *)infos->infoArray[i].imageLoadAddress;
+        const char *path = _dyld_get_image_name(i);
+        if (path == nullptr)
+            continue;
 
-                dlclose(loadedHandle);
-            }
-        }
+        void *handle = dlopen(path, RTLD_NOW | RTLD_NOLOAD);
+        if (handle == nullptr)
+            continue;
 
-        if (cacheBase == nullptr)
-            cacheBase = (void *)infos->sharedCacheBaseAddress;
+        dlclose(handle);
+        if (handle != moduleHandle)
+            continue;
+
+        *header = reinterpret_cast<const MachHeader_t *>(_dyld_get_image_header(i));
+        if (slide != nullptr)
+            *slide = static_cast<uintptr_t>(_dyld_get_image_vmaddr_slide(i));
+
+        return *header != nullptr && (*header)->magic == MachHeaderMagic;
     }
 
     // No loaded image has this handle (dlopen(NULL) handle, invalid handle).
-    if (foundModuleBase == nullptr)
+    return false;
+}
+
+// slide: what the image was moved by from its link address, to add to symbol values.
+static bool _LoadModuleExportDetails(void *moduleHandle, uintptr_t *slide, NList_t **dynamicSymbols, const char **dynamicSymbolsNames, uint32_t *dynamicSymbolsCount)
+{
+    const MachHeader_t *machHeader;
+    if (!_FindLoadedImage(moduleHandle, &machHeader, nullptr))
         return false;
 
-    MachHeader_t *machHeader = (MachHeader_t *)foundModuleBase;
-
-    if (machHeader->magic != MachHeaderMagic)
-        return false;
+    const void *foundModuleBase = machHeader;
 
     bool fromSharedCache = machHeader->flags & MH_DYLIB_IN_CACHE;
     if (fromSharedCache) // TODO: Handle shared cache
@@ -700,43 +704,592 @@ static size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportD
     return result;
 }
 
-static size_t GetAllIATSymbols(void * /*moduleHandle*/, IATDetails_t * /*exportDetails*/, size_t /*iatDetailsCount*/)
+// Import slots of a Mach-O image: the lazy (__la_symbol_ptr) and non lazy (__got, __auth_got, __nl_symbol_ptr) symbol
+// pointers, named by the indirect symbol table. This is what the image calls its imports through.
+struct _ImportSlot_t
 {
-    return 0;
+    // Without the leading '_' of C symbols.
+    const char *Name;
+    // Install name of the library the symbol is imported from, "" when not known (flat namespace, the image itself).
+    const char *ModuleName;
+    void **Slot;
+    // Before its first call, a lazy slot points to dyld's binding stub.
+    bool Lazy;
+};
+
+// Calls callback(_ImportSlot_t const&) for every import slot of the image, until it returns false.
+template <typename Callback>
+static bool _ForEachImportSlot(void *moduleHandle, Callback callback)
+{
+    const MachHeader_t *header;
+    uintptr_t slide;
+    if (!_FindLoadedImage(moduleHandle, &header, &slide))
+        return false;
+
+    const SymTabCommand_t *symTab    = nullptr;
+    const dysymtab_command *dySymTab = nullptr;
+    const SegmentCommand_t *linkEdit = nullptr;
+    // Library ordinals are 8 bits, starting at 1, in the order of the dylib load commands.
+    const char *libraries[256];
+    uint32_t libraryCount = 0;
+
+    const LoadCommand_t *loadCommandStart = reinterpret_cast<const LoadCommand_t *>(header + 1);
+    const LoadCommand_t *loadCommandEnd   = reinterpret_cast<const LoadCommand_t *>(reinterpret_cast<uintptr_t>(loadCommandStart) + header->sizeofcmds);
+    for (auto *loadCommand = loadCommandStart; loadCommand < loadCommandEnd;
+         loadCommand       = reinterpret_cast<const LoadCommand_t *>(reinterpret_cast<uintptr_t>(loadCommand) + loadCommand->cmdsize))
+    {
+        switch (loadCommand->cmd)
+        {
+            case LC_SYMTAB: symTab = reinterpret_cast<const SymTabCommand_t *>(loadCommand); break;
+            case LC_DYSYMTAB: dySymTab = reinterpret_cast<const dysymtab_command *>(loadCommand); break;
+            case LC_SEGMENT_ARCH:
+            {
+                auto segment = reinterpret_cast<const SegmentCommand_t *>(loadCommand);
+                if (strncmp(segment->segname, SEG_LINKEDIT, sizeof(segment->segname)) == 0)
+                    linkEdit = segment;
+
+                break;
+            }
+            case LC_LOAD_DYLIB:
+            case LC_LOAD_WEAK_DYLIB:
+            case LC_REEXPORT_DYLIB:
+            case LC_LOAD_UPWARD_DYLIB:
+            case LC_LAZY_LOAD_DYLIB:
+            {
+                auto dylib = reinterpret_cast<const dylib_command *>(loadCommand);
+                if (libraryCount < sizeof(libraries) / sizeof(*libraries))
+                    libraries[libraryCount++] = reinterpret_cast<const char *>(dylib) + dylib->dylib.name.offset;
+
+                break;
+            }
+        }
+    }
+
+    // Images in the shared cache too: their __LINKEDIT is mapped, at the link address of the cache plus its slide.
+    if (symTab == nullptr || dySymTab == nullptr || linkEdit == nullptr)
+        return false;
+
+    const uintptr_t linkEditBase    = slide + linkEdit->vmaddr - linkEdit->fileoff;
+    const NList_t *symbols          = reinterpret_cast<const NList_t *>(linkEditBase + symTab->symoff);
+    const char *symbolNames         = reinterpret_cast<const char *>(linkEditBase + symTab->stroff);
+    const uint32_t *indirectSymbols = reinterpret_cast<const uint32_t *>(linkEditBase + dySymTab->indirectsymoff);
+
+    for (auto *loadCommand = loadCommandStart; loadCommand < loadCommandEnd;
+         loadCommand       = reinterpret_cast<const LoadCommand_t *>(reinterpret_cast<uintptr_t>(loadCommand) + loadCommand->cmdsize))
+    {
+        if (loadCommand->cmd != LC_SEGMENT_ARCH)
+            continue;
+
+        auto segment  = reinterpret_cast<const SegmentCommand_t *>(loadCommand);
+        auto sections = reinterpret_cast<const Section_t *>(segment + 1);
+        for (uint32_t i = 0; i < segment->nsects; ++i)
+        {
+            const Section_t &section = sections[i];
+            const uint32_t type      = section.flags & SECTION_TYPE;
+            if (type != S_LAZY_SYMBOL_POINTERS && type != S_NON_LAZY_SYMBOL_POINTERS)
+                continue;
+
+            void **slots = reinterpret_cast<void **>(slide + section.addr);
+            for (size_t j = 0; j < section.size / sizeof(void *); ++j)
+            {
+                const uint32_t indirectIndex = section.reserved1 + static_cast<uint32_t>(j);
+                if (indirectIndex >= dySymTab->nindirectsyms)
+                    break;
+
+                // Local and absolute entries aren't imports.
+                const uint32_t symbolIndex = indirectSymbols[indirectIndex];
+                if ((symbolIndex & (INDIRECT_SYMBOL_LOCAL | INDIRECT_SYMBOL_ABS)) != 0 || symbolIndex >= symTab->nsyms)
+                    continue;
+
+                const NList_t &symbol = symbols[symbolIndex];
+                if (symbol.n_un.n_strx >= symTab->strsize)
+                    continue;
+
+                const char *name = symbolNames + symbol.n_un.n_strx;
+                if (name[0] == '_')
+                    ++name;
+
+                const uint32_t ordinal = GET_LIBRARY_ORDINAL(symbol.n_desc);
+                _ImportSlot_t importSlot;
+                importSlot.Name       = name;
+                importSlot.ModuleName = ordinal >= 1 && ordinal <= libraryCount ? libraries[ordinal - 1] : "";
+                importSlot.Slot       = slots + j;
+                importSlot.Lazy       = type == S_LAZY_SYMBOL_POINTERS;
+                if (!callback(importSlot))
+                    return true;
+            }
+        }
+    }
+
+    return true;
 }
 
-static size_t ReplaceModuleExports(void * /*moduleHandle*/, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
+// The address a slot leads to. An unresolved lazy slot points to dyld's binding stub: calling it would bind the slot
+// again, over a replacement. The function is then resolved from the library the symbol is imported from.
+static void *_GetImportTarget(_ImportSlot_t const &importSlot)
 {
-    // TODO: Read MachO and modify export address
+    if (!importSlot.Lazy)
+        return *importSlot.Slot;
+
+    void *library = importSlot.ModuleName[0] != '\0' ? dlopen(importSlot.ModuleName, RTLD_NOW | RTLD_NOLOAD) : nullptr;
+    void *target  = dlsym(library != nullptr ? library : RTLD_DEFAULT, importSlot.Name);
+    if (library != nullptr)
+        dlclose(library);
+
+    return target != nullptr ? target : *importSlot.Slot;
+}
+
+// The import module name can be the library install name or its file name. No name matches any library.
+static bool _ImportModuleMatches(const char *wantedModuleName, const char *moduleName)
+{
+    if (wantedModuleName == nullptr || wantedModuleName[0] == '\0' || strcmp(wantedModuleName, moduleName) == 0)
+        return true;
+
+    const char *fileName = strrchr(moduleName, '/');
+    return fileName != nullptr && strcmp(wantedModuleName, fileName + 1) == 0;
+}
+
+// Writes to pages whose maximum rights may not include writing: the import slots are in __DATA_CONST (read-only once the
+// image is bound), the export trie in __LINKEDIT, and shared cache pages are never writable. VM_PROT_COPY gives the
+// process its own writable copy of the pages. The rights are restored (those of the first page, for the whole range).
+static bool _WriteProtected(void *address, const void *data, size_t size)
+{
+    MiniDetour::MemoryManipulation::RegionInfos_t infos;
+    MiniDetour::MemoryManipulation::GetRegionInfos(address, &infos);
+    if (infos.Rights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
+        return false;
+
+    const size_t pageSize          = MemoryManipulation::Implementation::PageSize();
+    const mach_vm_address_t start  = reinterpret_cast<mach_vm_address_t>(MiniDetour::MemoryManipulation::PageRound(address, pageSize));
+    const mach_vm_address_t end    = (reinterpret_cast<mach_vm_address_t>(address) + size + pageSize - 1) & ~static_cast<mach_vm_address_t>(pageSize - 1);
+    const vm_prot_t originalRights = static_cast<vm_prot_t>(MemoryManipulation::Implementation::_MemoryProtectRightsToNative(infos.Rights));
+    if (mach_vm_protect(mach_task_self(), start, end - start, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
+        return false;
+
+    memcpy(address, data, size);
+    mach_vm_protect(mach_task_self(), start, end - start, FALSE, originalRights);
+    return true;
+}
+
+static bool _WriteImportSlot(void **slot, void *value)
+{
+    return _WriteProtected(slot, &value, sizeof(value));
+}
+
+// Where dyld looks the exports of an image up (dlsym, binding of the images loaded later): the export trie. Its location
+// is read once when the image is loaded, so it can only be modified in place. The padding between the load commands and
+// the first section of __TEXT is kept too: it is where the export jumps are written.
+struct _ExportTrie_t
+{
+    uintptr_t Base;
+    uint8_t *Start;
+    uint8_t *End;
+    uintptr_t PaddingStart;
+    uintptr_t PaddingEnd;
+};
+
+static bool _GetExportTrie(void *moduleHandle, _ExportTrie_t *exportTrie)
+{
+    const MachHeader_t *header;
+    uintptr_t slide;
+    if (!_FindLoadedImage(moduleHandle, &header, &slide))
+        return false;
+
+    exportTrie->Base         = reinterpret_cast<uintptr_t>(header);
+    exportTrie->PaddingStart = reinterpret_cast<uintptr_t>(header + 1) + header->sizeofcmds;
+    exportTrie->PaddingEnd   = 0;
+
+    uint32_t trieOffset = 0;
+    uint32_t trieSize   = 0;
+    bool hasLinkEdit    = false;
+    uintptr_t linkEdit  = 0;
+
+    auto loadCommand = reinterpret_cast<const LoadCommand_t *>(header + 1);
+    for (uint32_t i = 0; i < header->ncmds; ++i, loadCommand = reinterpret_cast<const LoadCommand_t *>(reinterpret_cast<uintptr_t>(loadCommand) + loadCommand->cmdsize))
+    {
+        switch (loadCommand->cmd)
+        {
+            case LC_DYLD_EXPORTS_TRIE:
+                trieOffset = reinterpret_cast<const linkedit_data_command *>(loadCommand)->dataoff;
+                trieSize   = reinterpret_cast<const linkedit_data_command *>(loadCommand)->datasize;
+                break;
+
+            case LC_DYLD_INFO:
+            case LC_DYLD_INFO_ONLY:
+                trieOffset = reinterpret_cast<const dyld_info_command *>(loadCommand)->export_off;
+                trieSize   = reinterpret_cast<const dyld_info_command *>(loadCommand)->export_size;
+                break;
+
+            case LC_SEGMENT_ARCH:
+            {
+                auto segment = reinterpret_cast<const SegmentCommand_t *>(loadCommand);
+                if (strncmp(segment->segname, SEG_LINKEDIT, sizeof(segment->segname)) == 0)
+                {
+                    hasLinkEdit = true;
+                    linkEdit    = slide + segment->vmaddr - segment->fileoff;
+                }
+                else if (strncmp(segment->segname, SEG_TEXT, sizeof(segment->segname)) == 0)
+                {
+                    auto sections = reinterpret_cast<const Section_t *>(segment + 1);
+                    for (uint32_t j = 0; j < segment->nsects; ++j)
+                    {
+                        const uintptr_t sectionStart = slide + sections[j].addr;
+                        if (sections[j].size != 0 && (exportTrie->PaddingEnd == 0 || sectionStart < exportTrie->PaddingEnd))
+                            exportTrie->PaddingEnd = sectionStart;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    if (!hasLinkEdit || trieSize == 0)
+        return false;
+
+    exportTrie->Start = reinterpret_cast<uint8_t *>(linkEdit + trieOffset);
+    exportTrie->End   = exportTrie->Start + trieSize;
+    if (exportTrie->PaddingEnd < exportTrie->PaddingStart)
+        exportTrie->PaddingEnd = exportTrie->PaddingStart;
+
+    return true;
+}
+
+static bool _ReadUleb128(const uint8_t *&p, const uint8_t *end, uint64_t &value)
+{
+    value          = 0;
+    unsigned shift = 0;
+    for (;;)
+    {
+        if (p >= end || shift > 63)
+            return false;
+
+        const uint8_t byte = *p++;
+        value |= static_cast<uint64_t>(byte & 0x7F) << shift;
+        shift += 7;
+        if ((byte & 0x80) == 0)
+            return true;
+    }
+}
+
+// Encodes value on exactly size bytes: ULEB128 can be padded with continuation bytes, dyld reads it the same way.
+static bool _WriteUleb128(uint64_t value, uint8_t *buffer, size_t size)
+{
+    for (size_t i = 0; i < size; ++i)
+    {
+        buffer[i] = static_cast<uint8_t>((value & 0x7F) | (i + 1 < size ? 0x80 : 0));
+        value >>= 7;
+    }
+
+    return value == 0;
+}
+
+// Finds the address of an exported symbol in the trie: an offset from the image header, encoded on *fieldSize bytes.
+// Re-exports, resolvers, absolute and thread local symbols are refused.
+static uint8_t *_FindExportAddressField(_ExportTrie_t const &exportTrie, const char *exportName, size_t *fieldSize)
+{
+    // C symbols start with '_' on macOS.
+    const std::string symbolName = std::string("_") + exportName;
+    const char *name             = symbolName.c_str();
+
+    const uint8_t *node = exportTrie.Start;
+    for (;;)
+    {
+        const uint8_t *p = node;
+        uint64_t terminalSize;
+        if (!_ReadUleb128(p, exportTrie.End, terminalSize) || terminalSize > static_cast<uint64_t>(exportTrie.End - p))
+            return nullptr;
+
+        const uint8_t *children = p + terminalSize;
+        if (*name == '\0')
+        {
+            uint64_t flags;
+            if (terminalSize == 0 || !_ReadUleb128(p, children, flags))
+                return nullptr;
+
+            if ((flags & (EXPORT_SYMBOL_FLAGS_REEXPORT | EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER)) != 0 ||
+                (flags & EXPORT_SYMBOL_FLAGS_KIND_MASK) != EXPORT_SYMBOL_FLAGS_KIND_REGULAR)
+                return nullptr;
+
+            const uint8_t *field = p;
+            uint64_t offset;
+            if (!_ReadUleb128(p, children, offset))
+                return nullptr;
+
+            *fieldSize = static_cast<size_t>(p - field);
+            return const_cast<uint8_t *>(field);
+        }
+
+        // Each edge is at least one character long: name gets shorter at every node, so the walk ends.
+        p = children;
+        if (p >= exportTrie.End)
+            return nullptr;
+
+        const uint8_t childCount = *p++;
+        const uint8_t *next      = nullptr;
+        for (uint8_t i = 0; i < childCount && next == nullptr; ++i)
+        {
+            const char *edge        = reinterpret_cast<const char *>(p);
+            const size_t edgeLength = strnlen(edge, static_cast<size_t>(exportTrie.End - p));
+            if (edgeLength == static_cast<size_t>(exportTrie.End - p))
+                return nullptr;
+
+            p += edgeLength + 1;
+            uint64_t childOffset;
+            if (!_ReadUleb128(p, exportTrie.End, childOffset) || childOffset >= static_cast<uint64_t>(exportTrie.End - exportTrie.Start))
+                return nullptr;
+
+            if (edgeLength != 0 && strncmp(name, edge, edgeLength) == 0)
+            {
+                name += edgeLength;
+                next = exportTrie.Start + childOffset;
+            }
+        }
+
+        if (next == nullptr)
+            return nullptr;
+
+        node = next;
+    }
+}
+
+static size_t _ExportJumpSlotSize()
+{
+    return (AbsJump::GetMaxOpcodeSize() + 15) & ~static_cast<size_t>(15);
+}
+
+static bool _IsExportJump(_ExportTrie_t const &exportTrie, uintptr_t address)
+{
+    return address >= exportTrie.PaddingStart && address + _ExportJumpSlotSize() <= exportTrie.PaddingEnd;
+}
+
+// The export offset keeps its encoded size, often 2 bytes (16 KB from the header): a jump above the image is out of
+// reach, but the zero filled padding after the load commands isn't. A slot is free when it is all zeros (a jump never is).
+static void *_WriteExportJump(_ExportTrie_t const &exportTrie, void *target)
+{
+    const size_t slotSize = _ExportJumpSlotSize();
+    uint8_t code[AbsJump::GetMaxOpcodeSize()];
+    const size_t jumpSize = MiniDetour::MemoryManipulation::WriteAbsoluteJump(code, target);
+
+    for (uintptr_t slot = (exportTrie.PaddingStart + 15) & ~static_cast<uintptr_t>(15); slot + slotSize <= exportTrie.PaddingEnd; slot += slotSize)
+    {
+        const uint8_t *bytes = reinterpret_cast<const uint8_t *>(slot);
+        bool isFree          = true;
+        for (size_t i = 0; i < slotSize && isFree; ++i)
+            isFree = bytes[i] == 0;
+
+        if (!isFree)
+            continue;
+
+        if (!_WriteProtected(reinterpret_cast<void *>(slot), code, jumpSize))
+            return nullptr;
+
+        MemoryManipulation::Implementation::FlushInstructionCache(reinterpret_cast<void *>(slot), jumpSize);
+        return reinterpret_cast<void *>(slot);
+    }
+
+    return nullptr;
+}
+
+static void _FreeExportJump(void *jump)
+{
+    uint8_t zeros[AbsJump::GetMaxOpcodeSize() + 16] = {};
+    _WriteProtected(jump, zeros, _ExportJumpSlotSize());
+}
+
+static size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *iatDetails, size_t iatDetailsCount)
+{
+    size_t result = 0;
+    _ForEachImportSlot(
+        moduleHandle,
+        [&](_ImportSlot_t const &importSlot)
+        {
+            if (iatDetails != nullptr)
+            {
+                if (result >= iatDetailsCount)
+                    return false;
+
+                iatDetails[result].ImportOrdinal     = static_cast<uint32_t>(result);
+                iatDetails[result].ImportName        = importSlot.Name;
+                iatDetails[result].ImportModuleName  = importSlot.ModuleName;
+                iatDetails[result].ImportCallAddress = _GetImportTarget(importSlot);
+            }
+
+            ++result;
+            return true;
+        });
+
+    return result;
+}
+
+// Only what dyld looks up from now on changes (dlsym, images loaded later): the images already bound keep calling the
+// original export, their imports can be replaced with ReplaceModuleIATs.
+static size_t ReplaceModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
+{
+    size_t result = 0;
     for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
         exportReplaceDetails[i].ExportCallAddress = nullptr;
 
-    return 0;
+    _ExportTrie_t exportTrie;
+    if (!_GetExportTrie(moduleHandle, &exportTrie))
+        return result;
+
+    for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
+    {
+        if (exportReplaceDetails[i].ExportName == nullptr || exportReplaceDetails[i].NewExportAddress == nullptr)
+            continue;
+
+        size_t fieldSize;
+        uint8_t *field = _FindExportAddressField(exportTrie, exportReplaceDetails[i].ExportName, &fieldSize);
+        uint8_t encoded[16];
+        if (field == nullptr || fieldSize > sizeof(encoded))
+            continue;
+
+        const uint8_t *p = field;
+        uint64_t oldOffset;
+        _ReadUleb128(p, field + fieldSize, oldOffset);
+
+        // The offset is unsigned and keeps its size: the new address is used as is when it fits, otherwise a jump to it.
+        const uintptr_t target = reinterpret_cast<uintptr_t>(exportReplaceDetails[i].NewExportAddress);
+        void *jump             = nullptr;
+        if (target <= exportTrie.Base || !_WriteUleb128(target - exportTrie.Base, encoded, fieldSize))
+        {
+            jump = _WriteExportJump(exportTrie, exportReplaceDetails[i].NewExportAddress);
+            if (jump == nullptr)
+                continue;
+
+            if (!_WriteUleb128(reinterpret_cast<uintptr_t>(jump) - exportTrie.Base, encoded, fieldSize))
+            {
+                _FreeExportJump(jump);
+                continue;
+            }
+        }
+
+        if (!_WriteProtected(field, encoded, fieldSize))
+        {
+            if (jump != nullptr)
+                _FreeExportJump(jump);
+
+            continue;
+        }
+
+        exportReplaceDetails[i].ExportCallAddress = reinterpret_cast<void *>(exportTrie.Base + static_cast<uintptr_t>(oldOffset));
+        ++result;
+    }
+
+    return result;
 }
 
-static size_t RestoreModuleExports(void * /*moduleHandle*/, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
+static size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
 {
-    // TODO: Read MachO and modify export address
+    size_t result = 0;
     for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
         exportReplaceDetails[i].NewExportAddress = nullptr;
 
-    return 0;
+    _ExportTrie_t exportTrie;
+    if (!_GetExportTrie(moduleHandle, &exportTrie))
+        return result;
+
+    for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
+    {
+        if (exportReplaceDetails[i].ExportName == nullptr)
+            continue;
+
+        size_t fieldSize;
+        uint8_t *field = _FindExportAddressField(exportTrie, exportReplaceDetails[i].ExportName, &fieldSize);
+        uint8_t encoded[16];
+        const uintptr_t original = reinterpret_cast<uintptr_t>(exportReplaceDetails[i].ExportCallAddress);
+        if (field == nullptr || fieldSize > sizeof(encoded) || original <= exportTrie.Base || !_WriteUleb128(original - exportTrie.Base, encoded, fieldSize))
+            continue;
+
+        const uint8_t *p = field;
+        uint64_t currentOffset;
+        _ReadUleb128(p, field + fieldSize, currentOffset);
+
+        // Only this entry fails: the next ones can still be restored.
+        if (!_WriteProtected(field, encoded, fieldSize))
+            continue;
+
+        const uintptr_t current                  = exportTrie.Base + static_cast<uintptr_t>(currentOffset);
+        exportReplaceDetails[i].NewExportAddress = reinterpret_cast<void *>(current);
+        if (current != original && _IsExportJump(exportTrie, current))
+            _FreeExportJump(reinterpret_cast<void *>(current));
+
+        ++result;
+    }
+
+    return result;
 }
 
-static size_t ReplaceModuleIATs(void * /*moduleHandle*/, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+// A symbol can have several slots (a lazy one for its calls, a non lazy one where its address is taken): all of them
+// are replaced. Mach-O imports have no ordinal, they are found by name.
+static size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
-    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
-        iatReplaceDetails[i].IATCallAddress = nullptr;
+    size_t result = 0;
 
-    return 0;
+    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+    {
+        IATReplaceParameter_t &parameter = iatReplaceDetails[i];
+        parameter.IATCallAddress         = nullptr;
+        if (parameter.IATName == nullptr)
+            continue;
+
+        void *original = nullptr;
+        _ForEachImportSlot(
+            moduleHandle,
+            [&](_ImportSlot_t const &importSlot)
+            {
+                if (strcmp(importSlot.Name, parameter.IATName) != 0 || !_ImportModuleMatches(parameter.IATModuleName, importSlot.ModuleName))
+                    return true;
+
+                void *target = _GetImportTarget(importSlot);
+                if (_WriteImportSlot(importSlot.Slot, parameter.NewIATAddress) && original == nullptr)
+                    original = target;
+
+                return true;
+            });
+
+        parameter.IATCallAddress = original;
+        if (original != nullptr)
+            ++result;
+    }
+
+    return result;
 }
 
-static size_t RestoreModuleIATs(void * /*moduleHandle*/, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+static size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
-    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
-        iatReplaceDetails[i].NewIATAddress = nullptr;
+    size_t result = 0;
 
-    return 0;
+    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+    {
+        IATReplaceParameter_t &parameter = iatReplaceDetails[i];
+        parameter.NewIATAddress          = nullptr;
+        if (parameter.IATName == nullptr || parameter.IATCallAddress == nullptr)
+            continue;
+
+        bool restored = false;
+        _ForEachImportSlot(
+            moduleHandle,
+            [&](_ImportSlot_t const &importSlot)
+            {
+                if (strcmp(importSlot.Name, parameter.IATName) != 0 || !_ImportModuleMatches(parameter.IATModuleName, importSlot.ModuleName))
+                    return true;
+
+                void *replacement = *importSlot.Slot;
+                if (_WriteImportSlot(importSlot.Slot, parameter.IATCallAddress) && !restored)
+                {
+                    parameter.NewIATAddress = replacement;
+                    restored                = true;
+                }
+
+                return true;
+            });
+
+        if (restored)
+            ++result;
+    }
+
+    return result;
 }
 
 } // namespace Implementation
