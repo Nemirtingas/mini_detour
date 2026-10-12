@@ -5,55 +5,46 @@ jobs:
   job:
     name: ${{ matrix.target.name }}-${{ matrix.build_type }}
     runs-on: ${{ matrix.target.os }}
-    # ARM runs under qemu: its failures are shown, but don't fail the workflow.
-    continue-on-error: ${{ matrix.target.optional }}
     strategy:
       fail-fast: false
       matrix:
         # Release catches what only shows once optimized: small functions, inlined calls, tail calls...
         build_type: [Debug, Release]
         # Each target gives what differs: its runner, the packages to install, the CMake arguments and how to run the tests.
-        # arm is cross compiled and runs under qemu; arm64 runs on native runners. macOS x64 is tested on a local machine.
+        # Every target runs natively: arm is cross compiled and runs on the arm64 runner, which executes 32 bits ARM code,
+        # through the loader of the cross toolchain. macOS x64 is tested on a local machine.
         target:
         - name: linux-x32
           os: ubuntu-latest
           packages: gcc-multilib g++-multilib
           cmake_args: -DCMAKE_TOOLCHAIN_FILE=tests/toolchains/linux_i386.toolchain
           run: ./tests
-          optional: false
         - name: linux-x64
           os: ubuntu-latest
           run: ./tests
-          optional: false
         - name: linux-arm
-          os: ubuntu-latest
-          packages: gcc-arm-linux-gnueabi g++-arm-linux-gnueabi qemu-user
+          os: ubuntu-24.04-arm
+          packages: gcc-arm-linux-gnueabi g++-arm-linux-gnueabi
           cmake_args: -DCMAKE_TOOLCHAIN_FILE=tests/toolchains/linux_arm.toolchain
-          run: qemu-arm -L /usr/arm-linux-gnueabi ./tests
-          optional: true
+          run: /usr/arm-linux-gnueabi/lib/ld-linux.so.3 --library-path /usr/arm-linux-gnueabi/lib ./tests
         - name: linux-arm64
           os: ubuntu-24.04-arm
           run: ./tests
-          optional: false
         - name: macos-arm64
           os: macos-latest
           run: ./macos_permission_fix tests && ./tests
-          optional: false
         - name: windows-x32
           os: windows-latest
           cmake_args: -A Win32
           run: ./tests.exe
-          optional: false
         - name: windows-x64
           os: windows-latest
           cmake_args: -A x64
           run: ./tests.exe
-          optional: false
         - name: windows-arm64
           os: windows-11-arm
           cmake_args: -A ARM64
           run: ./tests.exe
-          optional: false
 
     defaults:
       run:
