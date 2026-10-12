@@ -550,13 +550,13 @@ static bool _ReplaceModuleExport(void *moduleBase, ElfAddr_t *exportAddress, voi
     void *jump   = nullptr;
     if (!_AddressesAreRelativeJumpable(moduleBase, newExportAddress))
     {
-        jump = GetMemoryManager().GetFreeJump(moduleBase);
+        jump = Globals_t::Instance().Memory.GetFreeJump(moduleBase);
         if (jump == nullptr)
             return false;
 
         if (!_WriteJumpSlot(jump, newExportAddress, _GetCodeMode(jump), _GetCodeMode(newExportAddress)))
         {
-            GetMemoryManager().FreeJump(jump);
+            Globals_t::Instance().Memory.FreeJump(jump);
             return false;
         }
 
@@ -567,7 +567,7 @@ static bool _ReplaceModuleExport(void *moduleBase, ElfAddr_t *exportAddress, voi
     if (!_ExchangeTableEntry(exportAddress, static_cast<ElfAddr_t>((uintptr_t)target - (uintptr_t)moduleBase), &previous))
     {
         if (jump != nullptr)
-            GetMemoryManager().FreeJump(jump);
+            Globals_t::Instance().Memory.FreeJump(jump);
 
         return false;
     }
@@ -846,7 +846,7 @@ static size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t 
 
         exportReplaceDetails[i].NewExportAddress = (void *)((uintptr_t)moduleBase + previous);
         // Does nothing when the export didn't go through a jump.
-        GetMemoryManager().FreeJump(exportReplaceDetails[i].NewExportAddress);
+        Globals_t::Instance().Memory.FreeJump(exportReplaceDetails[i].NewExportAddress);
         ++result;
     }
 
