@@ -4,7 +4,7 @@
 // AArch64 // Need to align code on 4 bytes address (opcode are 4bytes fixed length)
 
 // Registers 	Description
-// X0 - X7     argumentsand return value
+// X0 - X7     arguments and return value
 // X8 - X18    temporary registers
 // X19 - X28   callee - saved registers
 // X29         frame pointer
