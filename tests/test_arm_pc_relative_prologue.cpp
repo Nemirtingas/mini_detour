@@ -42,11 +42,13 @@ TEST_CASE("Hook an AArch64 function starting with a literal load", "[arm_pc_rela
     auto original = reinterpret_cast<int (*)()>(hook.HookFunction((void *)function, detour));
     if (original != nullptr)
     {
+        // Hooked: the relocated load must still read 42.
         CHECK(function() == 7);
         CHECK(original() == 42);
         CHECK(hook.RestoreFunction() != nullptr);
     }
 
+    // Refused or restored: the function is unchanged.
     CHECK(function() == 42);
 }
 

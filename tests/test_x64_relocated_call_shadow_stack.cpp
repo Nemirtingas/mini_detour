@@ -36,8 +36,9 @@ static bool ShadowStackEnabled()
 // an address no call had pushed, and the process was killed when shadow stacks (CET) are enabled.
 TEST_CASE("A relocated call keeps the shadow stack consistent", "[x64_relocated_call]")
 {
-    if (!ShadowStackEnabled())
-        WARN("Shadow stacks aren't enabled: the relocated call runs, but the shadow stack isn't checked.");
+    // Without shadow stacks (CPUs without CET), the trampoline code is checked instead: the relocated call must be a real
+    // call. With them, a return no call pushed also kills the process.
+    INFO("Shadow stacks enabled: " << ShadowStackEnabled());
 
     // sub rsp, 28h ; call CallFirstCallee ; lea eax, [rax + rax * 2] ; add rsp, 28h ; ret
     uint8_t code[]              = {0x48, 0x83, 0xEC, 0x28, 0xE8, 0, 0, 0, 0, 0x8D, 0x04, 0x40, 0x48, 0x83, 0xC4, 0x28, 0xC3};
@@ -59,6 +60,15 @@ TEST_CASE("A relocated call keeps the shadow stack consistent", "[x64_relocated_
     MiniDetour::Hook_t hook;
     auto original = reinterpret_cast<int (*)(int)>(hook.HookFunction(g_CallFirstCode, reinterpret_cast<void *>(&CallFirstDetour)));
     REQUIRE(original != nullptr);
+
+    // sub rsp, 28h, then call [rip + 2]: the callee returns into the trampoline.
+    const uint8_t *trampoline = reinterpret_cast<const uint8_t *>(original);
+    CHECK(memcmp(trampoline, code, 4) == 0);
+    CHECK(trampoline[4] == 0xFF);
+    CHECK(trampoline[5] == 0x15);
+    void *callTarget;
+    memcpy(&callTarget, trampoline + 12, sizeof(callTarget));
+    CHECK(callTarget == reinterpret_cast<void *>(&CallFirstCallee));
 
     CHECK(function(1) == 100);
     CHECK(original(1) == 6);

@@ -17,6 +17,5 @@ TEST_CASE("Region infos of a free address", "[region_infos_free]")
     infos.End    = 2;
     MiniDetour::MemoryManipulation::GetRegionInfos(address, &infos);
 
-    // Windows reports free memory as mem_none, Linux and macOS as mem_unset.
-    CHECK((infos.Rights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset || infos.Rights == MiniDetour::MemoryManipulation::MemoryRights::mem_none));
+    CHECK(infos.Rights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset);
 }

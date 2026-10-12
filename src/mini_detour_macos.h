@@ -12,6 +12,7 @@
 #include <mach-o/nlist.h>
 #include <dlfcn.h>
 #include <libkern/OSCacheControl.h>
+#include <libproc.h>
 
 #include <unistd.h>
 #include <errno.h>
@@ -340,6 +341,23 @@ static mach_vm_address_t _PageZeroEnd()
     return pageZero != nullptr ? pageZero->vmaddr + pageZero->vmsize + _dyld_get_image_vmaddr_slide(imageIndex) : 0;
 }
 
+// The file mapped at address (image, shared cache, mapped file), as much as fits in a name of nameSize bytes.
+static void _GetRegionName(uintptr_t address, char *name, size_t nameSize)
+{
+    name[0] = '\0';
+    if (nameSize < 2)
+        return;
+
+    char path[PROC_PIDPATHINFO_MAXSIZE];
+    const int length = proc_regionfilename(getpid(), address, path, sizeof(path));
+    if (length <= 0)
+        return;
+
+    const size_t copySize = std::min(static_cast<size_t>(length), nameSize - 1);
+    memcpy(name, path, copySize);
+    name[copySize] = '\0';
+}
+
 static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
 {
     mach_port_t self_task     = mach_task_self();
@@ -400,10 +418,10 @@ static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, si
                 {
                     regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t *>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
 
-                    region.Rights        = MemoryRights::mem_none;
-                    region.Start         = static_cast<uintptr_t>(vm_address);
-                    region.End           = static_cast<uintptr_t>(vm_address + size);
-                    region.ModuleName[0] = '\0';
+                    region.Rights = MemoryRights::mem_none;
+                    region.Start  = static_cast<uintptr_t>(vm_address);
+                    region.End    = static_cast<uintptr_t>(vm_address + size);
+                    _GetRegionName(region.Start, region.ModuleName, region.StructSize - (sizeof(region) - sizeof(region.ModuleName)));
 
                     if (infos.protection & VM_PROT_READ)
                         region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_r);
@@ -455,10 +473,10 @@ static void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfo
     {
         if (static_cast<uintptr_t>(vm_address) <= reinterpret_cast<uintptr_t>(address) && reinterpret_cast<uintptr_t>(address) < static_cast<uintptr_t>(vm_address) + size)
         {
-            regionInfos->Start         = (uintptr_t)vm_address;
-            regionInfos->End           = regionInfos->Start + size;
-            regionInfos->Rights        = MemoryRights::mem_none;
-            regionInfos->ModuleName[0] = '\0';
+            regionInfos->Start  = (uintptr_t)vm_address;
+            regionInfos->End    = regionInfos->Start + size;
+            regionInfos->Rights = MemoryRights::mem_none;
+            _GetRegionName(regionInfos->Start, regionInfos->ModuleName, regionInfos->StructSize - (sizeof(*regionInfos) - sizeof(regionInfos->ModuleName)));
 
             if (infos.protection & VM_PROT_READ)
                 regionInfos->Rights = static_cast<MemoryRights>(regionInfos->Rights | MemoryRights::mem_r);
@@ -596,11 +614,16 @@ namespace Implementation
 {
 // Finds the loaded image whose dlopen handle is moduleHandle. Only dyld's public API is used: its internal structures
 // and the shared cache format change between macOS versions. An image's handle is the one dlopen returns for its path
-// (RTLD_NOLOAD never loads anything). slide can be null.
+// (RTLD_NOLOAD never loads anything), and dlopen(NULL) gives the main executable, as on Linux. slide can be null.
 static bool _FindLoadedImage(void *moduleHandle, const MachHeader_t **header, uintptr_t *slide)
 {
     if (moduleHandle == nullptr)
         return false;
+
+    // dlopen(NULL) gives a handle of its own, not the one of the executable path. The main executable is image 0.
+    void *mainHandle = dlopen(nullptr, RTLD_NOW | RTLD_NOLOAD);
+    if (mainHandle != nullptr)
+        dlclose(mainHandle);
 
     const uint32_t imageCount = _dyld_image_count();
     for (uint32_t i = 0; i < imageCount; ++i)
@@ -609,13 +632,16 @@ static bool _FindLoadedImage(void *moduleHandle, const MachHeader_t **header, ui
         if (path == nullptr)
             continue;
 
-        void *handle = dlopen(path, RTLD_NOW | RTLD_NOLOAD);
-        if (handle == nullptr)
-            continue;
+        if (i != 0 || moduleHandle != mainHandle)
+        {
+            void *handle = dlopen(path, RTLD_NOW | RTLD_NOLOAD);
+            if (handle == nullptr)
+                continue;
 
-        dlclose(handle);
-        if (handle != moduleHandle)
-            continue;
+            dlclose(handle);
+            if (handle != moduleHandle)
+                continue;
+        }
 
         *header = reinterpret_cast<const MachHeader_t *>(_dyld_get_image_header(i));
         if (slide != nullptr)
@@ -624,7 +650,7 @@ static bool _FindLoadedImage(void *moduleHandle, const MachHeader_t **header, ui
         return *header != nullptr && (*header)->magic == MachHeaderMagic;
     }
 
-    // No loaded image has this handle (dlopen(NULL) handle, invalid handle).
+    // No loaded image has this handle.
     return false;
 }
 

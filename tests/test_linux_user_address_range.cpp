@@ -41,31 +41,33 @@ TEST_CASE("Free regions are inside the user address space", "[mem regions]")
     }
 }
 
-#if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
 // MemoryAlloc capped the addresses at 0x7ffefffff000, 4 GB below the end of a 47 bits address space (and far
 // below the libraries of a 48 bits AArch64 kernel): memory near a module loaded there was never used.
 TEST_CASE("Near allocation above 0x7ffefffff000", "[mem alloc near]")
 {
-    const uintptr_t oldLimit = 0x7ffefffff000;
-    const size_t pageSize    = MiniDetour::MemoryManipulation::PageSize();
+    const uint64_t oldLimit = 0x7ffefffff000;
+    const size_t pageSize   = MiniDetour::MemoryManipulation::PageSize();
 
-    uintptr_t hint = 0;
+    // The first free memory above the old limit. When the address space ends below it (39 bits AArch64 kernels, 32 bits),
+    // the highest free memory instead: it must be usable too.
+    uintptr_t hint    = 0;
+    uintptr_t highest = 0;
     for (auto const &region : _GetFreeRegions())
     {
-        const uintptr_t start = region.Start > oldLimit + pageSize ? region.Start : oldLimit + pageSize;
-        if (start < region.End && region.End - start >= pageSize * 2)
-        {
-            // The middle of the region, which is inside the address space if the region is.
-            hint = (start + (region.End - start) / 2) & ~(uintptr_t)(pageSize - 1);
-            break;
-        }
+        const uint64_t start = region.Start > oldLimit + pageSize ? region.Start : oldLimit + pageSize;
+        if (hint == 0 && start < region.End && region.End - start >= pageSize * 2)
+            hint = static_cast<uintptr_t>((start + (region.End - start) / 2) & ~(uint64_t)(pageSize - 1));
+
+        if (region.End - region.Start >= pageSize * 2)
+            highest = (region.Start + (region.End - region.Start) / 2) & ~(uintptr_t)(pageSize - 1);
     }
 
     if (hint == 0)
-    {
-        WARN("No free memory above 0x7ffefffff000 in this process.");
-        return;
-    }
+        hint = highest;
+
+    // The middle of a free region, which is inside the address space if the region is.
+    REQUIRE(hint != 0);
+    INFO("Hint: " << (void *)hint);
 
     void *address = MiniDetour::MemoryManipulation::MemoryAlloc(reinterpret_cast<void *>(hint), pageSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rw);
     CHECK(address == reinterpret_cast<void *>(hint));
@@ -73,5 +75,4 @@ TEST_CASE("Near allocation above 0x7ffefffff000", "[mem alloc near]")
     if (address != nullptr)
         MiniDetour::MemoryManipulation::MemoryFree(address, pageSize);
 }
-#endif
 #endif

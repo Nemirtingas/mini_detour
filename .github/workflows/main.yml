@@ -78,8 +78,18 @@ jobs:
         run: cmake -S . -B build -DMINIDETOUR_BUILD_TESTS=ON ${{ runner.os != 'Windows' && format('-DCMAKE_BUILD_TYPE={0}', matrix.build_type) || '' }} ${{ matrix.target.cmake_args }}
 
       - name: Build
+        id: build
         run: cmake --build build --config ${{ matrix.build_type }}
 
       - name: Test
         working-directory: ${{ runner.os == 'Windows' && format('build/{0}', matrix.build_type) || 'build' }}
         run: ${{ matrix.target.run }}
+
+      # The memory regions as the library lists them, to check them on each target: only the [vmmap] tests log at the
+      # info level, the whole suite would give tens of thousands of lines.
+      - name: Memory regions
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: ${{ runner.os == 'Windows' && format('build/{0}', matrix.build_type) || 'build' }}
+        env:
+          MINIDETOUR_TEST_LOG_LEVEL: info
+        run: ${{ matrix.target.run }} "[vmmap]"
