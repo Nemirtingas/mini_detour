@@ -553,25 +553,31 @@ static bool _AddressIsRepresentableAsRva(void *moduleBase, void *address)
     return addr >= base && (addr - base) <= UINT32_MAX;
 }
 
+// Address of a data directory of a loaded PE image, nullptr if it isn't a PE image or has no such directory (RVA of 0).
+static void *_GetDataDirectory(void *moduleHandle, DWORD index)
+{
+    auto imageDosHeader = (PIMAGE_DOS_HEADER)moduleHandle;
+    if (imageDosHeader == nullptr || imageDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+        return nullptr;
+
+    auto imageNTHeaders = (PIMAGE_NT_HEADERS)((uintptr_t)moduleHandle + imageDosHeader->e_lfanew);
+    if (imageNTHeaders->Signature != IMAGE_NT_SIGNATURE || imageNTHeaders->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC ||
+        imageNTHeaders->OptionalHeader.NumberOfRvaAndSizes <= index)
+        return nullptr;
+
+    auto const &dataDirectory = imageNTHeaders->OptionalHeader.DataDirectory[index];
+    if (dataDirectory.VirtualAddress == 0 || dataDirectory.Size == 0)
+        return nullptr;
+
+    return (LPBYTE)moduleHandle + dataDirectory.VirtualAddress;
+}
+
 static bool _LoadModuleExportDetails(
     void *moduleHandle, void **moduleBase, PIMAGE_EXPORT_DIRECTORY *imageExportDirectory, PDWORD *functionAddressesRVA, PDWORD *functionNamesRVA, PWORD *functionOrdinal)
 {
-    PIMAGE_DOS_HEADER imageDosHeader = (PIMAGE_DOS_HEADER)moduleHandle;
-
-    if (imageDosHeader == nullptr || imageDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+    *imageExportDirectory = (PIMAGE_EXPORT_DIRECTORY)_GetDataDirectory(moduleHandle, IMAGE_DIRECTORY_ENTRY_EXPORT);
+    if (*imageExportDirectory == nullptr)
         return false;
-
-    PIMAGE_NT_HEADERS imageNTHeaders = (PIMAGE_NT_HEADERS)((DWORD_PTR)moduleHandle + imageDosHeader->e_lfanew);
-
-    if (imageNTHeaders->Signature != IMAGE_NT_SIGNATURE || imageNTHeaders->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC)
-        return false;
-
-    // An RVA of 0 means the module has no export directory.
-    auto const &exportDataDirectory = imageNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-    if (imageNTHeaders->OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_EXPORT || exportDataDirectory.VirtualAddress == 0 || exportDataDirectory.Size == 0)
-        return false;
-
-    *imageExportDirectory = (PIMAGE_EXPORT_DIRECTORY)((LPBYTE)moduleHandle + exportDataDirectory.VirtualAddress);
 
     *moduleBase           = moduleHandle;
     *functionAddressesRVA = (PDWORD)((LPBYTE)moduleHandle + (*imageExportDirectory)->AddressOfFunctions);
@@ -583,24 +589,11 @@ static bool _LoadModuleExportDetails(
 
 static bool _LoadModuleIATDetails(void *moduleHandle, void **moduleBase, PIMAGE_IMPORT_DESCRIPTOR *imageImportDescriptor)
 {
-    PIMAGE_DOS_HEADER imageDosHeader = (PIMAGE_DOS_HEADER)moduleHandle;
-
-    if (imageDosHeader == nullptr || imageDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+    *imageImportDescriptor = (PIMAGE_IMPORT_DESCRIPTOR)_GetDataDirectory(moduleHandle, IMAGE_DIRECTORY_ENTRY_IMPORT);
+    if (*imageImportDescriptor == nullptr)
         return false;
 
-    PIMAGE_NT_HEADERS imageNTHeaders = (PIMAGE_NT_HEADERS)((DWORD_PTR)moduleHandle + imageDosHeader->e_lfanew);
-
-    if (imageNTHeaders->Signature != IMAGE_NT_SIGNATURE || imageNTHeaders->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC)
-        return false;
-
-    // An RVA of 0 means the module has no import directory.
-    auto const &importDataDirectory = imageNTHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-    if (imageNTHeaders->OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_IMPORT || importDataDirectory.VirtualAddress == 0 || importDataDirectory.Size == 0)
-        return false;
-
-    *moduleBase            = moduleHandle;
-    *imageImportDescriptor = (PIMAGE_IMPORT_DESCRIPTOR)((LPBYTE)imageDosHeader + importDataDirectory.VirtualAddress);
-
+    *moduleBase = moduleHandle;
     return true;
 }
 
