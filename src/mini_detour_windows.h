@@ -414,9 +414,26 @@ static void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfo
     regionInfos->ModuleName[0] = '\0';
     if (VirtualQuery(address, &infos, sizeof(infos)) != 0)
     {
-        regionInfos->Start  = reinterpret_cast<uintptr_t>(infos.BaseAddress);
-        regionInfos->End    = regionInfos->Start + infos.RegionSize;
-        regionInfos->Rights = _MemoryNativeToProtectRights(infos.Protect);
+        // VirtualQuery describes the pages from the one holding the address. The region, as GetAllRegions lists it,
+        // starts at the first of the pages with the same state and rights: walk the allocation from its base to it.
+        if (infos.State != MEM_FREE)
+        {
+            MEMORY_BASIC_INFORMATION region;
+            for (auto search = reinterpret_cast<uintptr_t>(infos.AllocationBase); VirtualQuery(reinterpret_cast<void *>(search), &region, sizeof(region)) != 0;
+                 search      = reinterpret_cast<uintptr_t>(region.BaseAddress) + region.RegionSize)
+            {
+                if (reinterpret_cast<uintptr_t>(address) < reinterpret_cast<uintptr_t>(region.BaseAddress) + region.RegionSize)
+                {
+                    infos = region;
+                    break;
+                }
+            }
+        }
+
+        regionInfos->Start = reinterpret_cast<uintptr_t>(infos.BaseAddress);
+        regionInfos->End   = regionInfos->Start + infos.RegionSize;
+        // Free memory has no rights, as in GetAllRegions.
+        regionInfos->Rights = infos.State == MEM_FREE ? MemoryRights::mem_unset : _MemoryNativeToProtectRights(infos.Protect);
 
         // Only allocated when there is room for a name.
         const size_t regionNameSize = regionInfos->StructSize - (sizeof(*regionInfos) - sizeof(regionInfos->ModuleName));
