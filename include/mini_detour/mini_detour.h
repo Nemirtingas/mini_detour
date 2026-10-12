@@ -18,23 +18,14 @@
 #else
 #error "Unhandled arch"
 #endif
-#elif defined(__linux__) || defined(linux)
-#define MINIDETOUR_OS_LINUX
-
-#if defined(__i386__) || defined(__i386) || defined(i386)
-#define MINIDETOUR_ARCH_X86
-#elif defined(__x86_64__) || defined(__x86_64) || defined(__amd64) || defined(__amd64__)
-#define MINIDETOUR_ARCH_X64
-#elif defined(__arm__)
-#define MINIDETOUR_ARCH_ARM
-#elif defined(__aarch64__)
-#define MINIDETOUR_ARCH_ARM64
-#else
-#error "Unhandled arch"
-#endif
-#elif defined(__APPLE__)
+#elif defined(__linux__) || defined(linux) || defined(__APPLE__)
+#if defined(__APPLE__)
 #define MINIDETOUR_OS_APPLE
+#else
+#define MINIDETOUR_OS_LINUX
+#endif
 
+// GCC and Clang name the architectures the same way on Linux and macOS.
 #if defined(__i386__) || defined(__i386) || defined(i386)
 #define MINIDETOUR_ARCH_X86
 #elif defined(__x86_64__) || defined(__x86_64) || defined(__amd64) || defined(__amd64__)
