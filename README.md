@@ -1,22 +1,147 @@
 # mini_detour
 
-Minimalistic cross-platform detour library.
-Supported platforms are:
-Windows (tested on Windows >7).
-Linux (tested on Ubuntu >16)
-MacOS (test on High Sierra and Big Sur, since Monterey, you can't hook anymore functions cause write permission is rejected by the kernel).
+Minimalistic cross-platform function hooking library, with a C API and a thin C++ wrapper.
 
+- Inline hooks: the first instructions of a function are replaced by a jump to your function, and a trampoline lets you
+  call the original one.
+- Export and import table replacement: `GetProcAddress` / `dlsym` and the calls through the import table of a module
+  return or reach your function, without writing code into the target.
+- Memory helpers used by the library: region listing, protection changes, allocation near an address, safe reads and
+  writes.
 
-MacOS new kernels now lock the memory and disallow Write+Execute rights and also disable further Execute rights on some pages. So you will have to use a tuned Kernel or some kind of kext to bypass this restriction:
+The only dependency is [Capstone](https://www.capstone-engine.org/), vendored in `deps/capstone` and built with the
+library: only the disassembler of the target architecture is compiled.
 
+## Supported platforms
 
-TODO: Check how the executable loader creates maps, maybe we can use its function to allocate new block with RWX rights.
+|         | x86 | x64 | ARM / Thumb | ARM64 |
+|---------|:---:|:---:|:-----------:|:-----:|
+| Windows | ✅  | ✅  |      ¹      |  ✅   |
+| Linux   | ✅  | ✅  |     ✅      |  ✅   |
+| macOS   |     | ✅  |             |   ²   |
 
+¹ Not built nor tested.
+² Module imports and exports, and the memory functions, work. Inline hooks don't yet: the pages the library allocates
+can't be read-write-execute on Apple Silicon.
 
-References:
+On macOS, code can only be hooked in images whose segments allow it: see [macOS](#macos).
 
-Page lockdown: https://github.com/apple/darwin-xnu/blob/main/osfmk/vm/vm_user.c#L3287-L3300
+The CI runs the tests on Windows x86/x64/ARM64, Linux x86/x64/ARM64, Linux ARM (under qemu) and macOS ARM64. macOS x64
+is tested on a local machine.
+
+## Build
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
 ```
+
+| Option                       | Default | Description                                              |
+|------------------------------|---------|----------------------------------------------------------|
+| `BUILD_SHARED_LIBS`          | `OFF`   | Build a shared library instead of a static one.          |
+| `MINIDETOUR_DYNAMIC_RUNTIME` | `ON`    | Windows: link with the DLL C runtime (`/MD`).            |
+| `MINIDETOUR_BUILD_TESTS`     | `OFF`   | Build the `tests` executable and its test libraries.     |
+
+The library needs C++11. It can be used from another CMake project with `add_subdirectory`, or installed and found with
+`find_package`:
+
+```cmake
+find_package(MiniDetour 1.1 REQUIRED)
+target_link_libraries(my_target PRIVATE Nemirtingas::MiniDetour)
+```
+
+## Usage
+
+### Hooking a function
+
+```cpp
+#include <mini_detour/mini_detour.h>
+
+static MiniDetour::Hook_t addHook;
+
+static int MyAdd(int a, int b)
+{
+    // Call the original function through its trampoline.
+    return addHook.GetOriginalFunction<decltype(&MyAdd)>()(a, b) * 10;
+}
+
+void Install()
+{
+    if (addHook.HookFunction(reinterpret_cast<void*>(&add), reinterpret_cast<void*>(&MyAdd)) == nullptr)
+    {
+        // The function can't be hooked (too short, or starts with instructions that can't be relocated).
+    }
+}
+
+void Uninstall()
+{
+    addHook.RestoreFunction();
+}
+```
+
+- `HookFunction` returns the address to call the original function, or `nullptr` when the hook can't be set. The library
+  refuses to hook rather than generate wrong code: a function too short for a jump, or starting with instructions it
+  can't relocate, is not hooked. `CanHook` tells it without hooking.
+- A `Hook_t` restores its hook when destroyed, unless `RestoreOnDestroy(false)` was called. It can't be copied, only moved.
+- `Hook_t::ReplaceFunction(function, newFunction)` overwrites the start of a function with a jump, without trampoline:
+  the original function can't be called anymore.
+
+### Replacing a module export
+
+```cpp
+MiniDetour::ModuleManipulation::ExportReplaceParameter_t parameter{ "add", reinterpret_cast<void*>(&MyAdd), nullptr };
+
+void* module = dlopen("./library.so", RTLD_NOW); // LoadLibraryA on Windows
+if (MiniDetour::ModuleManipulation::ReplaceModuleExports(module, &parameter, 1) == 1)
+{
+    // dlsym(module, "add") now returns MyAdd, parameter.ExportCallAddress is the original add.
+    MiniDetour::ModuleManipulation::RestoreModuleExports(module, &parameter, 1);
+}
+```
+
+`ReplaceModuleIATs` / `RestoreModuleIATs` do the same with the import table (IAT on Windows, GOT on Linux, symbol
+pointers on macOS) of a module, and `GetAllExportedSymbols` / `GetAllIATSymbols` list them: pass `nullptr` to get the
+count first.
+
+### C API
+
+Every C++ function is an inline wrapper over a C function, declared in the same header:
+
+```c
+minidetour_hook_handle_t hook = MiniDetourHookTAlloc();
+void* original = MiniDetourHookTHookFunction(hook, (void*)&add, (void*)&MyAdd);
+/* ... */
+MiniDetourHookTRestoreFunction(hook);
+MiniDetourHookTFree(hook);
+```
+
+The C structures with a variable size (`MiniDetourMemoryManipulationRegionInfos_t`) start with a `StructSize` field to
+set before calling: the module name is written in the room left after the structure.
+
+## Logs
+
+Define `USE_SPDLOG` when building the library to get its logs through the vendored spdlog (the test build does).
+
+## Tests
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DMINIDETOUR_BUILD_TESTS=ON
+cmake --build build
+cd build && ./tests            # build/Debug/tests.exe with Visual Studio
+```
+
+The tests need `export_hook_test_library` in the working directory. On macOS, run `./macos_permission_fix tests` first.
+
+## macOS
+
+A segment can't be given more rights than its `maxprot`, and executables are linked with a read-execute `maxprot` for
+`__TEXT`: their functions can't be made writable. `macos_permission_fix <executable>` rewrites the `__TEXT` `maxprot` of
+an executable to read-write-execute (the tests use it on `tests`).
+
+Recent kernels may also lock the memory of a process and refuse to add execute rights (`map_disallow_new_exec`).
+
+Page lockdown: [vm_user.c](https://github.com/apple/darwin-xnu/blob/main/osfmk/vm/vm_user.c#L3287-L3300)
+```c
 kern_return_t
 vm_map_exec_lockdown(
 	vm_map_t        map)
@@ -33,8 +158,8 @@ vm_map_exec_lockdown(
 }
 ```
 
-Page protections change: https://github.com/apple/darwin-xnu/blob/main/osfmk/vm/vm_map.c#L5961-L5967
-```
+Protection change refused: [vm_map.c](https://github.com/apple/darwin-xnu/blob/main/osfmk/vm/vm_map.c#L5961-L5967)
+```c
 		if (map->map_disallow_new_exec == TRUE) {
 			if ((new_prot & VM_PROT_EXECUTE) ||
 			    ((current->protection & VM_PROT_EXECUTE) && (new_prot & VM_PROT_WRITE))) {
@@ -43,3 +168,15 @@ Page protections change: https://github.com/apple/darwin-xnu/blob/main/osfmk/vm/
 			}
 		}
 ```
+
+Import replacement works on macOS: the lazy and non lazy symbol pointers of an image are rebound. Shared cache libraries
+are supported up to macOS 12: on recent versions (seen on macOS 26) they have no symbol pointers of their own anymore,
+and no import is found in them. Calls between shared cache libraries may not go through these pointers either.
+
+Export replacement changes the export trie of the image, which dyld reads for `dlsym` and the images loaded later. The
+address of an export must keep its encoded size, so the jump to the new function is written in the padding after the
+load commands, at the start of `__TEXT`.
+
+## License
+
+See [LICENSE](LICENSE).
