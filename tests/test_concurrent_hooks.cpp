@@ -6,7 +6,7 @@
 #include <thread>
 #include <vector>
 
-#if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
+#if defined(TEST_HOOKS_GENERATED_CODE)
 
 static int TEST_CALL ConcurrentDetour()
 {
@@ -24,7 +24,7 @@ TEST_CASE("Hooks set from several threads", "[concurrent_hooks]")
     CodeBuffer code;
     REQUIRE(code.IsValid());
     for (int i = 0; i < threadCount; ++i)
-        code.Write(i * 64, {0x90, 0xB8, static_cast<uint8_t>(i), 0, 0, 0, 0xC3}); // nop; mov eax, i; ret
+        GeneratedCode::WriteReturnConstant(code, i * 64, static_cast<uint16_t>(i));
 
     std::atomic<int> failures{0};
     std::vector<std::thread> threads;
@@ -33,7 +33,7 @@ TEST_CASE("Hooks set from several threads", "[concurrent_hooks]")
         threads.emplace_back(
             [&code, &failures, i]()
             {
-                auto function = code.As<int(TEST_CALL *)()>(i * 64);
+                auto function = GeneratedCode::Function<int(TEST_CALL *)()>(code, i * 64);
                 for (int n = 0; n < iterations; ++n)
                 {
                     MiniDetour::Hook_t hook;

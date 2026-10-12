@@ -3,7 +3,7 @@
 
 #include <vector>
 
-#if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
+#if defined(TEST_HOOKS_GENERATED_CODE)
 
 static int TrampolineSlotsDetour()
 {
@@ -21,23 +21,19 @@ TEST_CASE("Many hooks use every trampoline slot without overflowing", "[trampoli
     REQUIRE(code.IsValid());
 
     for (size_t i = 0; i < functionCount; ++i)
-    {
-        // mov eax, i ; ret
-        code.Write(i * functionStride, {0xB8, 0, 0, 0, 0, 0xC3});
-        code.WriteValue<int32_t>(i * functionStride + 1, static_cast<int32_t>(i));
-    }
+        GeneratedCode::WriteReturnConstant(code, i * functionStride, static_cast<uint16_t>(i));
 
     std::vector<MiniDetour::Hook_t> hooks(functionCount);
     for (size_t i = 0; i < functionCount; ++i)
     {
         INFO("hook " << i);
-        REQUIRE(hooks[i].HookFunction(code.Data(i * functionStride), reinterpret_cast<void *>(&TrampolineSlotsDetour)) != nullptr);
+        REQUIRE(hooks[i].HookFunction((void *)GeneratedCode::Function(code, i * functionStride), reinterpret_cast<void *>(&TrampolineSlotsDetour)) != nullptr);
     }
 
     for (size_t i = 0; i < functionCount; ++i)
     {
         INFO("function " << i);
-        CHECK(code.As<int (*)()>(i * functionStride)() == -1);
+        CHECK(GeneratedCode::Function(code, i * functionStride)() == -1);
         CHECK(hooks[i].GetOriginalFunction<int (*)()>()() == static_cast<int>(i));
     }
 
@@ -45,7 +41,7 @@ TEST_CASE("Many hooks use every trampoline slot without overflowing", "[trampoli
     {
         INFO("restore " << i);
         CHECK(hooks[i].RestoreFunction() != nullptr);
-        CHECK(code.As<int (*)()>(i * functionStride)() == static_cast<int>(i));
+        CHECK(GeneratedCode::Function(code, i * functionStride)() == static_cast<int>(i));
     }
 }
 
