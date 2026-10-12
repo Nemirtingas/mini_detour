@@ -1220,20 +1220,28 @@ static size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t 
     return result;
 }
 
-// A symbol can have several slots (a lazy one for its calls, a non lazy one where its address is taken): all of them
-// are replaced. Mach-O imports have no ordinal, they are found by name.
-static size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+// Writes value in every slot of each symbol and gives what the first one held in previous. A symbol can have several
+// slots (a lazy one for its calls, a non lazy one where its address is taken). An unbound lazy slot holds dyld's
+// binding stub: when replacing, the function it would bind is given instead, so calling it doesn't bind the slot again
+// over the replacement. Mach-O imports have no ordinal, they are found by name.
+static size_t _ExchangeModuleIATs(
+    void *moduleHandle,
+    IATReplaceParameter_t *iatReplaceDetails,
+    size_t iatReplaceDetailsCount,
+    void *IATReplaceParameter_t::*value,
+    void *IATReplaceParameter_t::*previous,
+    bool resolveLazySlots)
 {
     size_t result = 0;
 
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
     {
         IATReplaceParameter_t &parameter = iatReplaceDetails[i];
-        parameter.IATCallAddress         = nullptr;
-        if (parameter.IATName == nullptr)
+        parameter.*previous              = nullptr;
+        if (parameter.IATName == nullptr || parameter.*value == nullptr)
             continue;
 
-        void *original = nullptr;
+        bool exchanged = false;
         _ForEachImportSlot(
             moduleHandle,
             [&](_ImportSlot_t const &importSlot)
@@ -1241,55 +1249,31 @@ static size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatRe
                 if (strcmp(importSlot.Name, parameter.IATName) != 0 || !_ImportModuleMatches(parameter.IATModuleName, importSlot.ModuleName))
                     return true;
 
-                void *target = _GetImportTarget(importSlot);
-                if (_WriteImportSlot(importSlot.Slot, parameter.NewIATAddress) && original == nullptr)
-                    original = target;
+                void *current = resolveLazySlots ? _GetImportTarget(importSlot) : *importSlot.Slot;
+                if (_WriteImportSlot(importSlot.Slot, parameter.*value) && !exchanged)
+                {
+                    parameter.*previous = current;
+                    exchanged           = true;
+                }
 
                 return true;
             });
 
-        parameter.IATCallAddress = original;
-        if (original != nullptr)
+        if (exchanged)
             ++result;
     }
 
     return result;
 }
 
+static size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+{
+    return _ExchangeModuleIATs(moduleHandle, iatReplaceDetails, iatReplaceDetailsCount, &IATReplaceParameter_t::NewIATAddress, &IATReplaceParameter_t::IATCallAddress, true);
+}
+
 static size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
-    size_t result = 0;
-
-    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
-    {
-        IATReplaceParameter_t &parameter = iatReplaceDetails[i];
-        parameter.NewIATAddress          = nullptr;
-        if (parameter.IATName == nullptr || parameter.IATCallAddress == nullptr)
-            continue;
-
-        bool restored = false;
-        _ForEachImportSlot(
-            moduleHandle,
-            [&](_ImportSlot_t const &importSlot)
-            {
-                if (strcmp(importSlot.Name, parameter.IATName) != 0 || !_ImportModuleMatches(parameter.IATModuleName, importSlot.ModuleName))
-                    return true;
-
-                void *replacement = *importSlot.Slot;
-                if (_WriteImportSlot(importSlot.Slot, parameter.IATCallAddress) && !restored)
-                {
-                    parameter.NewIATAddress = replacement;
-                    restored                = true;
-                }
-
-                return true;
-            });
-
-        if (restored)
-            ++result;
-    }
-
-    return result;
+    return _ExchangeModuleIATs(moduleHandle, iatReplaceDetails, iatReplaceDetailsCount, &IATReplaceParameter_t::IATCallAddress, &IATReplaceParameter_t::NewIATAddress, false);
 }
 
 } // namespace Implementation
