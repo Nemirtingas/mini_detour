@@ -161,7 +161,7 @@ static bool _GetRegionInfo(uintptr_t target, const char *mapLine, size_t mapLine
 }
 
 // mmap refuses the addresses below vm.mmap_min_addr.
-static inline uintptr_t _MinUserAddress()
+static inline uintptr_t _QueryMinUserAddress()
 {
     unsigned long minAddress = 0;
     std::ifstream f("/proc/sys/vm/mmap_min_addr");
@@ -173,7 +173,7 @@ static inline uintptr_t _MinUserAddress()
 
 // The end of the user address space (TASK_SIZE) depends on the kernel: 47, 48 or 39 bits on 64 bits, 3 or 4 GB
 // on 32 bits. It isn't exposed, so it is searched with mmap, which fails with ENOMEM above it.
-static uintptr_t _FindMaxUserAddress()
+static uintptr_t _QueryMaxUserAddress()
 {
     const uintptr_t pageSize = sysconf(_SC_PAGESIZE);
 
@@ -200,13 +200,6 @@ static uintptr_t _FindMaxUserAddress()
     return outside;
 }
 
-// End of the user address space.
-static inline uintptr_t _MaxUserAddress()
-{
-    static const uintptr_t maxAddress = _FindMaxUserAddress();
-    return maxAddress;
-}
-
 static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
 {
     uintptr_t oldEnd(0);
@@ -215,8 +208,8 @@ static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, si
 
     // Free memory is only listed inside the user address space: the gap below [vsyscall] (x64) or [vectors] (ARM),
     // which the kernel maps above it, isn't free. The free memory above the last mapping is listed.
-    const uintptr_t minAddress = _MinUserAddress();
-    const uintptr_t maxAddress = _MaxUserAddress();
+    const uintptr_t minAddress = Globals_t::Instance().MinUserAddress;
+    const uintptr_t maxAddress = Globals_t::Instance().MaxUserAddress;
     auto addFreeRegion         = [&](uintptr_t start, uintptr_t end)
     {
         start = std::max(start, minAddress);
@@ -285,7 +278,7 @@ static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, si
     return currentRegionCount;
 }
 
-static size_t PageSize()
+static size_t _QueryPageSize()
 {
     return sysconf(_SC_PAGESIZE);
 }
@@ -326,7 +319,8 @@ static bool MemoryProtect(void *address, size_t size, MemoryRights rights, Memor
         *oldRights = infos.Rights;
     }
 
-    bool res = mprotect(PageRound(address, PageSize()), _PageAddrSize(address, size, PageSize()), _MemoryProtectRightsToNative(rights)) == 0;
+    bool res =
+        mprotect(PageRound(address, Globals_t::Instance().PageSize), _PageAddrSize(address, size, Globals_t::Instance().PageSize), _MemoryProtectRightsToNative(rights)) == 0;
     return res;
 }
 
@@ -374,9 +368,9 @@ static inline void *_MemoryAllocAnywhere(size_t size, MemoryRights rights)
 }
 
 // mmap places a mapping at any page.
-static inline size_t _AllocationGranularity()
+static inline size_t _QueryAllocationGranularity()
 {
-    return PageSize();
+    return _QueryPageSize();
 }
 
 static bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
