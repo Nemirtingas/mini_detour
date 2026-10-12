@@ -526,19 +526,25 @@ static bool _WriteJumpSlot(void *jump, void *destination, int sourceMode, int de
     return true;
 }
 
-// Makes an import table slot (IAT/GOT entry) writable. The other rights of its page are kept: the slot is data,
-// so execution is never added, but it may share a page with code that must stay executable.
-// Not static: macOS doesn't replace imports yet, and an unused static function is a warning.
-inline bool _MakeImportSlotWritable(void *address, size_t size, MiniDetour::MemoryManipulation::MemoryRights *oldRights)
+// Writes value in a table entry (import slot, export address) and gives its previous value. The other rights of its
+// page are kept: the entry is data, so execution is never added, but it may share a page with code that must stay
+// executable.
+template <typename T>
+static bool _ExchangeTableEntry(T *entry, T value, T *previous)
 {
     MiniDetour::MemoryManipulation::RegionInfos_t infos;
-    MiniDetour::MemoryManipulation::GetRegionInfos(address, &infos);
+    MiniDetour::MemoryManipulation::GetRegionInfos(entry, &infos);
     if (infos.Rights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
         return false;
 
-    *oldRights  = infos.Rights;
-    auto rights = static_cast<MiniDetour::MemoryManipulation::MemoryRights>(infos.Rights | MiniDetour::MemoryManipulation::MemoryRights::mem_w);
-    return MiniDetour::MemoryManipulation::MemoryProtect(address, size, rights, nullptr);
+    auto writable = static_cast<MiniDetour::MemoryManipulation::MemoryRights>(infos.Rights | MiniDetour::MemoryManipulation::MemoryRights::mem_w);
+    if (!MiniDetour::MemoryManipulation::MemoryProtect(entry, sizeof(*entry), writable))
+        return false;
+
+    *previous = *entry;
+    *entry    = value;
+    MiniDetour::MemoryManipulation::MemoryProtect(entry, sizeof(*entry), infos.Rights);
+    return true;
 }
 
 #if defined(MINIDETOUR_OS_WINDOWS)
