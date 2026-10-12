@@ -2,7 +2,7 @@
 
 #include "test_utils.h"
 
-#if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
+#if defined(TEST_HOOKS_GENERATED_CODE)
 
 static int TEST_CALL FreedMemoryDetour()
 {
@@ -18,8 +18,8 @@ TEST_CASE("Restore a hook on freed memory", "[restore_freed]")
     {
         CodeBuffer code;
         REQUIRE(code.IsValid());
-        code.Write(0, {0x90, 0xB8, 42, 0, 0, 0, 0xC3}); // nop; mov eax, 42; ret
-        REQUIRE(hook.HookFunction(code.Data(), (void *)&FreedMemoryDetour) != nullptr);
+        GeneratedCode::WriteReturnConstant(code, 0, 42);
+        REQUIRE(hook.HookFunction((void *)GeneratedCode::Function(code), (void *)&FreedMemoryDetour) != nullptr);
     }
 
     CHECK(hook.RestoreFunction() == nullptr);
@@ -28,8 +28,8 @@ TEST_CASE("Restore a hook on freed memory", "[restore_freed]")
     // The hook object can be used again.
     CodeBuffer other;
     REQUIRE(other.IsValid());
-    other.Write(0, {0x90, 0xB8, 43, 0, 0, 0, 0xC3}); // nop; mov eax, 43; ret
-    auto function = other.As<int(TEST_CALL *)()>();
+    GeneratedCode::WriteReturnConstant(other, 0, 43);
+    auto function = GeneratedCode::Function<int(TEST_CALL *)()>(other);
 
     auto original = reinterpret_cast<int(TEST_CALL *)()>(hook.HookFunction((void *)function, (void *)&FreedMemoryDetour));
     REQUIRE(original != nullptr);

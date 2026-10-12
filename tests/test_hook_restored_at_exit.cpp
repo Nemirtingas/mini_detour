@@ -3,9 +3,7 @@
 
 #include <spdlog/spdlog.h>
 
-#if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
-
-using ExitFunc_t = int (*)();
+#if defined(TEST_HOOKS_GENERATED_CODE)
 
 static int RestoredAtExitDetour()
 {
@@ -26,10 +24,11 @@ static MiniDetour::Hook_t g_RestoredAtExitHook;
 TEST_CASE("Hook left active is restored at exit", "[restore_at_exit]")
 {
     REQUIRE(g_RestoredAtExitCode.IsValid());
-    g_RestoredAtExitCode.Write(0, {0xB8, 1, 0, 0, 0, 0xC3}); // mov eax, 1 ; ret
+    GeneratedCode::WriteReturnConstant(g_RestoredAtExitCode, 0, 1);
+    auto function = GeneratedCode::Function(g_RestoredAtExitCode);
 
-    REQUIRE(g_RestoredAtExitHook.HookFunction(g_RestoredAtExitCode.Data(), reinterpret_cast<void *>(&RestoredAtExitDetour)) != nullptr);
-    CHECK(g_RestoredAtExitCode.As<ExitFunc_t>()() == 100);
+    REQUIRE(g_RestoredAtExitHook.HookFunction((void *)function, reinterpret_cast<void *>(&RestoredAtExitDetour)) != nullptr);
+    CHECK(function() == 100);
 }
 
 #endif

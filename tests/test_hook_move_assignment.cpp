@@ -3,9 +3,7 @@
 
 #include <utility>
 
-#if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
-
-using MoveFunc_t = int (*)();
+#if defined(TEST_HOOKS_GENERATED_CODE)
 
 static int HookMoveDetour()
 {
@@ -18,11 +16,11 @@ TEST_CASE("Move assigning over an active hook restores it", "[hook_move]")
 {
     CodeBuffer code;
     REQUIRE(code.IsValid());
-    code.Write(0, {0xB8, 1, 0, 0, 0, 0xC3}); // mov eax, 1 ; ret
-    auto function = code.As<MoveFunc_t>();
+    GeneratedCode::WriteReturnConstant(code, 0, 1);
+    auto function = GeneratedCode::Function(code);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction(code.Data(), reinterpret_cast<void *>(&HookMoveDetour)) != nullptr);
+    REQUIRE(hook.HookFunction((void *)function, reinterpret_cast<void *>(&HookMoveDetour)) != nullptr);
     REQUIRE(function() == 100);
 
     hook = MiniDetour::Hook_t();
@@ -33,16 +31,16 @@ TEST_CASE("Self move assignment keeps the hook", "[hook_move]")
 {
     CodeBuffer code;
     REQUIRE(code.IsValid());
-    code.Write(0, {0xB8, 1, 0, 0, 0, 0xC3}); // mov eax, 1 ; ret
-    auto function = code.As<MoveFunc_t>();
+    GeneratedCode::WriteReturnConstant(code, 0, 1);
+    auto function = GeneratedCode::Function(code);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction(code.Data(), reinterpret_cast<void *>(&HookMoveDetour)) != nullptr);
+    REQUIRE(hook.HookFunction((void *)function, reinterpret_cast<void *>(&HookMoveDetour)) != nullptr);
 
     MiniDetour::Hook_t &sameHook = hook;
     hook                         = std::move(sameHook);
     CHECK(function() == 100);
-    CHECK(hook.GetOriginalFunction<MoveFunc_t>()() == 1);
+    CHECK(hook.GetOriginalFunction<int (*)()>()() == 1);
 
     CHECK(hook.RestoreFunction() != nullptr);
     CHECK(function() == 1);

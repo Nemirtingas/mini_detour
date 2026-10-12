@@ -1,7 +1,7 @@
 #include "catch.hpp"
 #include "test_utils.h"
 
-#if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
+#if defined(TEST_HOOKS_GENERATED_CODE)
 
 static int TEST_CALL RestoreOnlyHookBytesDetour()
 {
@@ -14,19 +14,27 @@ TEST_CASE("Restoring a hook only writes back the bytes it overwrote", "[restore_
 {
     CodeBuffer code;
     REQUIRE(code.IsValid());
-    // nop * 16 ; mov eax, 1 ; ret
-    code.Write(0, {0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0xB8, 1, 0, 0, 0, 0xC3});
+    // No-op instructions after the return value: room for an absolute jump.
+    GeneratedCode::WriteReturnConstant(code, 0, 1, 32 / GeneratedCode::NopSize);
+    auto function = GeneratedCode::Function<int(TEST_CALL *)()>(code);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction(code.Data(), reinterpret_cast<void *>(&RestoreOnlyHookBytesDetour)) != nullptr);
-    CHECK(code.As<int(TEST_CALL *)()>()() == 100);
+    REQUIRE(hook.HookFunction((void *)function, reinterpret_cast<void *>(&RestoreOnlyHookBytesDetour)) != nullptr);
+    CHECK(function() == 100);
 
-    // Someone else patches the function after the hook's jump: clc instead of a nop.
-    code.Write(8, {0xF8});
+    // Someone else patches a no-op instruction after the hook's relative jump, within the size of an absolute jump.
+#if defined(MINIDETOUR_ARCH_ARM)
+    const size_t patchOffset = 4;
+#else
+    const size_t patchOffset = 8;
+#endif
+    GeneratedCode::WriteOtherNop(code, patchOffset);
+    uint8_t patch[GeneratedCode::NopSize];
+    memcpy(patch, code.Data(patchOffset), sizeof(patch));
 
     CHECK(hook.RestoreFunction() != nullptr);
-    CHECK(*code.Data(8) == 0xF8);
-    CHECK(code.As<int(TEST_CALL *)()>()() == 1);
+    CHECK(memcmp(code.Data(patchOffset), patch, sizeof(patch)) == 0);
+    CHECK(function() == 1);
 }
 
 #endif

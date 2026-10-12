@@ -1,19 +1,11 @@
 #include "catch.hpp"
 #include "test_utils.h"
 
-#if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
-
-using OverwrittenFunc_t = int (*)();
+#if defined(TEST_HOOKS_GENERATED_CODE)
 
 static int OverwrittenHookDetour()
 {
     return 100;
-}
-
-static void WriteRelativeJump(CodeBuffer &code, size_t offset, void *destination)
-{
-    code.Write(offset, {0xE9, 0, 0, 0, 0});
-    code.WriteValue<int32_t>(offset + 1, static_cast<int32_t>(reinterpret_cast<intptr_t>(destination) - reinterpret_cast<intptr_t>(code.Data(offset + 5))));
 }
 
 // When another tool hooked over our hook, RestoreFunction rewrote the jump to the detour
@@ -22,21 +14,20 @@ TEST_CASE("Restoring a hook overwritten by someone else bypasses the detour", "[
 {
     CodeBuffer code;
     REQUIRE(code.IsValid());
-    code.Write(0, {0xB8, 1, 0, 0, 0, 0xC3}); // mov eax, 1 ; ret
-
-    auto function = code.As<OverwrittenFunc_t>();
+    GeneratedCode::WriteReturnConstant(code, 0, 1);
+    auto function = GeneratedCode::Function(code);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction(code.Data(), reinterpret_cast<void *>(&OverwrittenHookDetour)) != nullptr);
-    REQUIRE(code.Data()[0] == 0xE9);
+    REQUIRE(hook.HookFunction((void *)function, reinterpret_cast<void *>(&OverwrittenHookDetour)) != nullptr);
 
-    // Our hook is a "jmp rel32" to a jump going to the detour.
-    void *ourJump = code.Data(5 + *reinterpret_cast<int32_t *>(code.Data(1)));
+    // Our hook is a relative jump to a jump going to the detour.
+    void *ourJump = reinterpret_cast<void *>(GeneratedCode::RelativeJumpTarget(code.Data()));
+    REQUIRE(ourJump != nullptr);
 
     // Another tool hooks the function: function -> its stub -> our jump.
     const size_t stubOffset = 64;
-    WriteRelativeJump(code, stubOffset, ourJump);
-    WriteRelativeJump(code, 0, code.Data(stubOffset));
+    GeneratedCode::WriteRelativeJump(code, stubOffset, ourJump);
+    GeneratedCode::WriteRelativeJump(code, 0, code.Data(stubOffset));
     REQUIRE(function() == 100);
 
     CHECK(hook.RestoreFunction() != nullptr);
