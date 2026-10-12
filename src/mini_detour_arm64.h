@@ -35,34 +35,11 @@
 // movk x0, #0x89ab, lsl 32
 // movk x0, #0xcdef, lsl 48
 
-inline void *relative_addr_to_absolute(void *source_addr, int32_t rel_addr)
-{
-    return reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(source_addr) + rel_addr);
-}
-
-inline intptr_t absolute_addr_to_relative(void *opcode_addr, void *destination_addr)
-{
-    SPDLOG_INFO("opcode addr: {}, destination addr: {}", opcode_addr, destination_addr);
-    return static_cast<uint8_t *>(destination_addr) - static_cast<uint8_t *>(opcode_addr);
-}
-
-bool _AddressesAreRelativeJumpable(void *source, void *dest)
+static bool _AddressesAreRelativeJumpable(void *source, void *dest)
 {
     uintptr_t min_addr = reinterpret_cast<uintptr_t>(std::min(source, dest));
     uintptr_t max_addr = reinterpret_cast<uintptr_t>(std::max(source, dest));
     return (max_addr - min_addr) <= 0x7FFFFFC;
-
-    // intptr_t addr = reinterpret_cast<intptr_t>(source) - reinterpret_cast<intptr_t>(dest);
-    // return addr >= -134217728 && addr <= 134217724; // 26 bits signed integer range
-}
-
-// An export table entry holds a 32 bits RVA: the address must be above the module base, within 4 GB.
-bool _AddressIsRepresentableAsRva(void *moduleBase, void *address)
-{
-    uintptr_t base = reinterpret_cast<uintptr_t>(moduleBase);
-    uintptr_t addr = reinterpret_cast<uintptr_t>(address);
-
-    return addr >= base && (addr - base) <= UINT32_MAX;
 }
 
 #pragma pack(push, 1)
@@ -127,7 +104,7 @@ struct AbsJump
     }
 
     // Variable jump size
-    static inline size_t GetOpcodeSize(void *jump_destination, int source_mode, int dest_mode)
+    static inline size_t GetOpcodeSize(void *jump_destination, int /*source_mode*/, int /*dest_mode*/)
     {
         uintptr_t i_addr = (uintptr_t)jump_destination;
         // Need 4 instructions to fill 64bits
@@ -159,7 +136,7 @@ struct AbsJump
 
 struct RelJump
 {
-    static inline size_t WriteOpcodes(void *buffer, void *source, void *jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void *buffer, void *source, void *jump_destination, int /*source_mode*/, int /*dest_mode*/)
     {
         union
         {
@@ -178,7 +155,7 @@ struct RelJump
         return 4;
     }
 
-    static constexpr size_t GetOpcodeSize(void *source, void *jump_destination, int source_mode, int dest_mode) { return 4; }
+    static constexpr size_t GetOpcodeSize(void * /*source*/, void * /*jump_destination*/, int /*source_mode*/, int /*dest_mode*/) { return 4; }
 
     static constexpr size_t GetMaxOpcodeSize() { return 4; }
 };
@@ -212,7 +189,7 @@ static inline cs_err _InitDisasm(CodeDisasm &disasm, int /*mode*/)
 // address slot, PLT entries (GOT entry) and Windows import thunks (IAT entry):
 //   [bti c]; adrp x16, page; ldr x17, [x16, #offset]; add x16, x16, #offset; br x17
 //   adrp x16, page; ldr x16, [x16, #offset]; br x16
-void _EnterRecursiveThunk(void *&_pCode)
+static void _EnterRecursiveThunk(void *&_pCode)
 {
     // A longer chain is most likely a loop.
     for (int i = 0; i < 8; ++i)
@@ -259,7 +236,7 @@ static bool _UsesInstructionPointer(cs_insn const &instruction)
     return adr == 0x10000000 || adr == 0x90000000 || (raw & 0x3B000000) == 0x18000000;
 }
 
-size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatable_size)
+static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatable_size)
 {
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
@@ -280,9 +257,6 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
             {
                 relocatedOriginalCodeSize += disasm.GetInstruction().size;
                 relocatable_size += disasm.GetInstruction().size;
-            }
-            else if (disasm.GetJumpType() == 3)
-            { // Don't handle arm64 jump/call relocation.
             }
 
 #ifdef USE_SPDLOG
@@ -318,15 +292,8 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
     return relocatable_size;
 }
 
-size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize, int /*func_mode*/)
+static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize, int /*func_mode*/)
 {
-    // MOD-REG-R/M Byte
-    //  7 6    5 4 3    2 1 0 - bits
-    //[ MOD ][  REG  ][  R/M  ]
-    static constexpr auto mod_mask   = 0xC0;
-    static constexpr auto rm_mask    = 0x07; // Register or memory mask
-    static constexpr auto modrm_mask = mod_mask | rm_mask;
-
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
     size_t code_size             = 0;
@@ -335,8 +302,7 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
 
     code_size = _ReadCode(pCode, code_buffer, sizeof(code_buffer));
 
-    size_t relocatedSize     = 0;
-    void *originalCodeTarget = nullptr;
+    size_t relocatedSize = 0;
     while (relocatedSize < wanted_relocatableSize)
     {
         if (!disasm.Disasm(&code_iterator, &code_size, &code_addr))
@@ -367,10 +333,7 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
         pTrampolineCode += disasm.GetInstruction().size;
     }
 
-    if (originalCodeTarget == nullptr)
-        originalCodeTarget = reinterpret_cast<void *>(code_addr);
-
-    AbsJump::WriteOpcodes(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pTrampolineCode)), originalCodeTarget, 0, 0);
+    AbsJump::WriteOpcodes(pTrampolineCode, reinterpret_cast<void *>(code_addr), 0, 0);
 
     return relocatedSize;
 }

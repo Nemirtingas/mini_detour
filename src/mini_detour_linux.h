@@ -99,7 +99,7 @@ namespace MemoryManipulation
 {
 namespace Implementation
 {
-int _MemoryProtectRightsToNative(MemoryRights rights)
+static int _MemoryProtectRightsToNative(MemoryRights rights)
 {
     switch (rights)
     {
@@ -115,7 +115,7 @@ int _MemoryProtectRightsToNative(MemoryRights rights)
     }
 }
 
-bool _GetRegionInfo(uintptr_t target, const char *mapLine, size_t mapLineLength, MiniDetourMemoryManipulationRegionInfos_t &region)
+static bool _GetRegionInfo(uintptr_t target, const char *mapLine, size_t mapLineLength, MiniDetourMemoryManipulationRegionInfos_t &region)
 {
     // remove const because of strtoul
     auto *mapLineStart = (char *)mapLine;
@@ -133,13 +133,13 @@ bool _GetRegionInfo(uintptr_t target, const char *mapLine, size_t mapLineLength,
 
     ++mapLineStart;
     if (mapLineStart[0] == 'r')
-        (int &)region.Rights |= (int)MemoryRights::mem_r;
+        region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_r);
 
     if (mapLineStart[1] == 'w')
-        (int &)region.Rights |= (int)MemoryRights::mem_w;
+        region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_w);
 
     if (mapLineStart[2] == 'x')
-        (int &)region.Rights |= (int)MemoryRights::mem_x;
+        region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_x);
 
     //  Skip 4 fields from here \/, TODO find latest field instead
     // 7d3b3fa1d000-7d3b3fa1e000 r--p 00000000 fc:01 38300752                   /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
@@ -207,7 +207,7 @@ static inline uintptr_t _MaxUserAddress()
     return maxAddress;
 }
 
-size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
+static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
 {
     uintptr_t oldEnd(0);
     size_t writtenRegionCount = 0;
@@ -285,12 +285,12 @@ size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t re
     return currentRegionCount;
 }
 
-size_t PageSize()
+static size_t PageSize()
 {
     return sysconf(_SC_PAGESIZE);
 }
 
-void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *regionInfos)
+static void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *regionInfos)
 {
     std::ifstream f("/proc/self/maps");
     std::string s;
@@ -317,7 +317,7 @@ inline size_t GetFreeRegions(MiniDetourMemoryManipulationRegionInfos_t *regions,
     return _GetRegions(regions, regionCount, true);
 }
 
-bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights *oldRights)
+static bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights *oldRights)
 {
     if (oldRights != nullptr)
     {
@@ -330,7 +330,7 @@ bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights
     return res;
 }
 
-void MemoryFree(void *address, size_t size)
+static void MemoryFree(void *address, size_t size)
 {
     if (address != nullptr)
         munmap(address, size);
@@ -379,7 +379,7 @@ static inline size_t _AllocationGranularity()
     return PageSize();
 }
 
-bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
+static bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
 {
     struct iovec local;
     struct iovec remote;
@@ -389,13 +389,13 @@ bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
     remote.iov_base = (void *)address;
     remote.iov_len  = size;
 
-    if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != size)
+    if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != static_cast<ssize_t>(size))
         return false;
 
     return true;
 }
 
-bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
+static bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
 {
     struct iovec local;
     struct iovec remote;
@@ -405,13 +405,13 @@ bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
     remote.iov_base = (void *)address;
     remote.iov_len  = size;
 
-    if (process_vm_writev(getpid(), &local, 1, &remote, 1, 0) != size)
+    if (process_vm_writev(getpid(), &local, 1, &remote, 1, 0) != static_cast<ssize_t>(size))
         return false;
 
     return true;
 }
 
-int FlushInstructionCache(void *address, size_t size)
+static int FlushInstructionCache(void *address, size_t size)
 {
     __builtin___clear_cache(address, reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(address) + size));
     return 1;
@@ -734,7 +734,7 @@ static inline void **_GetIATAddress(
     return nullptr;
 }
 
-size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails, size_t exportDetailsCount)
+static size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails, size_t exportDetailsCount)
 {
     void *moduleBase                 = nullptr;
     ElfSymbol_t *dynamicSymbolsStart = nullptr;
@@ -753,7 +753,6 @@ size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails,
         {
             auto symbolBind = ELF_ST_BIND(symbol->st_info);
             auto symbolType = ELF_ST_TYPE(symbol->st_info);
-            // auto symbolVisiblity = ELF_ST_VISIBILITY(symbol->st_other);
 
             if ((symbol->st_name + 1) > dynamicSymbolsNamesSize)
                 continue;
@@ -771,7 +770,6 @@ size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails,
     {
         auto symbolBind = ELF_ST_BIND(symbol->st_info);
         auto symbolType = ELF_ST_TYPE(symbol->st_info);
-        // auto symbolVisiblity = ELF_ST_VISIBILITY(symbol->st_other);
 
         if ((symbol->st_name + 1) > dynamicSymbolsNamesSize)
             continue;
@@ -787,7 +785,7 @@ size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails,
     return result;
 }
 
-size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *iatDetails, size_t iatDetailsCount)
+static size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *iatDetails, size_t iatDetailsCount)
 {
     void *moduleBase                 = nullptr;
     ElfSymbol_t *dynamicSymbolsStart = nullptr;
@@ -828,10 +826,9 @@ size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *iatDetails, size_t iat
     return result;
 }
 
-size_t ReplaceModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
+static size_t ReplaceModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
 {
     void *moduleBase                 = nullptr;
-    int64_t relocationOffset         = 0;
     ElfSymbol_t *dynamicSymbolsStart = nullptr;
     ElfSymbol_t *dynamicSymbolsEnd   = nullptr;
     size_t dynamicSymbolsSize        = 0;
@@ -876,10 +873,9 @@ size_t ReplaceModuleExports(void *moduleHandle, ExportReplaceParameter_t *export
     return result;
 }
 
-size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
+static size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
 {
     void *moduleBase                 = nullptr;
-    int64_t relocationOffset         = 0;
     ElfSymbol_t *dynamicSymbolsStart = nullptr;
     ElfSymbol_t *dynamicSymbolsEnd   = nullptr;
     size_t dynamicSymbolsSize        = 0;
@@ -922,7 +918,7 @@ size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t *export
     return result;
 }
 
-size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+static size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
     void *moduleBase = nullptr;
     ElfSymbol_t *dynamicSymbolsStart;
@@ -964,7 +960,7 @@ size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDe
     return result;
 }
 
-size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+static size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
     void *moduleBase = nullptr;
     ElfSymbol_t *dynamicSymbolsStart;
@@ -973,7 +969,6 @@ size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDe
     const char *dynStr;
     size_t dynStrSize;
     _ImportRelocations_t relocations;
-    size_t iatEntrySize;
     size_t result = 0;
 
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)

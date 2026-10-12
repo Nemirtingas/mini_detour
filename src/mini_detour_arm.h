@@ -1,33 +1,12 @@
 #ifndef MINI_DETOUR_ARM_H
 #define MINI_DETOUR_ARM_H
 
-inline uint8_t *relative_addr_to_absolute(int32_t rel_addr, uint8_t *source_addr)
-{
-    // TODO
-    return source_addr + rel_addr;
-}
-
-inline int32_t absolute_addr_to_relative(void *opcode_addr, void *destination_addr)
-{
-    SPDLOG_INFO("opcode addr: {}, destination addr: {}", opcode_addr, destination_addr);
-    return reinterpret_cast<uint8_t *>(destination_addr) - reinterpret_cast<uint8_t *>(opcode_addr);
-}
-
-bool _AddressesAreRelativeJumpable(void *source, void *dest)
+static bool _AddressesAreRelativeJumpable(void *source, void *dest)
 {
     uintptr_t min_addr = reinterpret_cast<uintptr_t>(std::min(source, dest));
     uintptr_t max_addr = reinterpret_cast<uintptr_t>(std::max(source, dest));
     // Thumb B.W reaches +-16 MB, ARM B +-32 MB: the jump mode isn't known here, use the smallest range.
     return (max_addr - min_addr) <= 0xFFFFF0;
-}
-
-// An export table entry holds a 32 bits RVA: the address must be above the module base, within 4 GB.
-bool _AddressIsRepresentableAsRva(void *moduleBase, void *address)
-{
-    uintptr_t base = reinterpret_cast<uintptr_t>(moduleBase);
-    uintptr_t addr = reinterpret_cast<uintptr_t>(address);
-
-    return addr >= base && (addr - base) <= UINT32_MAX;
 }
 
 #pragma pack(push, 1)
@@ -39,20 +18,6 @@ struct memory_t
     uint8_t padding[3]; // arm is aligned on 4 bytes
     uint8_t data[40];   // Max absolute jump size is 20 bytes
 };
-
-// uint32_t arm_get_cpsr()
-//{
-//     uint32_t res;
-//     __asm ("MRS %[result], CPSR"
-//         : [result] "=r" (res)
-//     );
-//     return res;
-// }
-//
-// bool is_thumb_mode()
-//{
-//     return arm_get_cpsr() & 0x10;
-// }
 
 struct AbsJump
 {
@@ -95,7 +60,7 @@ struct AbsJump
         return source_mode ? WriteThumbOpcodes(buffer, addr) : WriteARMOpcodes(buffer, addr);
     }
 
-    static constexpr size_t GetOpcodeSize(void *jump_destination, int source_mode, int dest_mode) { return source_mode ? 10 : 8; }
+    static constexpr size_t GetOpcodeSize(void * /*jump_destination*/, int source_mode, int /*dest_mode*/) { return source_mode ? 10 : 8; }
 
     // Jump slots are spaced by this size: it must keep them 4 bytes aligned for ARM code.
     static constexpr size_t GetMaxOpcodeSize() { return 12; }
@@ -103,7 +68,7 @@ struct AbsJump
 
 struct RelJump
 {
-    static inline size_t WriteOpcodes(void *buffer, void *source, void *jump_destination, int source_mode, int dest_mode)
+    static inline size_t WriteOpcodes(void *buffer, void *source, void *jump_destination, int source_mode, int /*dest_mode*/)
     {
         int32_t rel_addr = static_cast<int32_t>(reinterpret_cast<uintptr_t>(jump_destination) - reinterpret_cast<uintptr_t>(source));
         if (source_mode)
@@ -177,7 +142,7 @@ struct RelJump
         return 4;
     }
 
-    static inline size_t GetOpcodeSize(void *source, void *jump_destination, int source_mode, int dest_mode)
+    static inline size_t GetOpcodeSize(void *source, void *jump_destination, int source_mode, int /*dest_mode*/)
     {
         if (source_mode)
         {
@@ -228,7 +193,7 @@ static uint32_t _ArmImmediate(uint32_t instruction)
 // Follows PLT entries to the function they jump to, read from their GOT entry (keeps its Thumb bit):
 //   add ip, pc, #A; add ip, ip, #B; ldr pc, [ip, #C]!   (GOT entry at entry + 8 + A + B + C)
 // Thumb callers can go through a "bx pc; nop" stub to the ARM entry.
-void _EnterRecursiveThunk(void *&pCode)
+static void _EnterRecursiveThunk(void *&pCode)
 {
     // A longer chain is most likely a loop.
     for (int i = 0; i < 8; ++i)
@@ -272,7 +237,7 @@ static bool _UsesInstructionPointer(cs_insn const &instruction)
     return false;
 }
 
-size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatableSize)
+static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatableSize)
 {
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
@@ -294,9 +259,6 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
                 relocatedOriginalCodeSize += disasm.GetInstruction().size;
                 relocatableSize += disasm.GetInstruction().size;
             }
-            else if (disasm.GetJumpType() == 3)
-            { // Don't handle arm jump/call relocation.
-            }
 
 #ifdef USE_SPDLOG
             SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
@@ -315,15 +277,8 @@ size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool 
 }
 
 // func_mode: 1 for Thumb code. pCode has no mode bit, it was cleared by the caller.
-size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize, int func_mode)
+static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize, int func_mode)
 {
-    // MOD-REG-R/M Byte
-    //  7 6    5 4 3    2 1 0 - bits
-    //[ MOD ][  REG  ][  R/M  ]
-    static constexpr auto mod_mask   = 0xC0;
-    static constexpr auto rm_mask    = 0x07; // Register or memory mask
-    static constexpr auto modrm_mask = mod_mask | rm_mask;
-
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
     size_t code_size             = 0;
@@ -332,8 +287,7 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
 
     code_size = _ReadCode(pCode, code_buffer, sizeof(code_buffer));
 
-    size_t relocatedSize     = 0;
-    void *originalCodeTarget = nullptr;
+    size_t relocatedSize = 0;
     while (relocatedSize < wanted_relocatableSize)
     {
         if (!disasm.Disasm(&code_iterator, &code_size, &code_addr))
@@ -355,11 +309,8 @@ size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t 
         pTrampolineCode += disasm.GetInstruction().size;
     }
 
-    if (originalCodeTarget == nullptr)
-        originalCodeTarget = reinterpret_cast<void *>(code_addr);
-
     // The trampoline runs the relocated code in the function mode, and goes back to the function in that mode.
-    AbsJump::WriteOpcodes(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pTrampolineCode)), originalCodeTarget, func_mode, func_mode);
+    AbsJump::WriteOpcodes(pTrampolineCode, reinterpret_cast<void *>(code_addr), func_mode, func_mode);
 
     return relocatedSize;
 }

@@ -55,115 +55,11 @@ struct fmt::formatter<MiniDetour::MemoryManipulation::MemoryRights>
 #define SPDLOG_ERROR(...)
 #define SPDLOG_WARN(...)
 #define SPDLOG_INFO(...)
-#define SPDLOG_DEBUG(...)
+#define SPDLOG_TRACE(...)
+#define SPDLOG_CRITICAL(...)
 #endif
 
-// #include <keystone/keystone.h>
 #include <capstone/capstone.h>
-
-namespace detail
-{
-template <typename It1, typename It2>
-static bool equal(It1 first1, It1 last1, It2 first2, It2 last2)
-{
-    while (first1 != last1 && first2 != last2)
-    {
-        if (*first1++ != *first2++)
-            return false;
-    }
-    return first1 == last1 && first2 == last2;
-}
-} // namespace detail
-
-// class CodeAsm {
-//     ks_engine* _Engine;
-//     std::string _AssemblySource;
-//     unsigned char *_BinaryCode;
-//     size_t _BinaryCodeSize;
-//
-//     bool _IsHandleValid()
-//     {
-//         return _Engine != nullptr;
-//     }
-//
-//     void _FreeBinaryCode()
-//     {
-//         if (_BinaryCode != nullptr)
-//         {
-//             ks_free(_BinaryCode);
-//             _BinaryCode = nullptr;
-//             _BinaryCodeSize = 0;
-//         }
-//     }
-//
-//     void _FreeEngine()
-//     {
-//         if (!_IsHandleValid())
-//             return;
-//
-//         ks_close(_Engine);
-//         _Engine = nullptr;
-//     }
-//
-// public:
-//     CodeAsm():
-//         _Engine{ nullptr },
-//         _BinaryCode{ nullptr },
-//         _BinaryCodeSize{ 0 }
-//     {}
-//
-//     ~CodeAsm()
-//     {
-//         _FreeBinaryCode();
-//         _FreeEngine();
-//     }
-//
-//     ks_err Init(ks_arch arch, ks_mode mode)
-//     {
-//         _FreeEngine();
-//
-//         return ks_open(arch, mode, &_Engine);
-//     }
-//
-//     void AddSource(std::string const& str)
-//     {
-//         _AssemblySource.append(str.data(), str.length());
-//     }
-//
-//     void AddSourceLine(std::string const& str)
-//     {
-//         AddSource(str);
-//         if(str[str.length()-1] != '\n')
-//             _AssemblySource += '\n';
-//     }
-//
-//     ks_err Build(uint64_t base_address)
-//     {
-//         if (!_IsHandleValid())
-//             return ks_err::KS_ERR_HANDLE;
-//
-//         size_t ignored;
-//
-//         _FreeBinaryCode();
-//
-//         if (ks_asm(_Engine, _AssemblySource.c_str(), base_address, &_BinaryCode, &_BinaryCodeSize, &ignored) != 0)
-//             return ks_errno(_Engine);
-//
-//         return ks_err::KS_ERR_OK;
-//     }
-//
-//     std::vector<uint8_t> GetBinary() const
-//     {
-//         return std::vector<uint8_t>{(const uint8_t*)_BinaryCode, (const uint8_t*)_BinaryCode + _BinaryCodeSize};
-//     }
-//
-//     static int RuntimeEndianness()
-//     {
-//         uint32_t x{ 0x12345678 };
-//         uint8_t e = *(uint8_t*)&x;
-//         return static_cast<int>(e == 0x12 ? ks_mode::KS_MODE_BIG_ENDIAN : ks_mode::KS_MODE_LITTLE_ENDIAN);
-//     }
-// };
 
 class CodeDisasm
 {
@@ -361,10 +257,6 @@ static void *_AllocInFreeRegion(MiniDetour::MemoryManipulation::RegionInfos_t co
 
 #endif
 
-inline size_t _RegionSize();
-inline size_t _JumpsInRegion();
-inline size_t _PageAddrSize(void *addr, size_t len, size_t page_size);
-
 inline size_t _RegionSize()
 {
     return MiniDetour::MemoryManipulation::PageSize();
@@ -401,18 +293,7 @@ class MemoryManager
     std::recursive_mutex _Mutex;
 
   public:
-    MemoryManager() {}
-
     std::recursive_mutex &Mutex() { return _Mutex; }
-
-    ~MemoryManager()
-    {
-        // for (auto& v : jumps_regions)
-        //     MemoryManipulation::MemoryFree(v, _RegionSize());
-        //
-        // for (auto& v : trampolines_regions)
-        //     MemoryManipulation::MemoryFree(v, _RegionSize());
-    }
 
     // Allocates near hint_addr. When the closest free memory isn't usable from reference (for example below a module
     // that needs a positive RVA), the other free regions are tried, closest first.
@@ -506,7 +387,7 @@ class MemoryManager
 
         for (auto &region : jumps_regions)
         {
-            for (int i = 0; i < region.bitmap.size(); ++i)
+            for (size_t i = 0; i < region.bitmap.size(); ++i)
             {
                 if (!region.bitmap[i] && isUsable(reference, region.jump_table + i))
                 {
@@ -634,7 +515,8 @@ static void _RestoreCodeRights(void *address, size_t size, MiniDetour::MemoryMan
 
 // Makes an import table slot (IAT/GOT entry) writable. The other rights of its page are kept: the slot is data,
 // so execution is never added, but it may share a page with code that must stay executable.
-static bool _MakeImportSlotWritable(void *address, size_t size, MiniDetour::MemoryManipulation::MemoryRights *oldRights)
+// Not static: macOS doesn't replace imports yet, and an unused static function is a warning.
+inline bool _MakeImportSlotWritable(void *address, size_t size, MiniDetour::MemoryManipulation::MemoryRights *oldRights)
 {
     MiniDetour::MemoryManipulation::RegionInfos_t infos;
     MiniDetour::MemoryManipulation::GetRegionInfos(address, &infos);
@@ -1043,7 +925,7 @@ class Hook_t
             goto error;
         }
 
-        if (relocatableSize >= relativeJumpSize)
+        // Only a relative jump is written in the function: shorter code was refused above.
         {
             SPDLOG_INFO("Relative hook");
 
@@ -1170,7 +1052,8 @@ class Hook_t
 
         res = _OriginalFuncAddress;
 
-        if (detail::equal(buffer.begin(), buffer.end(), _HookCode.begin(), _HookCode.end()))
+        // buffer has the size of _HookCode.
+        if (std::equal(buffer.begin(), buffer.end(), _HookCode.begin()))
         { // Our hook code is still there, we can restore the old instructions.
             MemoryManipulation::MemoryRights functionOldRights;
             if (!MemoryManipulation::MemoryProtect(_OriginalFuncAddress, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rwx, &functionOldRights))

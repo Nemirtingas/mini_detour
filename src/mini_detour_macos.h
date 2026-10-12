@@ -41,7 +41,7 @@ using NList_t         = nlist;
 
 #ifdef USE_SPDLOG
 
-std::string kern_return_t_2_str(kern_return_t v)
+static std::string kern_return_t_2_str(kern_return_t v)
 {
 #define CASE_TO_STRING(x) \
     case x: return #x;
@@ -237,7 +237,7 @@ namespace MemoryManipulation
 {
 namespace Implementation
 {
-size_t _MemoryProtectRightsToNative(MemoryRights rights)
+static size_t _MemoryProtectRightsToNative(MemoryRights rights)
 {
     switch (rights)
     {
@@ -294,7 +294,7 @@ static mach_vm_address_t _PageZeroEnd()
     return 0;
 }
 
-size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
+static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
 {
     mach_port_t self_task     = mach_task_self();
     mach_vm_address_t oldEnd  = _PageZeroEnd();
@@ -360,13 +360,13 @@ size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t re
                     region.ModuleName[0] = '\0';
 
                     if (infos.protection & VM_PROT_READ)
-                        (int &)region.Rights |= (int)MemoryRights::mem_r;
+                        region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_r);
 
                     if (infos.protection & VM_PROT_WRITE)
-                        (int &)region.Rights |= (int)MemoryRights::mem_w;
+                        region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_w);
 
                     if (infos.protection & VM_PROT_EXECUTE)
-                        (int &)region.Rights |= (int)MemoryRights::mem_x;
+                        region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_x);
 
                     ++writtenRegionCount;
                 }
@@ -382,12 +382,12 @@ size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t re
     return currentRegionCount;
 }
 
-size_t PageSize()
+static size_t PageSize()
 {
     return sysconf(_SC_PAGESIZE);
 }
 
-void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *regionInfos)
+static void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *regionInfos)
 {
     mach_vm_address_t vm_address = (mach_vm_address_t)address;
     kern_return_t ret;
@@ -415,28 +415,28 @@ void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *re
             regionInfos->ModuleName[0] = '\0';
 
             if (infos.protection & VM_PROT_READ)
-                (int &)regionInfos->Rights |= (int)MemoryRights::mem_r;
+                regionInfos->Rights = static_cast<MemoryRights>(regionInfos->Rights | MemoryRights::mem_r);
 
             if (infos.protection & VM_PROT_WRITE)
-                (int &)regionInfos->Rights |= (int)MemoryRights::mem_w;
+                regionInfos->Rights = static_cast<MemoryRights>(regionInfos->Rights | MemoryRights::mem_w);
 
             if (infos.protection & VM_PROT_EXECUTE)
-                (int &)regionInfos->Rights |= (int)MemoryRights::mem_x;
+                regionInfos->Rights = static_cast<MemoryRights>(regionInfos->Rights | MemoryRights::mem_x);
         }
     }
 }
 
-size_t GetAllRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount)
+static size_t GetAllRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount)
 {
     return _GetRegions(regions, regionCount, false);
 }
 
-size_t GetFreeRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount)
+static size_t GetFreeRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount)
 {
     return _GetRegions(regions, regionCount, true);
 }
 
-bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights *oldRights)
+static bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights *oldRights)
 {
     if (oldRights != nullptr)
     {
@@ -453,7 +453,7 @@ bool MemoryProtect(void *address, size_t size, MemoryRights rights, MemoryRights
     return kret == KERN_SUCCESS;
 }
 
-void MemoryFree(void *address, size_t size)
+static void MemoryFree(void *address, size_t size)
 {
     if (address != nullptr)
         mach_vm_deallocate(mach_task_self(), (mach_vm_address_t)address, size);
@@ -514,7 +514,7 @@ static inline size_t _AllocationGranularity()
     return PageSize();
 }
 
-bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
+static bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
 {
     mach_port_t task          = mach_task_self();
     mach_vm_size_t read_count = 0;
@@ -525,7 +525,7 @@ bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
     return true;
 }
 
-bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
+static bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
 {
     mach_port_t task = mach_task_self();
 
@@ -535,7 +535,7 @@ bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
     return true;
 }
 
-int FlushInstructionCache(void *address, size_t size)
+static int FlushInstructionCache(void *address, size_t size)
 {
     // Required on Apple Silicon after writing code, a no-op on x86.
     sys_icache_invalidate(address, size);
@@ -548,140 +548,6 @@ namespace ModuleManipulation
 {
 namespace Implementation
 {
-/*
-static void* _LoadModuleBaseFromHandleDYLDPre941(void* moduleHandle)
-{
-    struct ImageLoader
-    {
-#if __x86_64__
-        const char*                 fAotPath;
-#endif
-        const char*					fPath;
-        const char*					fRealPath;
-        dev_t						fDevice;
-        ino_t						fInode;
-        time_t						fLastModified;
-        uint32_t					fPathHash;
-        uint32_t					fDlopenReferenceCount;	// count of how many dlopens have been done on this image
-        struct recursive_lock*		fInitializerRecursiveLock;
-
-        union {
-            struct {
-                uint16_t					fLoadOrder;
-                uint16_t					fDepth : 15,
-                fObjCMappedNotified : 1;
-                uint32_t					fState : 8,
-                fLibraryCount : 9,
-                fMadeReadOnly : 1,
-                fAllLibraryChecksumsAndLoadAddressesMatch : 1,
-                fLeaveMapped : 1,		// when unloaded, leave image mapped in cause some other code may have pointers into it
-                fNeverUnload : 1,		// image was statically loaded by main executable
-                fHideSymbols : 1,		// ignore this image's exported symbols when linking other images
-                fMatchByInstallName : 1,// look at image's install-path not its load path
-                fInterposed : 1,
-                fRegisteredDOF : 1,
-                fAllLazyPointersBound : 1,
-                fMarkedInUse : 1,
-                fBeingRemoved : 1,
-                fAddFuncNotified : 1,
-                fPathOwnedByImage : 1,
-                fIsReferencedDownward : 1,
-                fWeakSymbolsBound : 1;
-            };
-            uint64_t 						sizeOfData;
-        };
-    };
-
-    struct ImageLoaderMachO : public ImageLoader
-    {
-        uint64_t								fCoveredCodeLength;
-        const uint8_t*							fMachOData;
-        const uint8_t*							fLinkEditBase; // add any internal "offset" to this to get mapped address
-        uintptr_t								fSlide;
-    };
-
-    // 4 first bits are mode bits
-    // moduleHandle == ImageLoader* & (~0xf)
-    // return ((ImageLoaderMachO_x86*)((uintptr_t)moduleHandle & (~1)))->fMachOData;
-
-    // From cache, use ImageLoaderMegaDylib
-    return nullptr;
-}
-
-static void* _LoadModuleBaseFromHandlePre1066(void* moduleHandle)
-{
-    struct Loader
-    {
-        struct LoaderRef {
-            uint16_t    index       : 15,   // index into PrebuiltLoaderSet
-                        app         :  1;   // app vs dyld cache PrebuiltLoaderSet
-        };
-
-        enum { kMagic = 'l4yd' };
-
-        const uint32_t      magic;
-        const uint16_t      isPrebuilt         :  1,  // PrebuiltLoader vs JustInTimeLoader
-                            dylibInDyldCache   :  1,
-                            hasObjC            :  1,
-                            mayHavePlusLoad    :  1,
-                            hasReadOnlyData    :  1,  // __DATA_CONST.  Don't use directly.  Use hasConstantSegmentsToProtect()
-                            neverUnload        :  1,  // part of launch or has non-unloadable data (e.g. objc, tlv)
-                            leaveMapped        :  1,  // RTLD_NODELETE
-                            hasReadOnlyObjC    :  1,  // Has __DATA_CONST,__objc_selrefs section
-                            pre2022Binary      :  1,
-                            isPremapped        :  1,  // mapped by exclave core
-                            hasUUIDLoadCommand :  1,
-                            hasWeakDefs        :  1,
-                            hasTLVs            :  1,
-                            belowLibSystem     :  1,
-                            padding            :  2;
-        LoaderRef           ref;
-    };
-
-    struct JustInTimeLoader : public Loader
-    {
-        const mach_header*   mappedAddress;
-        mutable uint64_t     pathOffset         : 16,
-                             dependentsSet      :  1,
-                             fixUpsApplied      :  1,
-                             inited             :  1,
-                             hidden             :  1,
-                             altInstallName     :  1,
-                             lateLeaveMapped    :  1,
-                             overridesCache     :  1,
-                             allDepsAreNormal   :  1,
-                             overrideIndex      : 15,
-                             depCount           : 16,
-                             padding            :  9;
-        uint64_t             sliceOffset;
-    };
-
-    Loader* loader = (Loader*)((uintptr_t)moduleHandle >> 1);
-    if (loader->magic == Loader::kMagic)
-    {
-        if (loader->isPrebuilt)// TODO PrebuiltLoader
-            return nullptr;
-
-        return (void*)((JustInTimeLoader*)loader)->mappedAddress;
-    }
-    return nullptr;
-}
-
-static void* _LoadModuleBaseFromHandlePost1066(void* moduleHandle)
-{
-    uintptr_t dyldStart = (uintptr_t)&__dso_handle;
-    Loader* loader = (Loader*)((((uintptr_t)h) & ~1) ^ dyldStart);
-    if (loader->magic == Loader::kMagic)
-    {
-        if (loader->isPrebuilt)// TODO PrebuiltLoader
-            return nullptr;
-
-        return (void*)((JustInTimeLoader*)loader)->mappedAddress;
-    }
-    return nullptr;
-}
-*/
-
 // slide: what the image was moved by from its link address, to add to symbol values.
 static bool _LoadModuleExportDetails(void *moduleHandle, uintptr_t *slide, NList_t **dynamicSymbols, const char **dynamicSymbolsNames, uint32_t *dynamicSymbolsCount)
 {
@@ -697,7 +563,7 @@ static bool _LoadModuleExportDetails(void *moduleHandle, uintptr_t *slide, NList
     void *cacheBase             = nullptr;
     void *foundModuleBase       = nullptr;
 
-    for (int i = 0; i < infos->infoArrayCount && (foundModuleBase == nullptr || cacheBase == nullptr); ++i)
+    for (uint32_t i = 0; i < infos->infoArrayCount && (foundModuleBase == nullptr || cacheBase == nullptr); ++i)
     {
         if (foundModuleBase == nullptr)
         {
@@ -724,9 +590,6 @@ static bool _LoadModuleExportDetails(void *moduleHandle, uintptr_t *slide, NList
 
     if (machHeader->magic != MachHeaderMagic)
         return false;
-
-    // cache rx base: void* cache_rx_base
-    // syscall(294, &cache_rx_base);
 
     bool fromSharedCache = machHeader->flags & MH_DYLIB_IN_CACHE;
     if (fromSharedCache) // TODO: Handle shared cache
@@ -794,7 +657,7 @@ static bool _LoadModuleExportDetails(void *moduleHandle, uintptr_t *slide, NList
     return true;
 }
 
-size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails, size_t exportDetailsCount)
+static size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails, size_t exportDetailsCount)
 {
     uintptr_t slide;
     NList_t *dynamicSymbols;
@@ -837,12 +700,12 @@ size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails,
     return result;
 }
 
-size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *exportDetails, size_t iatDetailsCount)
+static size_t GetAllIATSymbols(void * /*moduleHandle*/, IATDetails_t * /*exportDetails*/, size_t /*iatDetailsCount*/)
 {
     return 0;
 }
 
-size_t ReplaceModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
+static size_t ReplaceModuleExports(void * /*moduleHandle*/, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
 {
     // TODO: Read MachO and modify export address
     for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
@@ -851,7 +714,7 @@ size_t ReplaceModuleExports(void *moduleHandle, ExportReplaceParameter_t *export
     return 0;
 }
 
-size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
+static size_t RestoreModuleExports(void * /*moduleHandle*/, ExportReplaceParameter_t *exportReplaceDetails, size_t exportReplaceDetailsCount)
 {
     // TODO: Read MachO and modify export address
     for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
@@ -860,7 +723,7 @@ size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t *export
     return 0;
 }
 
-size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+static size_t ReplaceModuleIATs(void * /*moduleHandle*/, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
         iatReplaceDetails[i].IATCallAddress = nullptr;
@@ -868,7 +731,7 @@ size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDe
     return 0;
 }
 
-size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
+static size_t RestoreModuleIATs(void * /*moduleHandle*/, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
         iatReplaceDetails[i].NewIATAddress = nullptr;
