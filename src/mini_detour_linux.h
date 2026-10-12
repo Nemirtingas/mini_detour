@@ -576,6 +576,16 @@ static bool _ReplaceModuleExport(void *moduleBase, ElfAddr_t *exportAddress, voi
     return true;
 }
 
+// Exports are the global or weak functions and objects defined in the module: the undefined ones are its imports.
+static bool _IsExportedSymbol(ElfSymbol_t const *symbol, size_t dynamicSymbolsNamesSize)
+{
+    auto symbolBind = ELF_ST_BIND(symbol->st_info);
+    auto symbolType = ELF_ST_TYPE(symbol->st_info);
+
+    return symbol->st_name + 1 <= dynamicSymbolsNamesSize && (symbolBind == STB_GLOBAL || symbolBind == STB_WEAK) && (symbolType == STT_FUNC || symbolType == STT_OBJECT) &&
+           symbol->st_shndx != SHN_UNDEF && symbol->st_value != 0;
+}
+
 static inline ElfAddr_t *_GetExportAddress(
     ElfSymbol_t *dynamicSymbolsStart,
     ElfSymbol_t *dynamicSymbolsEnd,
@@ -589,20 +599,8 @@ static inline ElfAddr_t *_GetExportAddress(
 
     for (ElfSymbol_t *symbol = dynamicSymbolsStart; symbol < dynamicSymbolsEnd; symbol = (ElfSymbol_t *)((uintptr_t)symbol + dynamicSymbolsSize))
     {
-        auto symbolBind = ELF_ST_BIND(symbol->st_info);
-        auto symbolType = ELF_ST_TYPE(symbol->st_info);
-
-        if ((symbol->st_name + 1) > dynamicSymbolsNamesSize)
-            continue;
-
-        // Undefined symbols are the module imports, not its exports.
-        if ((symbolBind != STB_GLOBAL && symbolBind != STB_WEAK) || (symbolType != STT_FUNC && symbolType != STT_OBJECT) || symbol->st_shndx == SHN_UNDEF || symbol->st_value == 0)
-            continue;
-
-        if (strcmp(dynamicSymbolsNames + symbol->st_name, symbolName) != 0)
-            continue;
-
-        return &symbol->st_value;
+        if (_IsExportedSymbol(symbol, dynamicSymbolsNamesSize) && strcmp(dynamicSymbolsNames + symbol->st_name, symbolName) == 0)
+            return &symbol->st_value;
     }
 
     return nullptr;
@@ -646,13 +644,8 @@ static bool _LoadModuleIATDetails(
 {
     ElfDyn_t *dynamicTableStart;
 
-    if (!_LoadModuleDynamicTable(moduleHandle, moduleBase, &dynamicTableStart))
-        return false;
-
-    if (!_LoadModuleCommonDetails(dynamicTableStart, dynamicSymbolsNames, dynamicSymbolsNamesSize))
-        return false;
-
-    if (!_LoadModuleExportSymbolsCount(dynamicTableStart, dynamicSymbolsStart, dynamicSymbolsEnd, dynamicSymbolSize))
+    if (!_LoadModuleExportDetails(moduleHandle, moduleBase, dynamicSymbolsStart, dynamicSymbolsEnd, dynamicSymbolSize, dynamicSymbolsNames, dynamicSymbolsNamesSize) ||
+        !_LoadModuleDynamicTable(moduleHandle, moduleBase, &dynamicTableStart))
         return false;
 
     _LoadRelocationTable(dynamicTableStart, DT_JMPREL, DT_PLTRELSZ, &relocations->Start[0], &relocations->End[0]);
@@ -728,39 +721,23 @@ static size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportD
     if (!_LoadModuleExportDetails(moduleHandle, &moduleBase, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolsSize, &dynamicSymbolsNames, &dynamicSymbolsNamesSize))
         return result;
 
-    if (exportDetails == nullptr)
+    // Without exportDetails, the exports are only counted.
+    for (ElfSymbol_t *symbol = dynamicSymbolsStart; symbol < dynamicSymbolsEnd; symbol = (ElfSymbol_t *)((uintptr_t)symbol + dynamicSymbolsSize))
     {
-        for (ElfSymbol_t *symbol = dynamicSymbolsStart; symbol < dynamicSymbolsEnd; symbol = (ElfSymbol_t *)((uintptr_t)symbol + dynamicSymbolsSize))
+        if (!_IsExportedSymbol(symbol, dynamicSymbolsNamesSize))
+            continue;
+
+        if (exportDetails != nullptr)
         {
-            auto symbolBind = ELF_ST_BIND(symbol->st_info);
-            auto symbolType = ELF_ST_TYPE(symbol->st_info);
+            if (result >= exportDetailsCount)
+                break;
 
-            if ((symbol->st_name + 1) > dynamicSymbolsNamesSize)
-                continue;
-
-            if ((symbolBind != STB_GLOBAL && symbolBind != STB_WEAK) || (symbolType != STT_FUNC && symbolType != STT_OBJECT) || symbol->st_value == 0)
-                continue;
-
-            ++result;
+            exportDetails[result].ExportName        = dynamicSymbolsNames + symbol->st_name;
+            exportDetails[result].ExportCallAddress = (void *)((uintptr_t)moduleBase + symbol->st_value);
+            exportDetails[result].ExportOrdinal     = symbol - dynamicSymbolsStart;
         }
 
-        return result;
-    }
-
-    for (ElfSymbol_t *symbol = dynamicSymbolsStart; symbol < dynamicSymbolsEnd && result < exportDetailsCount; symbol = (ElfSymbol_t *)((uintptr_t)symbol + dynamicSymbolsSize))
-    {
-        auto symbolBind = ELF_ST_BIND(symbol->st_info);
-        auto symbolType = ELF_ST_TYPE(symbol->st_info);
-
-        if ((symbol->st_name + 1) > dynamicSymbolsNamesSize)
-            continue;
-
-        if ((symbolBind != STB_GLOBAL && symbolBind != STB_WEAK) || (symbolType != STT_FUNC && symbolType != STT_OBJECT) || symbol->st_value == 0)
-            continue;
-
-        exportDetails[result].ExportName        = dynamicSymbolsNames + symbol->st_name;
-        exportDetails[result].ExportCallAddress = (void *)((uintptr_t)moduleBase + symbol->st_value);
-        exportDetails[result++].ExportOrdinal   = symbol - dynamicSymbolsStart;
+        ++result;
     }
 
     return result;
