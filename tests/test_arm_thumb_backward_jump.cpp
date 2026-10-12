@@ -61,9 +61,10 @@ TEST_CASE("Thumb hook jumping backward to its jump slot", "[arm_thumb_backward_j
     MiniDetour::Hook_t hook;
     REQUIRE(hook.HookFunction((void *)function, ThumbAddress(second.Data(64))) != nullptr);
 
+    // The closest region with a free slot is the first one, below the function: the B.W jumps backward.
     const uintptr_t secondSlot = ThumbWideJumpTarget(second.Data());
-    if (secondSlot == 0 || secondSlot > reinterpret_cast<uintptr_t>(second.Data()))
-        WARN("The jump slot isn't below the function with this memory layout: the backward B.W isn't covered.");
+    REQUIRE(secondSlot != 0);
+    CHECK(secondSlot < reinterpret_cast<uintptr_t>(second.Data()));
 
     CHECK(function() == 8);
 

@@ -26,6 +26,7 @@
 
 #elif defined(MINIDETOUR_OS_APPLE)
 #include <dlfcn.h>
+#include <unistd.h>
 
 #define EXPORT_HOOK_TEST_LIBRARY "./export_hook_test_library.dylib"
 #define LOAD_LIBRARY(filePath) dlopen(filePath, RTLD_LAZY)
@@ -144,29 +145,31 @@ TEST_CASE("List modules iat symbols", "[module_list_iat_symbols]")
 {
     MiniDetour::ModuleManipulation::IATDetails_t *iatSymbols;
     size_t iatSymbolsCount = 0;
-#if defined(MINIDETOUR_OS_WINDOWS) || defined(MINIDETOUR_OS_LINUX)
-    auto h = LOAD_LIBRARY(EXPORT_HOOK_TEST_LIBRARY);
-    if (h != nullptr)
+    auto h                 = LOAD_LIBRARY(EXPORT_HOOK_TEST_LIBRARY);
+    REQUIRE(h != nullptr);
+
+    // The library calls puts, and the C runtime it is linked with has imports too.
+    iatSymbolsCount = MiniDetour::ModuleManipulation::GetAllIATSymbols(h, nullptr, 0);
+    CHECK(iatSymbolsCount > 0);
+
+    iatSymbols = (MiniDetour::ModuleManipulation::IATDetails_t *)malloc(sizeof(MiniDetour::ModuleManipulation::IATDetails_t) * iatSymbolsCount);
+    CHECK(MiniDetour::ModuleManipulation::GetAllIATSymbols(h, iatSymbols, iatSymbolsCount) == iatSymbolsCount);
+
+    SPDLOG_INFO("Module: {}", EXPORT_HOOK_TEST_LIBRARY);
+    for (size_t i = 0; i < iatSymbolsCount; ++i)
     {
-        iatSymbolsCount = MiniDetour::ModuleManipulation::GetAllIATSymbols(h, nullptr, 0);
-
-        iatSymbols = (MiniDetour::ModuleManipulation::IATDetails_t *)malloc(sizeof(MiniDetour::ModuleManipulation::IATDetails_t) * iatSymbolsCount);
-        CHECK(MiniDetour::ModuleManipulation::GetAllIATSymbols(h, iatSymbols, iatSymbolsCount) == iatSymbolsCount);
-
-        SPDLOG_INFO("Module: {}", EXPORT_HOOK_TEST_LIBRARY);
-        for (size_t i = 0; i < iatSymbolsCount; ++i)
-        {
-            SPDLOG_INFO(
-                "  Import module: {}, Symbol: {}, [ordinal]{} at {}",
-                iatSymbols[i].ImportModuleName,
-                iatSymbols[i].ImportName == nullptr ? "" : iatSymbols[i].ImportName,
-                iatSymbols[i].ImportOrdinal,
-                iatSymbols[i].ImportCallAddress);
-        }
-
-        free(iatSymbols);
+        // An import has a name or an ordinal.
+        CHECK((iatSymbols[i].ImportName != nullptr || iatSymbols[i].ImportOrdinal != 0));
+        SPDLOG_INFO(
+            "  Import module: {}, Symbol: {}, [ordinal]{} at {}",
+            iatSymbols[i].ImportModuleName,
+            iatSymbols[i].ImportName == nullptr ? "" : iatSymbols[i].ImportName,
+            iatSymbols[i].ImportOrdinal,
+            iatSymbols[i].ImportCallAddress);
     }
-#endif
+
+    free(iatSymbols);
+    FREE_LIBRARY(h);
 }
 
 TEST_CASE("List modules exported symbols", "[module_list_export_symbols]")
@@ -174,28 +177,28 @@ TEST_CASE("List modules exported symbols", "[module_list_export_symbols]")
     MiniDetour::ModuleManipulation::ExportDetails_t *exportedSymbols;
     size_t exportedSymbolsCount = 0;
     auto h                      = LOAD_LIBRARY(EXPORT_HOOK_TEST_LIBRARY);
-    if (h != nullptr)
+    REQUIRE(h != nullptr);
+
+    exportedSymbolsCount = MiniDetour::ModuleManipulation::GetAllExportedSymbols(h, nullptr, 0);
+    CHECK(exportedSymbolsCount == 3);
+
+    exportedSymbols = (MiniDetour::ModuleManipulation::ExportDetails_t *)malloc(sizeof(MiniDetour::ModuleManipulation::ExportDetails_t) * exportedSymbolsCount);
+    CHECK(MiniDetour::ModuleManipulation::GetAllExportedSymbols(h, exportedSymbols, exportedSymbolsCount) == exportedSymbolsCount);
+
+    SPDLOG_INFO("Module: {}", EXPORT_HOOK_TEST_LIBRARY);
+    for (size_t i = 0; i < exportedSymbolsCount; ++i)
     {
-        exportedSymbolsCount = MiniDetour::ModuleManipulation::GetAllExportedSymbols(h, nullptr, 0);
-        CHECK(exportedSymbolsCount == 3);
-
-        exportedSymbols = (MiniDetour::ModuleManipulation::ExportDetails_t *)malloc(sizeof(MiniDetour::ModuleManipulation::ExportDetails_t) * exportedSymbolsCount);
-        CHECK(MiniDetour::ModuleManipulation::GetAllExportedSymbols(h, exportedSymbols, exportedSymbolsCount) == exportedSymbolsCount);
-
-        SPDLOG_INFO("Module: {}", EXPORT_HOOK_TEST_LIBRARY);
-        for (size_t i = 0; i < exportedSymbolsCount; ++i)
-        {
-            CHECK(GET_LIBRARY_PROC(h, exportedSymbols[i].ExportName) == exportedSymbols[i].ExportCallAddress);
-            SPDLOG_INFO(
-                "  Symbol export: {}, [ordinal]{} at {} - {}",
-                exportedSymbols[i].ExportName == nullptr ? "" : exportedSymbols[i].ExportName,
-                exportedSymbols[i].ExportOrdinal,
-                exportedSymbols[i].ExportCallAddress,
-                GET_LIBRARY_PROC(h, exportedSymbols[i].ExportName));
-        }
-
-        free(exportedSymbols);
+        CHECK(GET_LIBRARY_PROC(h, exportedSymbols[i].ExportName) == exportedSymbols[i].ExportCallAddress);
+        SPDLOG_INFO(
+            "  Symbol export: {}, [ordinal]{} at {} - {}",
+            exportedSymbols[i].ExportName == nullptr ? "" : exportedSymbols[i].ExportName,
+            exportedSymbols[i].ExportOrdinal,
+            exportedSymbols[i].ExportCallAddress,
+            GET_LIBRARY_PROC(h, exportedSymbols[i].ExportName));
     }
+
+    free(exportedSymbols);
+    FREE_LIBRARY(h);
 }
 
 #if defined(MINIDETOUR_OS_WINDOWS)
@@ -207,6 +210,11 @@ HMODULE WINAPI MyGetModuleHandleA(LPCSTR)
 void *Mydlopen(const char *, int)
 {
     return (void *)0x99887766;
+}
+#elif defined(MINIDETOUR_OS_APPLE)
+pid_t Mygetpid()
+{
+    return 12345;
 }
 #endif
 
@@ -242,6 +250,25 @@ TEST_CASE("Module IAT hook", "[module_iat_hook]")
 
     CHECK(MiniDetour::ModuleManipulation::RestoreModuleIATs(h, &iatReplace, 1) == 1);
     CHECK(dlopen(nullptr, RTLD_LAZY) == (void *)h);
+#elif defined(MINIDETOUR_OS_APPLE)
+    // getpid is in the symbol pointers of the tests executable, bound to libSystem. dlopen(NULL) gives the executable, as
+    // on Linux. dlopen itself isn't replaced: the library calls it to find the images.
+    auto h = (void *)dlopen(nullptr, RTLD_LAZY);
+    MiniDetour::ModuleManipulation::IATReplaceParameter_t iatReplace{};
+    const pid_t pid = getpid();
+
+    iatReplace.IATModuleName = "libSystem.B.dylib";
+    iatReplace.IATName       = "getpid";
+    iatReplace.NewIATAddress = (void *)&Mygetpid;
+    CHECK(MiniDetour::ModuleManipulation::ReplaceModuleIATs(h, &iatReplace, 1) == 1);
+
+    CHECK(getpid() == 12345);
+    REQUIRE(iatReplace.IATCallAddress != nullptr);
+    CHECK(reinterpret_cast<pid_t (*)()>(iatReplace.IATCallAddress)() == pid);
+
+    CHECK(MiniDetour::ModuleManipulation::RestoreModuleIATs(h, &iatReplace, 1) == 1);
+    CHECK(getpid() == pid);
+    dlclose(h);
 #endif
 }
 
@@ -249,32 +276,30 @@ TEST_CASE("Module export hook", "[module_export_hook]")
 {
     SPDLOG_INFO("Test module export hook");
     auto h = LOAD_LIBRARY(EXPORT_HOOK_TEST_LIBRARY);
-    if (h != nullptr)
-    {
-        int (*libraryAdd)(int a, int b) = nullptr;
+    REQUIRE(h != nullptr);
 
-        MiniDetour::ModuleManipulation::ExportReplaceParameter_t exportDetails{"add", (void *)&MyAdd, nullptr};
+    int (*libraryAdd)(int a, int b) = nullptr;
 
-        CHECK(MiniDetour::ModuleManipulation::ReplaceModuleExports(h, &exportDetails, 1) == 1);
-        libraryAdd = (decltype(libraryAdd))exportDetails.ExportCallAddress;
-        if (libraryAdd != nullptr)
-        {
-            auto myAdd = ((decltype(libraryAdd))GET_LIBRARY_PROC(h, "add"));
+    MiniDetour::ModuleManipulation::ExportReplaceParameter_t exportDetails{"add", (void *)&MyAdd, nullptr};
 
-            CHECK(libraryAdd(5, 3) == 8);
-            CHECK(myAdd(5, 3) == 2);
+    CHECK(MiniDetour::ModuleManipulation::ReplaceModuleExports(h, &exportDetails, 1) == 1);
+    libraryAdd = (decltype(libraryAdd))exportDetails.ExportCallAddress;
+    REQUIRE(libraryAdd != nullptr);
 
-            // Test restore
-            CHECK(MiniDetour::ModuleManipulation::RestoreModuleExports(h, &exportDetails, 1) == 1);
+    auto myAdd = ((decltype(libraryAdd))GET_LIBRARY_PROC(h, "add"));
 
-            myAdd = ((decltype(libraryAdd))GET_LIBRARY_PROC(h, "add"));
+    CHECK(libraryAdd(5, 3) == 8);
+    CHECK(myAdd(5, 3) == 2);
 
-            CHECK(libraryAdd(5, 3) == 8);
-            CHECK(myAdd(5, 3) == 8);
-        }
+    // Test restore
+    CHECK(MiniDetour::ModuleManipulation::RestoreModuleExports(h, &exportDetails, 1) == 1);
 
-        FREE_LIBRARY(h);
-    }
+    myAdd = ((decltype(libraryAdd))GET_LIBRARY_PROC(h, "add"));
+
+    CHECK(libraryAdd(5, 3) == 8);
+    CHECK(myAdd(5, 3) == 8);
+
+    FREE_LIBRARY(h);
 }
 
 int AbsoluteJumpWriteTest(int x)
@@ -287,169 +312,17 @@ TEST_CASE("Test absolute jump write", "[absolute_jump_write]")
     SPDLOG_INFO("Test absolute jump write");
     auto allocSize   = MiniDetour::MemoryManipulation::WriteAbsoluteJump(nullptr, nullptr);
     auto jumpAddress = (int (*)(int))MiniDetour::MemoryManipulation::MemoryAlloc(nullptr, allocSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rw);
-    CHECK(jumpAddress != nullptr);
-    if (jumpAddress != nullptr)
-    {
-        if (MiniDetour::MemoryManipulation::WriteAbsoluteJump((void *)jumpAddress, (void *)&AbsoluteJumpWriteTest) &&
-            MiniDetour::MemoryManipulation::MemoryProtect((void *)jumpAddress, allocSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rx))
-        {
-            auto a1 = jumpAddress(2);
-            auto a2 = jumpAddress(3);
-            CHECK(a1 == 10);
-            CHECK(a2 == 15);
-            SPDLOG_INFO("Absolute jump write: {}, {}", a1, a2);
-        }
+    REQUIRE(jumpAddress != nullptr);
+    REQUIRE(MiniDetour::MemoryManipulation::WriteAbsoluteJump((void *)jumpAddress, (void *)&AbsoluteJumpWriteTest) != 0);
+    REQUIRE(MiniDetour::MemoryManipulation::MemoryProtect((void *)jumpAddress, allocSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rx));
 
-        MiniDetour::MemoryManipulation::MemoryFree((void *)jumpAddress, allocSize);
-    }
-}
+    auto a1 = jumpAddress(2);
+    auto a2 = jumpAddress(3);
+    CHECK(a1 == 10);
+    CHECK(a2 == 15);
+    SPDLOG_INFO("Absolute jump write: {}, {}", a1, a2);
 
-TEST_CASE("Memory mappings", "[vmmap]")
-{
-    SPDLOG_INFO("Memory mappings with big enough name space");
-
-    struct RegionInfos : MiniDetour::MemoryManipulation::RegionInfos_t
-    {
-        RegionInfos() { StructSize = sizeof(*this); }
-
-        char extraNameSpace[384];
-    };
-
-    auto regionCount = MiniDetour::MemoryManipulation::GetAllRegions(nullptr, 0);
-    std::vector<RegionInfos> regions(regionCount * 2);
-    regionCount = MiniDetour::MemoryManipulation::GetAllRegions(regions.data(), regions.size());
-    if (regionCount < regions.size())
-        regions.resize(regionCount);
-
-    char rights_str[5] = {'-', '-', '-', '-', '\0'};
-
-    for (auto const &map : regions)
-    {
-        if (map.Rights != MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
-        {
-            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_r)
-                rights_str[0] = 'r';
-            else
-                rights_str[0] = '-';
-
-            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_w)
-                rights_str[1] = 'w';
-            else
-                rights_str[1] = '-';
-
-            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_x)
-                rights_str[2] = 'x';
-            else
-                rights_str[2] = '-';
-
-            rights_str[3] = '-';
-        }
-        else
-        {
-            rights_str[0] = 'f';
-            rights_str[1] = 'r';
-            rights_str[2] = 'e';
-            rights_str[3] = 'e';
-        }
-
-        SPDLOG_INFO("[{:016X}-{:016X}]: [{}] {}", map.Start, map.End, rights_str, map.ModuleName);
-    }
-}
-
-TEST_CASE("Memory mappings with name buffer too small", "[vmmap]")
-{
-    SPDLOG_INFO("Memory mappings with small module name");
-
-    struct RegionInfos : MiniDetour::MemoryManipulation::RegionInfos_t
-    {
-        RegionInfos() { StructSize = sizeof(*this); }
-
-        char extraNameSpace[7];
-    };
-
-    auto regionCount = MiniDetour::MemoryManipulation::GetAllRegions(nullptr, 0);
-    std::vector<RegionInfos> regions(regionCount * 2);
-    regionCount = MiniDetour::MemoryManipulation::GetAllRegions(regions.data(), regions.size());
-    if (regionCount < regions.size())
-        regions.resize(regionCount);
-
-    char rights_str[5] = {'-', '-', '-', '-', '\0'};
-
-    for (auto const &map : regions)
-    {
-        if (map.Rights != MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
-        {
-            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_r)
-                rights_str[0] = 'r';
-            else
-                rights_str[0] = '-';
-
-            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_w)
-                rights_str[1] = 'w';
-            else
-                rights_str[1] = '-';
-
-            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_x)
-                rights_str[2] = 'x';
-            else
-                rights_str[2] = '-';
-
-            rights_str[3] = '-';
-        }
-        else
-        {
-            rights_str[0] = 'f';
-            rights_str[1] = 'r';
-            rights_str[2] = 'e';
-            rights_str[3] = 'e';
-        }
-
-        SPDLOG_INFO("[{:016X}-{:016X}]: [{}] {}", map.Start, map.End, rights_str, map.ModuleName);
-    }
-}
-
-TEST_CASE("Memory mappings with region buffer too small", "[vmmap]")
-{
-    SPDLOG_INFO("Only 5 memory mappings without crash");
-
-    std::vector<MiniDetour::MemoryManipulation::RegionInfos_t> regions(5);
-    auto regionCount = MiniDetour::MemoryManipulation::GetAllRegions(regions.data(), regions.size());
-    if (regionCount < regions.size())
-        regions.resize(regionCount);
-
-    char rights_str[5] = {'-', '-', '-', '-', '\0'};
-
-    for (auto const &map : regions)
-    {
-        if (map.Rights != MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
-        {
-            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_r)
-                rights_str[0] = 'r';
-            else
-                rights_str[0] = '-';
-
-            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_w)
-                rights_str[1] = 'w';
-            else
-                rights_str[1] = '-';
-
-            if (map.Rights & MiniDetour::MemoryManipulation::MemoryRights::mem_x)
-                rights_str[2] = 'x';
-            else
-                rights_str[2] = '-';
-
-            rights_str[3] = '-';
-        }
-        else
-        {
-            rights_str[0] = 'f';
-            rights_str[1] = 'r';
-            rights_str[2] = 'e';
-            rights_str[3] = 'e';
-        }
-
-        SPDLOG_INFO("[{:016X}-{:016X}]: [{}] {}", map.Start, map.End, rights_str, map.ModuleName);
-    }
+    MiniDetour::MemoryManipulation::MemoryFree((void *)jumpAddress, allocSize);
 }
 
 TEST_CASE("Free memory mappings", "[vmmap]")
@@ -699,10 +572,8 @@ TEST_CASE("Hook function", "[Hook function]")
     CHECK(puts_hook.HookFunction((void *)&puts, (void *)&Myputs) != nullptr);
 
     SPDLOG_INFO("Calling original puts...");
-    if (puts_hook.GetOriginalFunction<decltype(puts) *>() != nullptr)
-    {
-        puts_hook.GetOriginalFunction<decltype(puts) *>()("Hooked but call original");
-    }
+    REQUIRE(puts_hook.GetOriginalFunction<decltype(puts) *>() != nullptr);
+    puts_hook.GetOriginalFunction<decltype(puts) *>()("Hooked but call original");
     CHECK(Myputs_called == false);
 
     SPDLOG_INFO("Calling puts...");
@@ -723,7 +594,7 @@ TEST_CASE("Hook function", "[Hook function]")
     SPDLOG_INFO("Hooking do_something...");
     CHECK(do_something_hook.HookFunction((void *)&do_something, (void *)Mydo_something) != nullptr);
 
-    if (do_something_hook.GetOriginalFunction<void *>() != nullptr)
+    REQUIRE(do_something_hook.GetOriginalFunction<void *>() != nullptr);
     {
         int r;
         SPDLOG_INFO("Calling original do_something...");
@@ -745,7 +616,7 @@ TEST_CASE("Hook function", "[Hook function]")
     CHECK(do_something2_ptr(8, 4) == 4);
     CHECK(do_something_hook2.HookFunction((void *)&do_something2, (void *)Mydo_something2) != nullptr);
 
-    if (do_something_hook2.GetOriginalFunction<void *>() != nullptr)
+    REQUIRE(do_something_hook2.GetOriginalFunction<void *>() != nullptr);
     {
         int r;
 
@@ -768,15 +639,19 @@ TEST_CASE("Hook function", "[Hook function]")
 
 #if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
 void (*bkp)();
+static int nothing_calls      = 0;
+static int my_test_func_calls = 0;
 
 void nothing()
 {
     SPDLOG_INFO("Called nothing.");
+    ++nothing_calls;
 }
 
 void my_test_func()
 {
     SPDLOG_INFO("Called my_test_func");
+    ++my_test_func_calls;
     bkp();
 }
 
@@ -801,13 +676,20 @@ TEST_CASE("Hook small function with call", "[Hook function]")
     MiniDetour::Hook_t test_hook;
 
     SPDLOG_INFO("Calling test_func");
+    nothing_calls = 0;
     test_func();
+    CHECK(nothing_calls == 1);
 
     (void *&)bkp = test_hook.HookFunction((void *)test_func, (void *)my_test_func);
     REQUIRE(bkp != nullptr);
 
+    // The detour runs, then the original code through the trampoline, with its relocated call.
     SPDLOG_INFO("Calling test_func");
+    my_test_func_calls = 0;
+    nothing_calls      = 0;
     test_func();
+    CHECK(my_test_func_calls == 1);
+    CHECK(nothing_calls == 1);
 }
 #endif
 
