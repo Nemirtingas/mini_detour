@@ -4,6 +4,7 @@
 #include <sys/mman.h>
 #include <sys/uio.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <errno.h>
 #include <elf.h>
 #include <dlfcn.h>
@@ -373,6 +374,53 @@ static inline size_t _QueryAllocationGranularity()
     return _QueryPageSize();
 }
 
+// process_vm_readv/writev can be missing: qemu user mode doesn't implement them (ENOSYS), and seccomp filters block
+// them (EPERM, Docker's default profile).
+static bool _ProcessVmUnavailable()
+{
+    return errno == ENOSYS || errno == EPERM;
+}
+
+// Copies size bytes through a pipe, which the kernel fills from source and empties into destination: either side
+// that can't be accessed fails with EFAULT instead of crashing. size is at most a page (the copy is done page by page),
+// and a pipe holds at least one page.
+static bool _CopyThroughPipe(void *destination, const void *source, size_t size)
+{
+    int pipeFds[2];
+    if (pipe2(pipeFds, O_CLOEXEC) != 0)
+        return false;
+
+    size_t written = 0;
+    while (written < size)
+    {
+        const ssize_t result = write(pipeFds[1], static_cast<const uint8_t *>(source) + written, size - written);
+        if (result < 0 && errno == EINTR)
+            continue;
+
+        if (result <= 0)
+            break;
+
+        written += static_cast<size_t>(result);
+    }
+
+    size_t copied = 0;
+    while (written == size && copied < size)
+    {
+        const ssize_t result = ::read(pipeFds[0], static_cast<uint8_t *>(destination) + copied, size - copied);
+        if (result < 0 && errno == EINTR)
+            continue;
+
+        if (result <= 0)
+            break;
+
+        copied += static_cast<size_t>(result);
+    }
+
+    close(pipeFds[0]);
+    close(pipeFds[1]);
+    return copied == size;
+}
+
 static bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
 {
     struct iovec local;
@@ -383,10 +431,11 @@ static bool SafeMemoryRead(void *address, uint8_t *buffer, size_t size)
     remote.iov_base = (void *)address;
     remote.iov_len  = size;
 
-    if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != static_cast<ssize_t>(size))
-        return false;
+    const ssize_t result = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
+    if (result < 0 && _ProcessVmUnavailable())
+        return _CopyThroughPipe(buffer, address, size);
 
-    return true;
+    return result == static_cast<ssize_t>(size);
 }
 
 static bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
@@ -399,10 +448,11 @@ static bool SafeMemoryWrite(void *address, const uint8_t *buffer, size_t size)
     remote.iov_base = (void *)address;
     remote.iov_len  = size;
 
-    if (process_vm_writev(getpid(), &local, 1, &remote, 1, 0) != static_cast<ssize_t>(size))
-        return false;
+    const ssize_t result = process_vm_writev(getpid(), &local, 1, &remote, 1, 0);
+    if (result < 0 && _ProcessVmUnavailable())
+        return _CopyThroughPipe(address, buffer, size);
 
-    return true;
+    return result == static_cast<ssize_t>(size);
 }
 
 static int FlushInstructionCache(void *address, size_t size)

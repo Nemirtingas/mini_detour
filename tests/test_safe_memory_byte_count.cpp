@@ -8,15 +8,6 @@
 // They now return the number of bytes copied, the copy stopping at the first page that can't be accessed.
 TEST_CASE("Safe memory copies stop at the first inaccessible page", "[safe_memory_byte_count]")
 {
-    uint8_t probe     = 0x5A;
-    uint8_t probeCopy = 0;
-    if (MiniDetour::MemoryManipulation::SafeMemoryRead(&probe, &probeCopy, 1) != 1)
-    {
-        // qemu user mode doesn't implement process_vm_readv/process_vm_writev.
-        WARN("Safe memory access isn't supported here, test skipped.");
-        return;
-    }
-
     const size_t pageSize = MiniDetour::MemoryManipulation::PageSize();
     auto pages            = static_cast<uint8_t *>(MiniDetour::MemoryManipulation::MemoryAlloc(nullptr, pageSize * 2, MiniDetour::MemoryManipulation::MemoryRights::mem_rw));
     REQUIRE(pages != nullptr);
