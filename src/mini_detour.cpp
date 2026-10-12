@@ -513,19 +513,38 @@ static void _RestoreCodeRights(void *address, size_t size, MiniDetour::MemoryMan
     MiniDetour::MemoryManipulation::MemoryProtect(address, size, oldRights);
 }
 
-// Makes an import table slot (IAT/GOT entry) writable. The other rights of its page are kept: the slot is data,
-// so execution is never added, but it may share a page with code that must stay executable.
-// Not static: macOS doesn't replace imports yet, and an unused static function is a warning.
-inline bool _MakeImportSlotWritable(void *address, size_t size, MiniDetour::MemoryManipulation::MemoryRights *oldRights)
+// Writes an absolute jump in a jump slot, which is read/execute the rest of the time, and flushes it.
+static bool _WriteJumpSlot(void *jump, void *destination, int sourceMode, int destinationMode)
+{
+    const size_t jumpSize = AbsJump::GetMaxOpcodeSize();
+    if (!MiniDetour::MemoryManipulation::MemoryProtect(jump, jumpSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx))
+        return false;
+
+    AbsJump::WriteOpcodes(jump, destination, sourceMode, destinationMode);
+    MiniDetour::MemoryManipulation::MemoryProtect(jump, jumpSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rx);
+    MiniDetour::MemoryManipulation::FlushInstructionCache(jump, jumpSize);
+    return true;
+}
+
+// Writes value in a table entry (import slot, export address) and gives its previous value. The other rights of its
+// page are kept: the entry is data, so execution is never added, but it may share a page with code that must stay
+// executable.
+template <typename T>
+static bool _ExchangeTableEntry(T *entry, T value, T *previous)
 {
     MiniDetour::MemoryManipulation::RegionInfos_t infos;
-    MiniDetour::MemoryManipulation::GetRegionInfos(address, &infos);
+    MiniDetour::MemoryManipulation::GetRegionInfos(entry, &infos);
     if (infos.Rights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
         return false;
 
-    *oldRights  = infos.Rights;
-    auto rights = static_cast<MiniDetour::MemoryManipulation::MemoryRights>(infos.Rights | MiniDetour::MemoryManipulation::MemoryRights::mem_w);
-    return MiniDetour::MemoryManipulation::MemoryProtect(address, size, rights, nullptr);
+    auto writable = static_cast<MiniDetour::MemoryManipulation::MemoryRights>(infos.Rights | MiniDetour::MemoryManipulation::MemoryRights::mem_w);
+    if (!MiniDetour::MemoryManipulation::MemoryProtect(entry, sizeof(*entry), writable))
+        return false;
+
+    *previous = *entry;
+    *entry    = value;
+    MiniDetour::MemoryManipulation::MemoryProtect(entry, sizeof(*entry), infos.Rights);
+    return true;
 }
 
 #if defined(MINIDETOUR_OS_WINDOWS)
@@ -821,17 +840,12 @@ class Hook_t
                 return false;
             }
 
-            if (!MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rwx))
+            if (!_WriteJumpSlot(jump_mem, newFunction, func_mode, hook_mode))
             {
                 GetMemoryManager().FreeJump(jump_mem);
                 _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
                 return false;
             }
-
-            AbsJump::WriteOpcodes(jump_mem, newFunction, func_mode, hook_mode);
-
-            MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rx);
-            MemoryManipulation::FlushInstructionCache(jump_mem, AbsJump::GetMaxOpcodeSize());
 
             if (!freezer.Freeze(functionToReplace, relocatableSize))
             {
@@ -937,18 +951,13 @@ class Hook_t
                 goto error;
             }
 
-            if (!MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rwx))
+            SPDLOG_INFO("Trampoline located at: {}", jump_mem);
+            if (!_WriteJumpSlot(jump_mem, newFunction, func_mode, hook_mode))
             {
                 GetMemoryManager().FreeJump(jump_mem);
                 SPDLOG_ERROR("Failed to protect jump memory.");
                 goto error;
             }
-
-            SPDLOG_INFO("Trampoline located at: {}", jump_mem);
-            AbsJump::WriteOpcodes(jump_mem, newFunction, func_mode, hook_mode);
-
-            MemoryManipulation::MemoryProtect(jump_mem, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rx);
-            MemoryManipulation::FlushInstructionCache(jump_mem, AbsJump::GetMaxOpcodeSize());
 
 #ifdef USE_SPDLOG
             {
@@ -1082,17 +1091,10 @@ class Hook_t
         {
             // Our Hook code has been modified, we have to nullify the hook:
             // the jump to the detour now goes to the original function trampoline, which stays allocated.
-            const size_t jumpSize = AbsJump::GetMaxOpcodeSize();
-            if (!MemoryManipulation::MemoryProtect(_TrampolineAddress, jumpSize, MemoryManipulation::MemoryRights::mem_rwx))
-                return res;
-
             // The jump is reached from the hooked function and goes to its relocated code: both use the function mode.
             const int func_mode = _GetCodeMode(_OriginalTrampolineCallAddress);
-
-            AbsJump::WriteOpcodes(_TrampolineAddress, _OriginalTrampolineAddress, func_mode, func_mode);
-
-            MemoryManipulation::MemoryProtect(_TrampolineAddress, jumpSize, MemoryManipulation::MemoryRights::mem_rx);
-            MemoryManipulation::FlushInstructionCache(_TrampolineAddress, jumpSize);
+            if (!_WriteJumpSlot(_TrampolineAddress, _OriginalTrampolineAddress, func_mode, func_mode))
+                return res;
 
             Reset(false);
             SPDLOG_INFO("Bypassed hook");

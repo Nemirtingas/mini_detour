@@ -543,56 +543,37 @@ static bool _LoadModuleExportDetails(
     return true;
 }
 
-static bool _ReplaceModuleExportInPlace(void *moduleBase, ElfAddr_t *exportAddress, void **exportCallAddress, void *newExportAddress)
+// A new address too far from the module goes through a jump allocated near it.
+static bool _ReplaceModuleExport(void *moduleBase, ElfAddr_t *exportAddress, void *newExportAddress, void **exportCallAddress)
 {
-    MemoryManipulation::MemoryRights oldRights;
+    void *target = newExportAddress;
+    void *jump   = nullptr;
+    if (!_AddressesAreRelativeJumpable(moduleBase, newExportAddress))
+    {
+        jump = GetMemoryManager().GetFreeJump(moduleBase);
+        if (jump == nullptr)
+            return false;
 
-    if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::MemoryRights::mem_rw, &oldRights))
-        goto Error;
+        if (!_WriteJumpSlot(jump, newExportAddress, _GetCodeMode(jump), _GetCodeMode(newExportAddress)))
+        {
+            GetMemoryManager().FreeJump(jump);
+            return false;
+        }
 
-    *exportCallAddress = (void *)((char *)moduleBase + *exportAddress);
-    *exportAddress     = (uintptr_t)newExportAddress - (uintptr_t)moduleBase;
+        target = jump;
+    }
 
-    MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
+    ElfAddr_t previous;
+    if (!_ExchangeTableEntry(exportAddress, static_cast<ElfAddr_t>((uintptr_t)target - (uintptr_t)moduleBase), &previous))
+    {
+        if (jump != nullptr)
+            GetMemoryManager().FreeJump(jump);
 
+        return false;
+    }
+
+    *exportCallAddress = (void *)((uintptr_t)moduleBase + previous);
     return true;
-
-Error:
-    *exportCallAddress = nullptr;
-    return false;
-}
-
-static bool _ReplaceModuleExportWithTrampoline(void *moduleBase, ElfAddr_t *exportAddress, void **exportCallAddress, void *newExportAddress)
-{
-    MemoryManipulation::MemoryRights oldRights;
-
-    auto exportJump = GetMemoryManager().GetFreeJump(moduleBase);
-    if (exportJump == nullptr)
-        goto Error;
-
-    if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::MemoryRights::mem_rw, &oldRights))
-        goto ErrorFree;
-
-    if (!MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rwx, nullptr))
-        goto ErrorFree;
-
-    MemoryManipulation::WriteAbsoluteJump(exportJump, newExportAddress);
-
-    if (exportCallAddress != nullptr)
-        *exportCallAddress = (void *)((char *)moduleBase + *exportAddress);
-
-    *exportAddress = (uintptr_t)exportJump - (uintptr_t)moduleBase;
-
-    MemoryManipulation::MemoryProtect(exportJump, AbsJump::GetMaxOpcodeSize(), MemoryManipulation::MemoryRights::mem_rx, nullptr);
-    MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
-
-    return true;
-
-ErrorFree:
-    GetMemoryManager().FreeJump(exportJump);
-Error:
-    *exportCallAddress = nullptr;
-    return false;
 }
 
 static inline ElfAddr_t *_GetExportAddress(
@@ -852,22 +833,8 @@ static size_t ReplaceModuleExports(void *moduleHandle, ExportReplaceParameter_t 
     {
         auto exportAddress =
             _GetExportAddress(dynamicSymbolsStart, dynamicSymbolsEnd, dynamicSymbolsSize, dynamicSymbolsNames, dynamicSymbolsNamesSize, exportReplaceDetails[i].ExportName);
-        if (exportAddress == nullptr)
-        {
-            exportReplaceDetails[i].ExportCallAddress = nullptr;
-            continue;
-        }
-
-        if (_AddressesAreRelativeJumpable(moduleBase, exportReplaceDetails[i].NewExportAddress))
-        {
-            if (_ReplaceModuleExportInPlace(moduleBase, exportAddress, &exportReplaceDetails[i].ExportCallAddress, exportReplaceDetails[i].NewExportAddress))
-                ++result;
-        }
-        else
-        {
-            if (_ReplaceModuleExportWithTrampoline(moduleBase, exportAddress, &exportReplaceDetails[i].ExportCallAddress, exportReplaceDetails[i].NewExportAddress))
-                ++result;
-        }
+        if (exportAddress != nullptr && _ReplaceModuleExport(moduleBase, exportAddress, exportReplaceDetails[i].NewExportAddress, &exportReplaceDetails[i].ExportCallAddress))
+            ++result;
     }
 
     return result;
@@ -893,26 +860,47 @@ static size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t 
     {
         auto exportAddress =
             _GetExportAddress(dynamicSymbolsStart, dynamicSymbolsEnd, dynamicSymbolsSize, dynamicSymbolsNames, dynamicSymbolsNamesSize, exportReplaceDetails[i].ExportName);
-        if (exportAddress == nullptr)
-        {
-            exportReplaceDetails[i].NewExportAddress = nullptr;
-            continue;
-        }
 
-        MemoryManipulation::MemoryRights oldRights;
-
-        if (!MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), MemoryManipulation::MemoryRights::mem_rw, &oldRights))
+        // Only this entry fails: the next ones can still be restored.
+        ElfAddr_t previous;
+        if (exportAddress == nullptr ||
+            !_ExchangeTableEntry(exportAddress, static_cast<ElfAddr_t>((uintptr_t)exportReplaceDetails[i].ExportCallAddress - (uintptr_t)moduleBase), &previous))
             continue;
 
-        exportReplaceDetails[i].NewExportAddress = (void *)((uintptr_t)*exportAddress + (uintptr_t)moduleBase);
-        auto oldJumpAddress                      = (void *)((uintptr_t)moduleBase + *exportAddress);
-        *exportAddress                           = (uintptr_t)exportReplaceDetails[i].ExportCallAddress - (uintptr_t)moduleBase;
-
-        MemoryManipulation::MemoryProtect(exportAddress, sizeof(*exportAddress), oldRights, nullptr);
-
-        GetMemoryManager().FreeJump(oldJumpAddress);
-
+        exportReplaceDetails[i].NewExportAddress = (void *)((uintptr_t)moduleBase + previous);
+        // Does nothing when the export didn't go through a jump.
+        GetMemoryManager().FreeJump(exportReplaceDetails[i].NewExportAddress);
         ++result;
+    }
+
+    return result;
+}
+
+// ReplaceModuleIATs writes NewIATAddress and gives the previous value in IATCallAddress, RestoreModuleIATs does the
+// opposite: value is the field written, previous the field set.
+static size_t _ExchangeModuleIATs(
+    void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount, void *IATReplaceParameter_t::*value, void *IATReplaceParameter_t::*previous)
+{
+    void *moduleBase = nullptr;
+    ElfSymbol_t *dynamicSymbolsStart;
+    ElfSymbol_t *dynamicSymbolsEnd;
+    size_t dynamicSymbolSize;
+    const char *dynStr;
+    size_t dynStrSize;
+    _ImportRelocations_t relocations;
+    size_t result = 0;
+
+    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+        iatReplaceDetails[i].*previous = nullptr;
+
+    if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &relocations, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolSize, &dynStr, &dynStrSize))
+        return result;
+
+    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
+    {
+        auto iatAddress = _GetIATAddress(moduleBase, relocations, dynamicSymbolsStart, dynamicSymbolSize, dynStr, dynStrSize, iatReplaceDetails[i].IATName);
+        if (iatAddress != nullptr && _ExchangeTableEntry(iatAddress, iatReplaceDetails[i].*value, &(iatReplaceDetails[i].*previous)))
+            ++result;
     }
 
     return result;
@@ -920,86 +908,12 @@ static size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t 
 
 static size_t ReplaceModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
-    void *moduleBase = nullptr;
-    ElfSymbol_t *dynamicSymbolsStart;
-    ElfSymbol_t *dynamicSymbolsEnd;
-    size_t dynamicSymbolSize;
-    const char *dynStr;
-    size_t dynStrSize;
-    _ImportRelocations_t relocations;
-    size_t result = 0;
-
-    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
-        iatReplaceDetails[i].IATCallAddress = nullptr;
-
-    if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &relocations, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolSize, &dynStr, &dynStrSize))
-        return result;
-
-    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
-    {
-        auto iatAddress = _GetIATAddress(moduleBase, relocations, dynamicSymbolsStart, dynamicSymbolSize, dynStr, dynStrSize, iatReplaceDetails[i].IATName);
-        if (iatAddress == nullptr)
-        {
-            iatReplaceDetails[i].IATCallAddress = nullptr;
-            continue;
-        }
-
-        MiniDetour::MemoryManipulation::MemoryRights oldRights;
-        if (!_MakeImportSlotWritable(iatAddress, sizeof(*iatAddress), &oldRights))
-        {
-            iatReplaceDetails[i].IATCallAddress = nullptr;
-            continue;
-        }
-
-        iatReplaceDetails[i].IATCallAddress = *iatAddress;
-        *iatAddress                         = iatReplaceDetails[i].NewIATAddress;
-        MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), oldRights, nullptr);
-        ++result;
-    }
-
-    return result;
+    return _ExchangeModuleIATs(moduleHandle, iatReplaceDetails, iatReplaceDetailsCount, &IATReplaceParameter_t::NewIATAddress, &IATReplaceParameter_t::IATCallAddress);
 }
 
 static size_t RestoreModuleIATs(void *moduleHandle, IATReplaceParameter_t *iatReplaceDetails, size_t iatReplaceDetailsCount)
 {
-    void *moduleBase = nullptr;
-    ElfSymbol_t *dynamicSymbolsStart;
-    ElfSymbol_t *dynamicSymbolsEnd;
-    size_t dynamicSymbolSize;
-    const char *dynStr;
-    size_t dynStrSize;
-    _ImportRelocations_t relocations;
-    size_t result = 0;
-
-    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
-        iatReplaceDetails[i].NewIATAddress = nullptr;
-
-    if (!_LoadModuleIATDetails(moduleHandle, &moduleBase, &relocations, &dynamicSymbolsStart, &dynamicSymbolsEnd, &dynamicSymbolSize, &dynStr, &dynStrSize))
-        return result;
-
-    for (size_t i = 0; i < iatReplaceDetailsCount; ++i)
-    {
-        auto iatAddress = _GetIATAddress(moduleBase, relocations, dynamicSymbolsStart, dynamicSymbolSize, dynStr, dynStrSize, iatReplaceDetails[i].IATName);
-        if (iatAddress == nullptr)
-        {
-            iatReplaceDetails[i].NewIATAddress = nullptr;
-            continue;
-        }
-
-        MiniDetour::MemoryManipulation::MemoryRights oldRights;
-        if (!_MakeImportSlotWritable(iatAddress, sizeof(*iatAddress), &oldRights))
-        {
-            iatReplaceDetails[i].NewIATAddress = nullptr;
-            continue;
-        }
-
-        iatReplaceDetails[i].NewIATAddress = *iatAddress;
-        *iatAddress                        = iatReplaceDetails[i].IATCallAddress;
-        MiniDetour::MemoryManipulation::MemoryProtect(iatAddress, sizeof(*iatAddress), oldRights, nullptr);
-        ++result;
-    }
-
-    return result;
+    return _ExchangeModuleIATs(moduleHandle, iatReplaceDetails, iatReplaceDetailsCount, &IATReplaceParameter_t::IATCallAddress, &IATReplaceParameter_t::NewIATAddress);
 }
 
 } // namespace Implementation
