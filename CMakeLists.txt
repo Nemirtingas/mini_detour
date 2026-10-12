@@ -311,6 +311,12 @@ if(MINIDETOUR_BUILD_TESTS)
     target_link_options(tests PRIVATE /CETCOMPAT)
   endif()
 
+  # A 64 bits executable has a 4 GB __PAGEZERO on macOS: nothing can be allocated below 4 GB, which some x64 tests need
+  # (return addresses between 2 and 4 GB). The tests are linked with a 64 KB one instead.
+  if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    target_link_options(tests PRIVATE -Wl,-pagezero_size,0x10000)
+  endif()
+
 endif()
 
 add_library(Nemirtingas::MiniDetour ALIAS mini_detour)

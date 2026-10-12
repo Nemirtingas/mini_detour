@@ -53,12 +53,9 @@ static void FreeBetween2And4GB(uint8_t *memory, size_t size)
 TEST_CASE("Relocated call returns to an address between 2 and 4 GB", "[x64_push]")
 {
     const size_t size = 4096;
-    uint8_t *code     = AllocBetween2And4GB(size);
-    if (code == nullptr)
-    {
-        WARN("Couldn't allocate memory between 2 and 4 GB, test skipped.");
-        return;
-    }
+    // On macOS, the tests are linked with a small __PAGEZERO for it.
+    uint8_t *code = AllocBetween2And4GB(size);
+    REQUIRE(code != nullptr);
 
     const size_t calleeOffset = 32;
     const uint8_t function[]  = {
