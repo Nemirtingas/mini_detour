@@ -235,6 +235,64 @@ class _OtherThreadsFreezer_t
     }
 };
 
+// Calls callback(loadCommand) for the load commands of an image, until it returns false.
+template <typename Callback>
+static void _ForEachLoadCommand(const MachHeader_t *header, Callback callback)
+{
+    auto loadCommand = reinterpret_cast<const LoadCommand_t *>(header + 1);
+    for (uint32_t i = 0; i < header->ncmds; ++i, loadCommand = reinterpret_cast<const LoadCommand_t *>(reinterpret_cast<uintptr_t>(loadCommand) + loadCommand->cmdsize))
+    {
+        if (!callback(loadCommand))
+            return;
+    }
+}
+
+// First load command of an image with this cmd, nullptr if it has none.
+template <typename Command>
+static const Command *_FindLoadCommand(const MachHeader_t *header, uint32_t cmd)
+{
+    const Command *result = nullptr;
+    _ForEachLoadCommand(
+        header,
+        [&](const LoadCommand_t *loadCommand)
+        {
+            if (loadCommand->cmd != cmd)
+                return true;
+
+            result = reinterpret_cast<const Command *>(loadCommand);
+            return false;
+        });
+
+    return result;
+}
+
+// Segment of an image by name, nullptr if it has none.
+static const SegmentCommand_t *_FindSegment(const MachHeader_t *header, const char *name)
+{
+    const SegmentCommand_t *result = nullptr;
+    _ForEachLoadCommand(
+        header,
+        [&](const LoadCommand_t *loadCommand)
+        {
+            auto segment = reinterpret_cast<const SegmentCommand_t *>(loadCommand);
+            if (loadCommand->cmd != LC_SEGMENT_ARCH || strncmp(segment->segname, name, sizeof(segment->segname)) != 0)
+                return true;
+
+            result = segment;
+            return false;
+        });
+
+    return result;
+}
+
+// Where the file offsets of the __LINKEDIT data (symbol tables, export trie) are mapped, 0 without __LINKEDIT. Images in
+// the shared cache too: their __LINKEDIT is mapped, at the link address of the cache plus its slide.
+static uintptr_t _GetLinkEditBase(const MachHeader_t *header, uintptr_t slide)
+{
+    const SegmentCommand_t *linkEdit = _FindSegment(header, SEG_LINKEDIT);
+    return linkEdit != nullptr ? slide + linkEdit->vmaddr - linkEdit->fileoff : 0;
+}
+
 namespace MiniDetour
 {
 namespace MemoryManipulation
@@ -278,24 +336,8 @@ static mach_vm_address_t _PageZeroEnd()
     if (header == nullptr)
         return 0;
 
-    auto loadCommand = reinterpret_cast<const LoadCommand_t *>(header + 1);
-    for (uint32_t i = 0; i < header->ncmds; ++i, loadCommand = reinterpret_cast<const LoadCommand_t *>(reinterpret_cast<uintptr_t>(loadCommand) + loadCommand->cmdsize))
-    {
-        if (loadCommand->cmd == LC_SEGMENT_64)
-        {
-            auto segment = reinterpret_cast<const segment_command_64 *>(loadCommand);
-            if (strncmp(segment->segname, SEG_PAGEZERO, sizeof(segment->segname)) == 0)
-                return segment->vmaddr + segment->vmsize + _dyld_get_image_vmaddr_slide(imageIndex);
-        }
-        else if (loadCommand->cmd == LC_SEGMENT)
-        {
-            auto segment = reinterpret_cast<const segment_command *>(loadCommand);
-            if (strncmp(segment->segname, SEG_PAGEZERO, sizeof(segment->segname)) == 0)
-                return segment->vmaddr + segment->vmsize + _dyld_get_image_vmaddr_slide(imageIndex);
-        }
-    }
-
-    return 0;
+    const SegmentCommand_t *pageZero = _FindSegment(header, SEG_PAGEZERO);
+    return pageZero != nullptr ? pageZero->vmaddr + pageZero->vmsize + _dyld_get_image_vmaddr_slide(imageIndex) : 0;
 }
 
 static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
@@ -590,69 +632,16 @@ static bool _FindLoadedImage(void *moduleHandle, const MachHeader_t **header, ui
 static bool _LoadModuleExportDetails(void *moduleHandle, uintptr_t *slide, NList_t **dynamicSymbols, const char **dynamicSymbolsNames, uint32_t *dynamicSymbolsCount)
 {
     const MachHeader_t *machHeader;
-    if (!_FindLoadedImage(moduleHandle, &machHeader, nullptr))
+    if (!_FindLoadedImage(moduleHandle, &machHeader, slide))
         return false;
 
-    const void *foundModuleBase = machHeader;
-
-    bool fromSharedCache = machHeader->flags & MH_DYLIB_IN_CACHE;
-    if (fromSharedCache) // TODO: Handle shared cache
+    if (machHeader->flags & MH_DYLIB_IN_CACHE) // TODO: Handle shared cache
         return false;
 
-    LoadCommand_t *loadCommandStart = (LoadCommand_t *)(((uintptr_t)foundModuleBase) + sizeof(*machHeader));
-    LoadCommand_t *loadCommandEnd   = (LoadCommand_t *)(((uintptr_t)loadCommandStart) + machHeader->sizeofcmds);
-
-    SymTabCommand_t *symTabCommand = nullptr;
-    bool hasText                   = false;
-    bool hasLinkEdit               = false;
-    uintptr_t textVmAddr           = 0;
-    uintptr_t linkEditVmAddr       = 0;
-    uintptr_t linkEditFileOffset   = 0;
-
-    for (auto *loadCommand = loadCommandStart; loadCommand < loadCommandEnd; loadCommand = (LoadCommand_t *)((uintptr_t)loadCommand + loadCommand->cmdsize))
-    {
-        const char *segmentName = nullptr;
-        uintptr_t vmAddr        = 0;
-        uintptr_t fileOffset    = 0;
-        if (loadCommand->cmd == LC_SYMTAB)
-        {
-            symTabCommand = (SymTabCommand_t *)loadCommand;
-        }
-        else if (loadCommand->cmd == LC_SEGMENT)
-        {
-            segmentName = ((segment_command *)loadCommand)->segname;
-            vmAddr      = ((segment_command *)loadCommand)->vmaddr;
-            fileOffset  = ((segment_command *)loadCommand)->fileoff;
-        }
-        else if (loadCommand->cmd == LC_SEGMENT_64)
-        {
-            segmentName = ((segment_command_64 *)loadCommand)->segname;
-            vmAddr      = ((segment_command_64 *)loadCommand)->vmaddr;
-            fileOffset  = ((segment_command_64 *)loadCommand)->fileoff;
-        }
-
-        if (segmentName == nullptr)
-            continue;
-
-        if (strncmp(segmentName, SEG_TEXT, sizeof(segment_command::segname)) == 0)
-        {
-            hasText    = true;
-            textVmAddr = vmAddr;
-        }
-        else if (strncmp(segmentName, SEG_LINKEDIT, sizeof(segment_command::segname)) == 0)
-        {
-            hasLinkEdit        = true;
-            linkEditVmAddr     = vmAddr;
-            linkEditFileOffset = fileOffset;
-        }
-    }
-
-    if (symTabCommand == nullptr || !hasText || !hasLinkEdit)
+    const SymTabCommand_t *symTabCommand = _FindLoadCommand<SymTabCommand_t>(machHeader, LC_SYMTAB);
+    const uintptr_t linkEditBase         = _GetLinkEditBase(machHeader, *slide);
+    if (symTabCommand == nullptr || linkEditBase == 0)
         return false;
-
-    // The header is at the start of __TEXT. Its link address is 0 for a dylib, but not for an executable (0x100000000).
-    *slide                       = (uintptr_t)foundModuleBase - textVmAddr;
-    const uintptr_t linkEditBase = *slide + linkEditVmAddr - linkEditFileOffset;
 
     *dynamicSymbols      = (NList_t *)(linkEditBase + symTabCommand->symoff);
     *dynamicSymbolsNames = (const char *)(linkEditBase + symTabCommand->stroff);
@@ -672,33 +661,25 @@ static size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportD
     if (!_LoadModuleExportDetails(moduleHandle, &slide, &dynamicSymbols, &dynamicSymbolsNames, &dynamicSymbolsCount))
         return result;
 
-    if (exportDetails == nullptr)
+    // Without exportDetails, the exports are only counted. The undefined external symbols are the imports.
+    for (uint32_t i = 0; i < dynamicSymbolsCount; ++i)
     {
-        for (uint32_t i = 0; i < dynamicSymbolsCount; ++i)
-            if (dynamicSymbols[i].n_type & N_EXT && (dynamicSymbols[i].n_type & N_TYPE) != N_UNDF)
-                ++result;
-
-        return result;
-    }
-
-    SPDLOG_INFO("{} - slide {:x}", moduleHandle, slide);
-    for (uint32_t i = 0; i < dynamicSymbolsCount && result < exportDetailsCount; ++i)
-    {
-        if (!(dynamicSymbols[i].n_type & N_EXT))
+        if (!(dynamicSymbols[i].n_type & N_EXT) || (dynamicSymbols[i].n_type & N_TYPE) == N_UNDF)
             continue;
 
-        // uint8_t type = dynamicSymbols[i].n_type & N_TYPE;
-        //  If type == N_INDR, might need to do some extra work to figure its address.
-        SPDLOG_INFO("{} - ext: {}, type: {}", dynamicSymbolsNames + dynamicSymbols[i].n_un.n_strx, dynamicSymbols[i].n_type & N_EXT, dynamicSymbols[i].n_type & N_TYPE);
+        if (exportDetails != nullptr)
+        {
+            if (result >= exportDetailsCount)
+                break;
 
-        if ((dynamicSymbols[i].n_type & N_TYPE) == N_UNDF)
-            continue;
+            // C symbols start with '_' on macOS.
+            const char *symbolName                  = dynamicSymbolsNames + dynamicSymbols[i].n_un.n_strx;
+            exportDetails[result].ExportName        = symbolName[0] == '_' ? symbolName + 1 : symbolName;
+            exportDetails[result].ExportCallAddress = (void *)(slide + dynamicSymbols[i].n_value);
+            exportDetails[result].ExportOrdinal     = i;
+        }
 
-        // C symbols start with '_' on macOS.
-        const char *symbolName                  = dynamicSymbolsNames + dynamicSymbols[i].n_un.n_strx;
-        exportDetails[result].ExportName        = symbolName[0] == '_' ? symbolName + 1 : symbolName;
-        exportDetails[result].ExportCallAddress = (void *)(slide + dynamicSymbols[i].n_value);
-        exportDetails[result++].ExportOrdinal   = i;
+        ++result;
     }
 
     return result;
@@ -726,100 +707,91 @@ static bool _ForEachImportSlot(void *moduleHandle, Callback callback)
     if (!_FindLoadedImage(moduleHandle, &header, &slide))
         return false;
 
-    const SymTabCommand_t *symTab    = nullptr;
-    const dysymtab_command *dySymTab = nullptr;
-    const SegmentCommand_t *linkEdit = nullptr;
     // Library ordinals are 8 bits, starting at 1, in the order of the dylib load commands.
     const char *libraries[256];
     uint32_t libraryCount = 0;
-
-    const LoadCommand_t *loadCommandStart = reinterpret_cast<const LoadCommand_t *>(header + 1);
-    const LoadCommand_t *loadCommandEnd   = reinterpret_cast<const LoadCommand_t *>(reinterpret_cast<uintptr_t>(loadCommandStart) + header->sizeofcmds);
-    for (auto *loadCommand = loadCommandStart; loadCommand < loadCommandEnd;
-         loadCommand       = reinterpret_cast<const LoadCommand_t *>(reinterpret_cast<uintptr_t>(loadCommand) + loadCommand->cmdsize))
-    {
-        switch (loadCommand->cmd)
+    _ForEachLoadCommand(
+        header,
+        [&](const LoadCommand_t *loadCommand)
         {
-            case LC_SYMTAB: symTab = reinterpret_cast<const SymTabCommand_t *>(loadCommand); break;
-            case LC_DYSYMTAB: dySymTab = reinterpret_cast<const dysymtab_command *>(loadCommand); break;
-            case LC_SEGMENT_ARCH:
+            switch (loadCommand->cmd)
             {
-                auto segment = reinterpret_cast<const SegmentCommand_t *>(loadCommand);
-                if (strncmp(segment->segname, SEG_LINKEDIT, sizeof(segment->segname)) == 0)
-                    linkEdit = segment;
+                case LC_LOAD_DYLIB:
+                case LC_LOAD_WEAK_DYLIB:
+                case LC_REEXPORT_DYLIB:
+                case LC_LOAD_UPWARD_DYLIB:
+                case LC_LAZY_LOAD_DYLIB:
+                {
+                    auto dylib = reinterpret_cast<const dylib_command *>(loadCommand);
+                    if (libraryCount < sizeof(libraries) / sizeof(*libraries))
+                        libraries[libraryCount++] = reinterpret_cast<const char *>(dylib) + dylib->dylib.name.offset;
 
-                break;
+                    break;
+                }
             }
-            case LC_LOAD_DYLIB:
-            case LC_LOAD_WEAK_DYLIB:
-            case LC_REEXPORT_DYLIB:
-            case LC_LOAD_UPWARD_DYLIB:
-            case LC_LAZY_LOAD_DYLIB:
-            {
-                auto dylib = reinterpret_cast<const dylib_command *>(loadCommand);
-                if (libraryCount < sizeof(libraries) / sizeof(*libraries))
-                    libraries[libraryCount++] = reinterpret_cast<const char *>(dylib) + dylib->dylib.name.offset;
 
-                break;
-            }
-        }
-    }
+            return true;
+        });
 
-    // Images in the shared cache too: their __LINKEDIT is mapped, at the link address of the cache plus its slide.
-    if (symTab == nullptr || dySymTab == nullptr || linkEdit == nullptr)
+    const SymTabCommand_t *symTab    = _FindLoadCommand<SymTabCommand_t>(header, LC_SYMTAB);
+    const dysymtab_command *dySymTab = _FindLoadCommand<dysymtab_command>(header, LC_DYSYMTAB);
+    const uintptr_t linkEditBase     = _GetLinkEditBase(header, slide);
+    if (symTab == nullptr || dySymTab == nullptr || linkEditBase == 0)
         return false;
 
-    const uintptr_t linkEditBase    = slide + linkEdit->vmaddr - linkEdit->fileoff;
     const NList_t *symbols          = reinterpret_cast<const NList_t *>(linkEditBase + symTab->symoff);
     const char *symbolNames         = reinterpret_cast<const char *>(linkEditBase + symTab->stroff);
     const uint32_t *indirectSymbols = reinterpret_cast<const uint32_t *>(linkEditBase + dySymTab->indirectsymoff);
 
-    for (auto *loadCommand = loadCommandStart; loadCommand < loadCommandEnd;
-         loadCommand       = reinterpret_cast<const LoadCommand_t *>(reinterpret_cast<uintptr_t>(loadCommand) + loadCommand->cmdsize))
-    {
-        if (loadCommand->cmd != LC_SEGMENT_ARCH)
-            continue;
-
-        auto segment  = reinterpret_cast<const SegmentCommand_t *>(loadCommand);
-        auto sections = reinterpret_cast<const Section_t *>(segment + 1);
-        for (uint32_t i = 0; i < segment->nsects; ++i)
+    _ForEachLoadCommand(
+        header,
+        [&](const LoadCommand_t *loadCommand)
         {
-            const Section_t &section = sections[i];
-            const uint32_t type      = section.flags & SECTION_TYPE;
-            if (type != S_LAZY_SYMBOL_POINTERS && type != S_NON_LAZY_SYMBOL_POINTERS)
-                continue;
+            if (loadCommand->cmd != LC_SEGMENT_ARCH)
+                return true;
 
-            void **slots = reinterpret_cast<void **>(slide + section.addr);
-            for (size_t j = 0; j < section.size / sizeof(void *); ++j)
+            auto segment  = reinterpret_cast<const SegmentCommand_t *>(loadCommand);
+            auto sections = reinterpret_cast<const Section_t *>(segment + 1);
+            for (uint32_t i = 0; i < segment->nsects; ++i)
             {
-                const uint32_t indirectIndex = section.reserved1 + static_cast<uint32_t>(j);
-                if (indirectIndex >= dySymTab->nindirectsyms)
-                    break;
-
-                // Local and absolute entries aren't imports.
-                const uint32_t symbolIndex = indirectSymbols[indirectIndex];
-                if ((symbolIndex & (INDIRECT_SYMBOL_LOCAL | INDIRECT_SYMBOL_ABS)) != 0 || symbolIndex >= symTab->nsyms)
+                const Section_t &section = sections[i];
+                const uint32_t type      = section.flags & SECTION_TYPE;
+                if (type != S_LAZY_SYMBOL_POINTERS && type != S_NON_LAZY_SYMBOL_POINTERS)
                     continue;
 
-                const NList_t &symbol = symbols[symbolIndex];
-                if (symbol.n_un.n_strx >= symTab->strsize)
-                    continue;
+                void **slots = reinterpret_cast<void **>(slide + section.addr);
+                for (size_t j = 0; j < section.size / sizeof(void *); ++j)
+                {
+                    const uint32_t indirectIndex = section.reserved1 + static_cast<uint32_t>(j);
+                    if (indirectIndex >= dySymTab->nindirectsyms)
+                        break;
 
-                const char *name = symbolNames + symbol.n_un.n_strx;
-                if (name[0] == '_')
-                    ++name;
+                    // Local and absolute entries aren't imports.
+                    const uint32_t symbolIndex = indirectSymbols[indirectIndex];
+                    if ((symbolIndex & (INDIRECT_SYMBOL_LOCAL | INDIRECT_SYMBOL_ABS)) != 0 || symbolIndex >= symTab->nsyms)
+                        continue;
 
-                const uint32_t ordinal = GET_LIBRARY_ORDINAL(symbol.n_desc);
-                _ImportSlot_t importSlot;
-                importSlot.Name       = name;
-                importSlot.ModuleName = ordinal >= 1 && ordinal <= libraryCount ? libraries[ordinal - 1] : "";
-                importSlot.Slot       = slots + j;
-                importSlot.Lazy       = type == S_LAZY_SYMBOL_POINTERS;
-                if (!callback(importSlot))
-                    return true;
+                    const NList_t &symbol = symbols[symbolIndex];
+                    if (symbol.n_un.n_strx >= symTab->strsize)
+                        continue;
+
+                    const char *name = symbolNames + symbol.n_un.n_strx;
+                    if (name[0] == '_')
+                        ++name;
+
+                    const uint32_t ordinal = GET_LIBRARY_ORDINAL(symbol.n_desc);
+                    _ImportSlot_t importSlot;
+                    importSlot.Name       = name;
+                    importSlot.ModuleName = ordinal >= 1 && ordinal <= libraryCount ? libraries[ordinal - 1] : "";
+                    importSlot.Slot       = slots + j;
+                    importSlot.Lazy       = type == S_LAZY_SYMBOL_POINTERS;
+                    if (!callback(importSlot))
+                        return false;
+                }
             }
-        }
-    }
+
+            return true;
+        });
 
     return true;
 }
@@ -888,6 +860,13 @@ struct _ExportTrie_t
     uintptr_t PaddingEnd;
 };
 
+// LC_DYLD_INFO_ONLY, or LC_DYLD_INFO for old images.
+static const dyld_info_command *_FindDyldInfo(const MachHeader_t *header)
+{
+    auto dyldInfo = _FindLoadCommand<dyld_info_command>(header, LC_DYLD_INFO_ONLY);
+    return dyldInfo != nullptr ? dyldInfo : _FindLoadCommand<dyld_info_command>(header, LC_DYLD_INFO);
+}
+
 static bool _GetExportTrie(void *moduleHandle, _ExportTrie_t *exportTrie)
 {
     const MachHeader_t *header;
@@ -895,61 +874,44 @@ static bool _GetExportTrie(void *moduleHandle, _ExportTrie_t *exportTrie)
     if (!_FindLoadedImage(moduleHandle, &header, &slide))
         return false;
 
-    exportTrie->Base         = reinterpret_cast<uintptr_t>(header);
-    exportTrie->PaddingStart = reinterpret_cast<uintptr_t>(header + 1) + header->sizeofcmds;
-    exportTrie->PaddingEnd   = 0;
-
     uint32_t trieOffset = 0;
     uint32_t trieSize   = 0;
-    bool hasLinkEdit    = false;
-    uintptr_t linkEdit  = 0;
-
-    auto loadCommand = reinterpret_cast<const LoadCommand_t *>(header + 1);
-    for (uint32_t i = 0; i < header->ncmds; ++i, loadCommand = reinterpret_cast<const LoadCommand_t *>(reinterpret_cast<uintptr_t>(loadCommand) + loadCommand->cmdsize))
+    if (auto exportsTrie = _FindLoadCommand<linkedit_data_command>(header, LC_DYLD_EXPORTS_TRIE))
     {
-        switch (loadCommand->cmd)
-        {
-            case LC_DYLD_EXPORTS_TRIE:
-                trieOffset = reinterpret_cast<const linkedit_data_command *>(loadCommand)->dataoff;
-                trieSize   = reinterpret_cast<const linkedit_data_command *>(loadCommand)->datasize;
-                break;
-
-            case LC_DYLD_INFO:
-            case LC_DYLD_INFO_ONLY:
-                trieOffset = reinterpret_cast<const dyld_info_command *>(loadCommand)->export_off;
-                trieSize   = reinterpret_cast<const dyld_info_command *>(loadCommand)->export_size;
-                break;
-
-            case LC_SEGMENT_ARCH:
-            {
-                auto segment = reinterpret_cast<const SegmentCommand_t *>(loadCommand);
-                if (strncmp(segment->segname, SEG_LINKEDIT, sizeof(segment->segname)) == 0)
-                {
-                    hasLinkEdit = true;
-                    linkEdit    = slide + segment->vmaddr - segment->fileoff;
-                }
-                else if (strncmp(segment->segname, SEG_TEXT, sizeof(segment->segname)) == 0)
-                {
-                    auto sections = reinterpret_cast<const Section_t *>(segment + 1);
-                    for (uint32_t j = 0; j < segment->nsects; ++j)
-                    {
-                        const uintptr_t sectionStart = slide + sections[j].addr;
-                        if (sections[j].size != 0 && (exportTrie->PaddingEnd == 0 || sectionStart < exportTrie->PaddingEnd))
-                            exportTrie->PaddingEnd = sectionStart;
-                    }
-                }
-                break;
-            }
-        }
+        trieOffset = exportsTrie->dataoff;
+        trieSize   = exportsTrie->datasize;
+    }
+    else if (auto dyldInfo = _FindDyldInfo(header))
+    {
+        trieOffset = dyldInfo->export_off;
+        trieSize   = dyldInfo->export_size;
     }
 
-    if (!hasLinkEdit || trieSize == 0)
+    const uintptr_t linkEditBase = _GetLinkEditBase(header, slide);
+    if (linkEditBase == 0 || trieSize == 0)
         return false;
 
-    exportTrie->Start = reinterpret_cast<uint8_t *>(linkEdit + trieOffset);
+    exportTrie->Base  = reinterpret_cast<uintptr_t>(header);
+    exportTrie->Start = reinterpret_cast<uint8_t *>(linkEditBase + trieOffset);
     exportTrie->End   = exportTrie->Start + trieSize;
-    if (exportTrie->PaddingEnd < exportTrie->PaddingStart)
-        exportTrie->PaddingEnd = exportTrie->PaddingStart;
+
+    // The padding goes from the end of the load commands to the first section of __TEXT.
+    exportTrie->PaddingStart = reinterpret_cast<uintptr_t>(header + 1) + header->sizeofcmds;
+    exportTrie->PaddingEnd   = exportTrie->PaddingStart;
+    if (const SegmentCommand_t *text = _FindSegment(header, SEG_TEXT))
+    {
+        uintptr_t firstSection = 0;
+        auto sections          = reinterpret_cast<const Section_t *>(text + 1);
+        for (uint32_t i = 0; i < text->nsects; ++i)
+        {
+            const uintptr_t sectionStart = slide + sections[i].addr;
+            if (sections[i].size != 0 && (firstSection == 0 || sectionStart < firstSection))
+                firstSection = sectionStart;
+        }
+
+        if (firstSection > exportTrie->PaddingStart)
+            exportTrie->PaddingEnd = firstSection;
+    }
 
     return true;
 }
