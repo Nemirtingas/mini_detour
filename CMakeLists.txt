@@ -217,6 +217,20 @@ if(MINIDETOUR_BUILD_TESTS)
     target_compile_options(no_plt_test_library PRIVATE -fno-plt)
   endif()
 
+  if(APPLE)
+    # The same library with the two kinds of import binding: built for an old macOS, its imports are lazy symbol
+    # pointers bound by dyld on the first call; built for macOS 12, they are non lazy pointers set by chained fixups.
+    foreach(binding lazy:10.15 chained:12.0)
+      string(REPLACE ":" ";" binding "${binding}")
+      list(GET binding 0 bindingName)
+      list(GET binding 1 bindingMacosVersion)
+
+      minidetour_add_test_library(macos_${bindingName}_import_test_library tests/macos_import_test_library.c)
+      target_compile_options(macos_${bindingName}_import_test_library PRIVATE -mmacosx-version-min=${bindingMacosVersion})
+      target_link_options(macos_${bindingName}_import_test_library PRIVATE -mmacosx-version-min=${bindingMacosVersion})
+    endforeach()
+  endif()
+
   # Same library, with logs.
   minidetour_add_library(mini_detour_test)
 
