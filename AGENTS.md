@@ -77,10 +77,10 @@ cmake --build build --parallel 4
 ## Architecture rules
 
 ### What each header provides
-- An architecture header defines: `memory_t` (trampoline slot), `AbsJump`, `RelJump` (`WriteOpcodes`,
+- An architecture header defines: `TrampolineSlot_t`, `AbsJump_t`, `RelJump_t` (`WriteOpcodes`,
   `GetOpcodeSize`, `constexpr GetMaxOpcodeSize`), `_AddressesAreRelativeJumpable`, `_GetCodeMode`, `_GetCodeAddress`,
   `_GetCallAddress`, `_InitDisasm`, `_EnterRecursiveThunk`, `_GetRelocatableSize`, `_RelocateCode`.
-- A platform header defines `_OtherThreadsFreezer_t` (`Freeze`, `Unfreeze`), the `_Query*` functions used by
+- A platform header defines `OtherThreadsFreezer_t` (`Freeze`, `Unfreeze`), the `_Query*` functions used by
   `Globals_t`, the `MemoryManipulation::Implementation` entry points (`GetRegionInfos`, `GetAllRegions`,
   `GetFreeRegions`, `MemoryProtect`, `MemoryFree`, `_MemoryAllocAt`, `_MemoryAllocAnywhere`, `SafeMemoryRead`,
   `SafeMemoryWrite`, `FlushInstructionCache`) and the `ModuleManipulation::Implementation` ones
@@ -97,8 +97,8 @@ cmake --build build --parallel 4
 ### Writing code and tables
 - Code the library owns (jump slots, trampolines) comes from `AllocCode` and is only written between
   `BeginCodeWrite` and `EndCodeWrite` (which flushes the instruction cache).
-- Code the library doesn't own (the hooked function) is written through `_FunctionCodeWriter`: `Prepare` (may
-  allocate), then `Write` while `_OtherThreadsFreezer_t` holds the other threads, then `Finish`. It keeps the original
+- Code the library doesn't own (the hooked function) is written through `FunctionCodeWriter_t`: `Prepare` (may
+  allocate), then `Write` while `OtherThreadsFreezer_t` holds the other threads, then `Finish`. It keeps the original
   rights of the page.
 - Never make code `mem_rwx` with `MemoryProtect` directly: Apple Silicon and the hardened runtime refuse writable and
   executable memory.
@@ -112,7 +112,7 @@ cmake --build build --parallel 4
 - Refusing to hook is always better than generating wrong code: a relocation handles, or explicitly refuses, every
   instruction form it can meet. An instruction that can't be copied as is (IP-relative, branch) is rewritten by a
   dedicated case or stops the relocation.
-- Never write past a slot: trampolines fit in the slot data, jumps in `AbsJump::GetMaxOpcodeSize()`, code reads in
+- Never write past a slot: trampolines fit in the slot data, jumps in `AbsJump_t::GetMaxOpcodeSize()`, code reads in
   the local buffers. Reading code near the end of a mapping goes through `_ReadCode` (safe read).
 - Following thunks is bounded (8 jumps): a thunk jumping to itself must not hang.
 - Check every OS return value (`mmap` gives `MAP_FAILED`, `VirtualAlloc` `nullptr`, `mach_vm_*` a `kern_return_t`).
@@ -191,7 +191,7 @@ cmake --build build --parallel 4
 - `#if defined(MINIDETOUR_OS_*)` / `MINIDETOUR_ARCH_*` for platforms, `#ifdef` for feature macros (`USE_SPDLOG`).
 - Early returns, no `goto`.
 - No magic numbers: encodings carry a comment giving the instruction (`0xE9 // jmp rel32`), and flags or kinds get
-  named constants (an enum of bits for the jump kinds returned by `CodeDisasm::GetJumpType`).
+  named constants (an enum of bits for the jump kinds returned by `CodeDisasm_t::GetJumpType`).
 - Functions and types local to the library are `static` (`static inline` is fine).
 
 ### Naming
@@ -232,7 +232,7 @@ cmake --build build --parallel 4
   time. Build a deterministic layout rather than replacing an assertion with a conditional `WARN`: a `WARN` is only
   for a limit of the environment the test can't control (qemu hiding its own mappings).
 - `REQUIRE` for preconditions (library loaded, buffer allocated), `CHECK` for the behavior.
-- Hand-written code goes through `CodeBuffer` and `GeneratedCode` (`tests/test_utils.h`): never writable and
+- Hand-written code goes through `CodeBuffer_t` and `GeneratedCode` (`tests/test_utils.h`): never writable and
   executable memory, Thumb addresses through `GeneratedCode::FunctionAddress`.
 - A test replacing a system function forwards to the real one (taken from the loader), and calls the replaced imports
   itself through a `noinline` helper, so the optimizer keeps the import.
