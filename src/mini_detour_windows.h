@@ -262,12 +262,15 @@ static void _GetRegionName(std::wstring &wmodule_name, void *address, char *regi
     if (regionNameSize == 1)
         return;
 
-    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCWSTR)address, &moduleHandle) != FALSE &&
+    if (Globals_t::Instance().ModuleFunctions.GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+            static_cast<LPCSTR>(address),
+            &moduleHandle) != FALSE &&
         moduleHandle != nullptr)
     {
         while (wmodule_name_size != 0)
         {
-            wmodule_name_size = GetModuleFileNameW(moduleHandle, &wmodule_name[0], static_cast<DWORD>(wmodule_name.size()));
+            wmodule_name_size = Globals_t::Instance().ModuleFunctions.GetModuleFileNameW(moduleHandle, &wmodule_name[0], static_cast<DWORD>(wmodule_name.size()));
             if (wmodule_name_size == wmodule_name.size())
             {
                 if (wmodule_name_size > 0x100000)
@@ -567,6 +570,18 @@ namespace ModuleManipulation
 {
 namespace Implementation
 {
+// Their addresses are asked to the loader when the library starts: see ModuleFunctions_t. Not &GetProcAddress: the
+// address of an imported function is the thunk of the image (jmp [import slot]) when it isn't declared dllimport.
+static ModuleFunctions_t _QueryModuleFunctions()
+{
+    HMODULE kernel32 = ::GetModuleHandleW(L"kernel32.dll");
+    ModuleFunctions_t functions;
+    functions.GetModuleHandleExA = reinterpret_cast<decltype(functions.GetModuleHandleExA)>(::GetProcAddress(kernel32, "GetModuleHandleExA"));
+    functions.GetProcAddress     = reinterpret_cast<decltype(functions.GetProcAddress)>(::GetProcAddress(kernel32, "GetProcAddress"));
+    functions.GetModuleFileNameW = reinterpret_cast<decltype(functions.GetModuleFileNameW)>(::GetProcAddress(kernel32, "GetModuleFileNameW"));
+    return functions;
+}
+
 // RVAs are unsigned 32 bits offsets from the module base: the address must be above it and within 4 GB of it.
 static bool _AddressIsRepresentableAsRva(void *moduleBase, void *address)
 {
@@ -684,11 +699,12 @@ static inline void **_FindBoundIATSlot(void **addressTable, const char *libraryN
 {
     if (boundAddress == nullptr)
     {
-        HMODULE library = GetModuleHandleA(libraryName);
-        if (library == nullptr)
+        ModuleFunctions_t const &moduleFunctions = Globals_t::Instance().ModuleFunctions;
+        HMODULE library                          = nullptr;
+        if (moduleFunctions.GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, libraryName, &library) == FALSE || library == nullptr)
             return nullptr;
 
-        boundAddress = (void *)GetProcAddress(library, symbolName != nullptr ? symbolName : MAKEINTRESOURCEA(ordinal));
+        boundAddress = reinterpret_cast<void *>(moduleFunctions.GetProcAddress(library, symbolName != nullptr ? symbolName : MAKEINTRESOURCEA(ordinal)));
         if (boundAddress == nullptr)
             return nullptr;
     }

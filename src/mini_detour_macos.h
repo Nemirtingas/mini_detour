@@ -735,6 +735,17 @@ namespace ModuleManipulation
 {
 namespace Implementation
 {
+// Their addresses are asked to dyld when the library starts: see ModuleFunctions_t. Not &dlopen: the address of an
+// imported function can be the stub of the image, which jumps through the import slot.
+static ModuleFunctions_t _QueryModuleFunctions()
+{
+    ModuleFunctions_t functions;
+    functions.dlopen  = reinterpret_cast<decltype(functions.dlopen)>(dlsym(RTLD_DEFAULT, "dlopen"));
+    functions.dlclose = reinterpret_cast<decltype(functions.dlclose)>(dlsym(RTLD_DEFAULT, "dlclose"));
+    functions.dlsym   = reinterpret_cast<decltype(functions.dlsym)>(dlsym(RTLD_DEFAULT, "dlsym"));
+    return functions;
+}
+
 // Finds the loaded image whose dlopen handle is moduleHandle. Only dyld's public API is used: its internal structures
 // and the shared cache format change between macOS versions. An image's handle is the one dlopen returns for its path
 // (RTLD_NOLOAD never loads anything), and dlopen(NULL) gives the main executable, as on Linux. slide can be null.
@@ -744,9 +755,10 @@ static bool _FindLoadedImage(void *moduleHandle, const MachHeader_t **header, ui
         return false;
 
     // dlopen(NULL) gives a handle of its own, not the one of the executable path. The main executable is image 0.
-    void *mainHandle = dlopen(nullptr, RTLD_NOW | RTLD_NOLOAD);
+    ModuleFunctions_t const &dyld = Globals_t::Instance().ModuleFunctions;
+    void *mainHandle              = dyld.dlopen(nullptr, RTLD_NOW | RTLD_NOLOAD);
     if (mainHandle != nullptr)
-        dlclose(mainHandle);
+        dyld.dlclose(mainHandle);
 
     const uint32_t imageCount = _dyld_image_count();
     for (uint32_t i = 0; i < imageCount; ++i)
@@ -757,11 +769,11 @@ static bool _FindLoadedImage(void *moduleHandle, const MachHeader_t **header, ui
 
         if (i != 0 || moduleHandle != mainHandle)
         {
-            void *handle = dlopen(path, RTLD_NOW | RTLD_NOLOAD);
+            void *handle = dyld.dlopen(path, RTLD_NOW | RTLD_NOLOAD);
             if (handle == nullptr)
                 continue;
 
-            dlclose(handle);
+            dyld.dlclose(handle);
             if (handle != moduleHandle)
                 continue;
         }
@@ -952,10 +964,11 @@ static void *_GetImportTarget(_ImportSlot_t const &importSlot)
     if (!importSlot.Lazy)
         return *importSlot.Slot;
 
-    void *library = importSlot.ModuleName[0] != '\0' ? dlopen(importSlot.ModuleName, RTLD_NOW | RTLD_NOLOAD) : nullptr;
-    void *target  = dlsym(library != nullptr ? library : RTLD_DEFAULT, importSlot.Name);
+    ModuleFunctions_t const &dyld = Globals_t::Instance().ModuleFunctions;
+    void *library                 = importSlot.ModuleName[0] != '\0' ? dyld.dlopen(importSlot.ModuleName, RTLD_NOW | RTLD_NOLOAD) : nullptr;
+    void *target                  = dyld.dlsym(library != nullptr ? library : RTLD_DEFAULT, importSlot.Name);
     if (library != nullptr)
-        dlclose(library);
+        dyld.dlclose(library);
 
     return target != nullptr ? target : *importSlot.Slot;
 }
