@@ -358,89 +358,109 @@ static void _GetRegionName(uintptr_t address, char *name, size_t nameSize)
     name[copySize] = '\0';
 }
 
+static MemoryRights _NativeToMemoryRights(vm_prot_t protection)
+{
+    MemoryRights rights = MemoryRights::mem_none;
+    if (protection & VM_PROT_READ)
+        rights = static_cast<MemoryRights>(rights | MemoryRights::mem_r);
+
+    if (protection & VM_PROT_WRITE)
+        rights = static_cast<MemoryRights>(rights | MemoryRights::mem_w);
+
+    if (protection & VM_PROT_EXECUTE)
+        rights = static_cast<MemoryRights>(rights | MemoryRights::mem_x);
+
+    return rights;
+}
+
+// The first mapping at or after *address. The dyld shared cache is a submap: mach_vm_region describes it as one 1 GB
+// region with the protection of the submap entry (read only), not the ones of its pages (code is read/execute), so the
+// submaps are walked down to their mappings. *submapEnd is the end of the submap holding the mapping, 0 if there is
+// none: the memory between the mappings of a submap is reserved, not free.
+static bool _NextMapping(mach_vm_address_t *address, mach_vm_size_t *size, vm_prot_t *protection, mach_vm_address_t *submapEnd)
+{
+    natural_t depth = 0;
+    *submapEnd      = 0;
+    for (;;)
+    {
+        vm_region_submap_info_data_64_t info;
+        mach_msg_type_number_t count    = VM_REGION_SUBMAP_INFO_COUNT_64;
+        mach_vm_address_t regionAddress = *address;
+        mach_vm_size_t regionSize       = 0;
+        if (mach_vm_region_recurse(mach_task_self(), &regionAddress, &regionSize, &depth, (vm_region_recurse_info_t)&info, &count) != KERN_SUCCESS)
+            return false;
+
+        // Past the submap walked down: the mapping found is outside of it.
+        if (*submapEnd != 0 && regionAddress >= *submapEnd)
+            *submapEnd = 0;
+
+        if (info.is_submap)
+        {
+            if (*submapEnd == 0)
+                *submapEnd = regionAddress + regionSize;
+
+            if (*address < regionAddress)
+                *address = regionAddress;
+
+            ++depth;
+            continue;
+        }
+
+        *address    = regionAddress;
+        *size       = regionSize;
+        *protection = info.protection;
+        return true;
+    }
+}
+
 static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, size_t regionCount, bool onlyFree)
 {
-    mach_port_t self_task     = mach_task_self();
     mach_vm_address_t oldEnd  = Globals_t::Instance().MinUserAddress;
     size_t writtenRegionCount = 0;
     size_t currentRegionCount = 0;
 
-    if (!onlyFree && oldEnd != 0)
+    auto addRegion = [&](uintptr_t start, uintptr_t end, MemoryRights rights)
     {
         if (regions != nullptr && writtenRegionCount < regionCount && regions->StructSize >= sizeof(*regions))
         {
             auto &region = *regions;
             regions      = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t *>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
 
-            region.Rights        = MemoryRights::mem_none;
-            region.Start         = 0;
-            region.End           = static_cast<uintptr_t>(oldEnd);
-            region.ModuleName[0] = '\0';
+            region.Rights = rights;
+            region.Start  = start;
+            region.End    = end;
+            if (rights == MemoryRights::mem_unset)
+                region.ModuleName[0] = '\0';
+            else
+                _GetRegionName(start, region.ModuleName, region.StructSize - (sizeof(region) - sizeof(region.ModuleName)));
+
             ++writtenRegionCount;
         }
         ++currentRegionCount;
-    }
+    };
 
-    mach_vm_address_t vm_address = 0;
+    // __PAGEZERO.
+    if (!onlyFree && oldEnd != 0)
+        addRegion(0, static_cast<uintptr_t>(oldEnd), MemoryRights::mem_none);
+
+    mach_vm_address_t address     = 0;
+    mach_vm_address_t reservedEnd = 0;
     mach_vm_size_t size;
-    vm_region_basic_info_data_64_t infos;
-    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-    mach_port_t object_name      = MACH_PORT_NULL;
-
-    while (mach_vm_region(self_task, &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name) == KERN_SUCCESS)
+    vm_prot_t protection;
+    mach_vm_address_t submapEnd;
+    while (_NextMapping(&address, &size, &protection, &submapEnd))
     {
-        if (vm_address > oldEnd)
-        {
-            if (regions != nullptr && writtenRegionCount < regionCount)
-            {
-                auto &region = *regions;
-                if (region.StructSize >= sizeof(region))
-                {
-                    regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t *>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
-
-                    region.Rights        = MemoryRights::mem_unset;
-                    region.Start         = oldEnd;
-                    region.End           = static_cast<uintptr_t>(vm_address);
-                    region.ModuleName[0] = '\0';
-                    ++writtenRegionCount;
-                }
-            }
-            ++currentRegionCount;
-        }
+        // Free memory before the mapping, if it isn't the reserved memory of a submap.
+        const mach_vm_address_t freeStart = std::max(oldEnd, reservedEnd);
+        if (address > freeStart)
+            addRegion(static_cast<uintptr_t>(freeStart), static_cast<uintptr_t>(address), MemoryRights::mem_unset);
 
         if (!onlyFree)
-        {
-            if (regions != nullptr && writtenRegionCount < regionCount)
-            {
-                auto &region = *regions;
+            addRegion(static_cast<uintptr_t>(address), static_cast<uintptr_t>(address + size), _NativeToMemoryRights(protection));
 
-                if (region.StructSize >= sizeof(region))
-                {
-                    regions = reinterpret_cast<MiniDetourMemoryManipulationRegionInfos_t *>(reinterpret_cast<uintptr_t>(regions) + regions->StructSize);
-
-                    region.Rights = MemoryRights::mem_none;
-                    region.Start  = static_cast<uintptr_t>(vm_address);
-                    region.End    = static_cast<uintptr_t>(vm_address + size);
-                    _GetRegionName(region.Start, region.ModuleName, region.StructSize - (sizeof(region) - sizeof(region.ModuleName)));
-
-                    if (infos.protection & VM_PROT_READ)
-                        region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_r);
-
-                    if (infos.protection & VM_PROT_WRITE)
-                        region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_w);
-
-                    if (infos.protection & VM_PROT_EXECUTE)
-                        region.Rights = static_cast<MemoryRights>(region.Rights | MemoryRights::mem_x);
-
-                    ++writtenRegionCount;
-                }
-            }
-
-            ++currentRegionCount;
-        }
-
-        vm_address += size;
-        oldEnd = vm_address;
+        reservedEnd = std::max(reservedEnd, submapEnd);
+        address += size;
+        oldEnd = address;
     }
 
     return currentRegionCount;
@@ -453,40 +473,24 @@ static size_t _QueryPageSize()
 
 static void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfos_t *regionInfos)
 {
-    mach_vm_address_t vm_address = (mach_vm_address_t)address;
-    kern_return_t ret;
-    mach_vm_size_t size;
-    vm_region_basic_info_data_64_t infos;
-    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-    mach_port_t object_name      = MACH_PORT_NULL;
-
     // Values for a free address, replaced below if the address is mapped.
     regionInfos->Rights        = MemoryRights::mem_unset;
     regionInfos->Start         = 0;
     regionInfos->End           = 0;
     regionInfos->ModuleName[0] = '\0';
 
-    // mach_vm_region returns the region or the next region to vm_address, so if the region queried is free, it will not return the free region but the next one.
-    ret = mach_vm_region(mach_task_self(), &vm_address, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&infos, &count, &object_name);
-
-    if (ret == KERN_SUCCESS)
+    // The mapping holding the address, or the next one if the address isn't mapped.
+    mach_vm_address_t mapping = reinterpret_cast<mach_vm_address_t>(address);
+    mach_vm_size_t size;
+    vm_prot_t protection;
+    mach_vm_address_t submapEnd;
+    if (_NextMapping(&mapping, &size, &protection, &submapEnd) && mapping <= reinterpret_cast<mach_vm_address_t>(address) &&
+        reinterpret_cast<mach_vm_address_t>(address) < mapping + size)
     {
-        if (static_cast<uintptr_t>(vm_address) <= reinterpret_cast<uintptr_t>(address) && reinterpret_cast<uintptr_t>(address) < static_cast<uintptr_t>(vm_address) + size)
-        {
-            regionInfos->Start  = (uintptr_t)vm_address;
-            regionInfos->End    = regionInfos->Start + size;
-            regionInfos->Rights = MemoryRights::mem_none;
-            _GetRegionName(regionInfos->Start, regionInfos->ModuleName, regionInfos->StructSize - (sizeof(*regionInfos) - sizeof(regionInfos->ModuleName)));
-
-            if (infos.protection & VM_PROT_READ)
-                regionInfos->Rights = static_cast<MemoryRights>(regionInfos->Rights | MemoryRights::mem_r);
-
-            if (infos.protection & VM_PROT_WRITE)
-                regionInfos->Rights = static_cast<MemoryRights>(regionInfos->Rights | MemoryRights::mem_w);
-
-            if (infos.protection & VM_PROT_EXECUTE)
-                regionInfos->Rights = static_cast<MemoryRights>(regionInfos->Rights | MemoryRights::mem_x);
-        }
+        regionInfos->Start  = static_cast<uintptr_t>(mapping);
+        regionInfos->End    = static_cast<uintptr_t>(mapping + size);
+        regionInfos->Rights = _NativeToMemoryRights(protection);
+        _GetRegionName(regionInfos->Start, regionInfos->ModuleName, regionInfos->StructSize - (sizeof(*regionInfos) - sizeof(regionInfos->ModuleName)));
     }
 }
 

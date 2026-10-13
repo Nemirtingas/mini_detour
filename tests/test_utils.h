@@ -85,10 +85,10 @@ static inline void *ThumbAddress(void *address)
 }
 #endif
 
-// The tests that hook generated code run on every architecture, except ARM64 macOS: code in allocated memory can't be
-// hooked there yet (the library needs pages that are writable and executable at the same time).
+// The tests that hook code run on every target, except ARM64 macOS: code can't be hooked there yet (the library needs
+// pages that are writable and executable at the same time, which Apple Silicon refuses).
 #if !(defined(MINIDETOUR_OS_APPLE) && defined(MINIDETOUR_ARCH_ARM64))
-#define TEST_HOOKS_GENERATED_CODE
+#define TEST_HOOKS_CODE
 
 // Small functions written by hand for those tests, in the instruction set of the architecture.
 namespace GeneratedCode
