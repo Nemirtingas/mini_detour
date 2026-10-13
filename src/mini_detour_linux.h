@@ -10,21 +10,20 @@
 #include <dlfcn.h>
 #include <link.h>
 
+#include <fstream>
+
 #ifndef MAP_FIXED_NOREPLACE
 #define MAP_FIXED_NOREPLACE 0x100000
 #endif
 
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
-using ElfHeader_t        = Elf64_Ehdr;
-using ElfSectionHeader_t = Elf64_Shdr;
-using ElfProgramHeader_t = Elf64_Phdr;
-using ElfSymbol_t        = Elf64_Sym;
-using ElfAddr_t          = Elf64_Addr;
-using ElfRel_t           = Elf64_Rel;
-using ElfRela_t          = Elf64_Rela;
-using ElfDyn_t           = Elf64_Dyn;
-using ElfSxword_t        = Elf64_Sxword;
-using ElfRelocation_t    = ElfRela_t;
+using ElfSymbol_t     = Elf64_Sym;
+using ElfAddr_t       = Elf64_Addr;
+using ElfRel_t        = Elf64_Rel;
+using ElfRela_t       = Elf64_Rela;
+using ElfDyn_t        = Elf64_Dyn;
+using ElfSxword_t     = Elf64_Sxword;
+using ElfRelocation_t = ElfRela_t;
 #define DT_RELOCATIONS DT_RELA
 #define DT_RELOCATIONS_SIZE DT_RELASZ
 
@@ -32,8 +31,6 @@ using ElfRelocation_t    = ElfRela_t;
 #define ELF_ST_TYPE ELF64_ST_TYPE
 #define ELF_R_SYM ELF64_R_SYM
 #define ELF_R_TYPE ELF64_R_TYPE
-#define ELF_R_INFO ELF64_R_INFO
-#define ELF_ST_VISIBILITY ELF64_ST_VISIBILITY
 
 #if defined(MINIDETOUR_ARCH_X64)
 #define R_JUMP_SLOT R_X86_64_JUMP_SLOT
@@ -44,16 +41,13 @@ using ElfRelocation_t    = ElfRela_t;
 #endif
 
 #elif defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_ARM)
-using ElfHeader_t        = Elf32_Ehdr;
-using ElfSectionHeader_t = Elf32_Shdr;
-using ElfProgramHeader_t = Elf32_Phdr;
-using ElfSymbol_t        = Elf32_Sym;
-using ElfAddr_t          = Elf32_Addr;
-using ElfRel_t           = Elf32_Rel;
-using ElfRela_t          = Elf32_Rela;
-using ElfDyn_t           = Elf32_Dyn;
-using ElfSxword_t        = Elf32_Sxword;
-using ElfRelocation_t    = ElfRel_t;
+using ElfSymbol_t     = Elf32_Sym;
+using ElfAddr_t       = Elf32_Addr;
+using ElfRel_t        = Elf32_Rel;
+using ElfRela_t       = Elf32_Rela;
+using ElfDyn_t        = Elf32_Dyn;
+using ElfSxword_t     = Elf32_Sxword;
+using ElfRelocation_t = ElfRel_t;
 #define DT_RELOCATIONS DT_REL
 #define DT_RELOCATIONS_SIZE DT_RELSZ
 
@@ -61,8 +55,6 @@ using ElfRelocation_t    = ElfRel_t;
 #define ELF_ST_TYPE ELF32_ST_TYPE
 #define ELF_R_SYM ELF32_R_SYM
 #define ELF_R_TYPE ELF32_R_TYPE
-#define ELF_R_INFO ELF32_R_INFO
-#define ELF_ST_VISIBILITY ELF32_ST_VISIBILITY
 
 #if defined(MINIDETOUR_ARCH_X86)
 #define R_JUMP_SLOT R_386_JMP_SLOT
