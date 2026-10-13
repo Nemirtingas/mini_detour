@@ -848,6 +848,12 @@ static size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportD
 
 // Import slots of a Mach-O image: the lazy (__la_symbol_ptr) and non lazy (__got, __auth_got, __nl_symbol_ptr) symbol
 // pointers, named by the indirect symbol table. This is what the image calls its imports through.
+//
+// Shared cache images don't use their own symbol pointers anymore on recent macOS (seen from macOS 14 on, arm64 and x64):
+// the cache builder made their stubs jump through slots of the cache, one per symbol, shared by every image of the cache
+// importing it. Their own sections lose their type and stay empty. These slots are found from the stubs, which the
+// indirect symbol table names too. Replacing one replaces the import in every shared cache image calling it through a
+// stub.
 struct _ImportSlot_t
 {
     // Without the leading '_' of C symbols.
@@ -858,6 +864,48 @@ struct _ImportSlot_t
     // Before its first call, a lazy slot points to dyld's binding stub.
     bool Lazy;
 };
+
+// The slot a symbol stub jumps through, nullptr when the stub isn't one that loads its target from a slot.
+// x64: jmp *slot(%rip).
+// arm64: adrp x16, slot@page; ldr x16, [x16, slot@pageoff]; br x16. Authenticated stubs (arm64e shared cache):
+// adrp x17, slot@page; add x17, x17, slot@pageoff; ldr x16, [x17]; braa x16, x17.
+static void **_GetStubSlot(const uint8_t *stub)
+{
+#if defined(MINIDETOUR_ARCH_X64)
+    if (stub[0] != 0xff || stub[1] != 0x25)
+        return nullptr;
+
+    int32_t displacement;
+    memcpy(&displacement, stub + 2, sizeof(displacement));
+    return reinterpret_cast<void **>(reinterpret_cast<uintptr_t>(stub) + 6 + displacement);
+#elif defined(MINIDETOUR_ARCH_ARM64)
+    uint32_t instructions[3];
+    memcpy(instructions, stub, sizeof(instructions));
+    if ((instructions[0] & 0x9f000000) != 0x90000000)
+        return nullptr;
+
+    // adrp: a signed 21 bits count of 4 KB pages, immlo in bits 29-30 and immhi in bits 5-23.
+    const uint32_t pageRegister = instructions[0] & 0x1f;
+    int64_t pages               = ((instructions[0] >> 3) & 0x1ffffc) | ((instructions[0] >> 29) & 3);
+    pages                       = (pages ^ 0x100000) - 0x100000;
+    const uintptr_t page        = (reinterpret_cast<uintptr_t>(stub) & ~static_cast<uintptr_t>(0xfff)) + static_cast<uintptr_t>(pages * 0x1000);
+    const uint32_t offset       = (instructions[1] >> 10) & 0xfff;
+
+    // ldr x, [pageRegister, #offset * 8]
+    if ((instructions[1] & 0xffc003e0) == (0xf9400000 | pageRegister << 5))
+        return reinterpret_cast<void **>(page + offset * 8);
+
+    // add x, pageRegister, #offset; ldr x, [x]
+    const uint32_t slotRegister = instructions[1] & 0x1f;
+    if ((instructions[1] & 0xffc003e0) == (0x91000000 | pageRegister << 5) && (instructions[2] & 0xffffffe0) == (0xf9400000 | slotRegister << 5))
+        return reinterpret_cast<void **>(page + offset);
+
+    return nullptr;
+#else
+    (void)stub;
+    return nullptr;
+#endif
+}
 
 // Calls callback(_ImportSlot_t const&) for every import slot of the image, until it returns false.
 template <typename Callback>
@@ -904,6 +952,34 @@ static bool _ForEachImportSlot(void *moduleHandle, Callback callback)
     const char *symbolNames         = reinterpret_cast<const char *>(linkEditBase + symTab->stroff);
     const uint32_t *indirectSymbols = reinterpret_cast<const uint32_t *>(linkEditBase + dySymTab->indirectsymoff);
 
+    // A stub jumping through one of the image's own symbol pointers: that slot is already listed with them.
+    auto isOwnSymbolPointer = [&](void **slot)
+    {
+        bool found = false;
+        _ForEachLoadCommand(
+            header,
+            [&](const LoadCommand_t *loadCommand)
+            {
+                if (loadCommand->cmd != LC_SEGMENT_ARCH)
+                    return true;
+
+                auto segment  = reinterpret_cast<const SegmentCommand_t *>(loadCommand);
+                auto sections = reinterpret_cast<const Section_t *>(segment + 1);
+                for (uint32_t i = 0; i < segment->nsects && !found; ++i)
+                {
+                    const uint32_t type   = sections[i].flags & SECTION_TYPE;
+                    const uintptr_t start = slide + sections[i].addr;
+                    found                 = (type == S_LAZY_SYMBOL_POINTERS || type == S_NON_LAZY_SYMBOL_POINTERS) && reinterpret_cast<uintptr_t>(slot) >= start &&
+                                            reinterpret_cast<uintptr_t>(slot) < start + sections[i].size;
+                }
+
+                return !found;
+            });
+
+        return found;
+    };
+
+    const bool inSharedCache = (header->flags & MH_DYLIB_IN_CACHE) != 0;
     _ForEachLoadCommand(
         header,
         [&](const LoadCommand_t *loadCommand)
@@ -917,12 +993,19 @@ static bool _ForEachImportSlot(void *moduleHandle, Callback callback)
             {
                 const Section_t &section = sections[i];
                 const uint32_t type      = section.flags & SECTION_TYPE;
-                if (type != S_LAZY_SYMBOL_POINTERS && type != S_NON_LAZY_SYMBOL_POINTERS)
+                const bool stubs         = inSharedCache && type == S_SYMBOL_STUBS && section.reserved2 != 0;
+                if (type != S_LAZY_SYMBOL_POINTERS && type != S_NON_LAZY_SYMBOL_POINTERS && !stubs)
                     continue;
 
-                void **slots = reinterpret_cast<void **>(slide + section.addr);
-                for (size_t j = 0; j < section.size / sizeof(void *); ++j)
+                // Symbol pointers, or stubs of reserved2 bytes.
+                const size_t entrySize = stubs ? section.reserved2 : sizeof(void *);
+                for (size_t j = 0; j < section.size / entrySize; ++j)
                 {
+                    const uintptr_t entry = slide + section.addr + j * entrySize;
+                    void **slot           = stubs ? _GetStubSlot(reinterpret_cast<const uint8_t *>(entry)) : reinterpret_cast<void **>(entry);
+                    if (slot == nullptr || (stubs && isOwnSymbolPointer(slot)))
+                        continue;
+
                     const uint32_t indirectIndex = section.reserved1 + static_cast<uint32_t>(j);
                     if (indirectIndex >= dySymTab->nindirectsyms)
                         break;
@@ -944,7 +1027,7 @@ static bool _ForEachImportSlot(void *moduleHandle, Callback callback)
                     _ImportSlot_t importSlot;
                     importSlot.Name       = name;
                     importSlot.ModuleName = ordinal >= 1 && ordinal <= libraryCount ? libraries[ordinal - 1] : "";
-                    importSlot.Slot       = slots + j;
+                    importSlot.Slot       = slot;
                     importSlot.Lazy       = type == S_LAZY_SYMBOL_POINTERS;
                     if (!callback(importSlot))
                         return false;

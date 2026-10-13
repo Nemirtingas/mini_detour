@@ -4,7 +4,9 @@
 
 #if defined(MINIDETOUR_OS_APPLE)
 #include <dlfcn.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/sysctl.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -225,48 +227,91 @@ TEST_CASE("Imports bound with chained fixups can be replaced", "[macos_imports]"
     CheckLibraryImportReplacement("./macos_chained_import_test_library.dylib");
 }
 
-static void InvalidArgumentDestructorReplacement()
+// The replacement calls the real function, so the rest of the process keeps working while it is in place (all the
+// shared cache images may call it), and counts its calls.
+static std::atomic<int> g_FreeCalls(0);
+static void (*g_Free)(void *);
+
+static void CountingFree(void *pointer)
 {
+    ++g_FreeCalls;
+    g_Free(pointer);
 }
 
-// Images of the shared cache were refused. Their import pages can't be made writable without a copy (VM_PROT_COPY).
+// operator delete is in libc++abi, which frees the memory through its import of free.
+__attribute__((noinline)) static void NewThenDelete()
+{
+    void *volatile pointer = ::operator new(16);
+    ::operator delete(pointer);
+}
+
+static int MacOSMajorVersion()
+{
+    char version[32] = {};
+    size_t size      = sizeof(version);
+    if (sysctlbyname("kern.osproductversion", version, &size, nullptr, 0) != 0)
+        return 0;
+
+    return atoi(version);
+}
+
+// Images of the shared cache were refused: their import pages can't be made writable without a copy (VM_PROT_COPY). Up
+// to macOS 12 at least, each image has its own symbol pointers. From macOS 14 on, the stubs of the cache images go through
+// slots shared by the whole cache: replacing free in libc++abi replaces it in libc++ too.
 TEST_CASE("Imports of a shared cache library can be replaced", "[macos_imports]")
 {
-    void *libcxx = dlopen("/usr/lib/libc++.1.dylib", RTLD_NOW | RTLD_NOLOAD);
+    void *libcxxabi = dlopen("/usr/lib/libc++abi.dylib", RTLD_NOW | RTLD_NOLOAD);
+    void *libcxx    = dlopen("/usr/lib/libc++.1.dylib", RTLD_NOW | RTLD_NOLOAD);
+    REQUIRE(libcxxabi != nullptr);
     REQUIRE(libcxx != nullptr);
 
-    auto imports = GetImports(libcxx);
-    if (imports.empty())
-    {
-        // Seen on macOS 26: the shared cache libraries have no symbol pointers of their own anymore (most likely merged
-        // in a GOT shared by the cache). Their imports can't be replaced, see README.md.
-        WARN("No import found in the shared cache libc++, test skipped.");
-        dlclose(libcxx);
-        return;
-    }
+    // Set before the replacement: another thread may call it as soon as it is written. Asked to the loader: &free can be
+    // the stub of the executable.
+    g_Free = reinterpret_cast<void (*)(void *)>(dlsym(RTLD_DEFAULT, "free"));
+    REQUIRE(g_Free != nullptr);
 
-    // Nothing destroys a std::invalid_argument while it is replaced.
-    const char *name    = "_ZNSt16invalid_argumentD1Ev";
-    auto originalImport = FindImport(imports, name);
+    auto imports        = GetImports(libcxxabi);
+    auto originalImport = FindImport(imports, "free");
     REQUIRE(originalImport != nullptr);
-    void *original = originalImport->ImportCallAddress;
+    CHECK(originalImport->ImportCallAddress == reinterpret_cast<void *>(g_Free));
 
     MiniDetour::ModuleManipulation::IATReplaceParameter_t parameter{};
-    parameter.IATName       = name;
-    parameter.NewIATAddress = reinterpret_cast<void *>(&InvalidArgumentDestructorReplacement);
-    REQUIRE(MiniDetour::ModuleManipulation::ReplaceModuleIATs(libcxx, &parameter, 1) == 1);
-    CHECK(parameter.IATCallAddress == original);
+    parameter.IATName       = "free";
+    parameter.NewIATAddress = reinterpret_cast<void *>(&CountingFree);
+    REQUIRE(MiniDetour::ModuleManipulation::ReplaceModuleIATs(libcxxabi, &parameter, 1) == 1);
 
-    auto replacedImport = FindImport(GetImports(libcxx), name);
-    REQUIRE(replacedImport != nullptr);
-    CHECK(replacedImport->ImportCallAddress == reinterpret_cast<void *>(&InvalidArgumentDestructorReplacement));
+    g_FreeCalls = 0;
+    NewThenDelete();
+    const int freeCalls      = g_FreeCalls;
+    auto replacedImports     = GetImports(libcxxabi);
+    auto libcxxImports       = GetImports(libcxx);
+    auto replacedImport      = FindImport(replacedImports, "free");
+    auto libcxxImport        = FindImport(libcxxImports, "free");
+    void *replacedCall       = replacedImport != nullptr ? replacedImport->ImportCallAddress : nullptr;
+    void *libcxxReplacedCall = libcxxImport != nullptr ? libcxxImport->ImportCallAddress : nullptr;
 
-    CHECK(MiniDetour::ModuleManipulation::RestoreModuleIATs(libcxx, &parameter, 1) == 1);
-    auto restoredImport = FindImport(GetImports(libcxx), name);
+    CHECK(MiniDetour::ModuleManipulation::RestoreModuleIATs(libcxxabi, &parameter, 1) == 1);
+
+    // Other threads can free memory too.
+    CHECK(freeCalls >= 1);
+    CHECK(parameter.IATCallAddress == reinterpret_cast<void *>(g_Free));
+    CHECK(replacedCall == reinterpret_cast<void *>(&CountingFree));
+
+    const int version = MacOSMajorVersion();
+    INFO("macOS " << version);
+    REQUIRE(libcxxImport != nullptr);
+    if (version >= 14)
+        CHECK(libcxxReplacedCall == reinterpret_cast<void *>(&CountingFree));
+    else if (version <= 12)
+        CHECK(libcxxReplacedCall == reinterpret_cast<void *>(g_Free));
+
+    auto restoredImports = GetImports(libcxxabi);
+    auto restoredImport  = FindImport(restoredImports, "free");
     REQUIRE(restoredImport != nullptr);
-    CHECK(restoredImport->ImportCallAddress == original);
+    CHECK(restoredImport->ImportCallAddress == reinterpret_cast<void *>(g_Free));
 
     dlclose(libcxx);
+    dlclose(libcxxabi);
 }
 
 #endif

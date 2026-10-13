@@ -170,8 +170,10 @@ Protection change refused: [vm_map.c](https://github.com/apple/darwin-xnu/blob/m
 ```
 
 Import replacement works on macOS: the lazy and non lazy symbol pointers of an image are rebound. Shared cache libraries
-are supported up to macOS 12: on recent versions (seen on macOS 26) they have no symbol pointers of their own anymore,
-and no import is found in them. Calls between shared cache libraries may not go through these pointers either.
+are supported, with a difference on recent versions (seen from macOS 14 on): their own symbol pointers aren't used
+anymore, their stubs go through slots shared by the whole cache, one per symbol. Replacing an import of a shared cache
+library then replaces it in every shared cache library calling that function through a stub. Images outside the cache
+(the executable, the other libraries) keep their own imports.
 
 Export replacement changes the export trie of the image, which dyld reads for `dlsym` and the images loaded later. The
 address of an export must keep its encoded size, so the jump to the new function is written in the padding after the
