@@ -5,7 +5,6 @@
 #define VC_EXTRALEAN
 #define NOMINMAX
 #include <windows.h>
-#include <intsafe.h>
 
 typedef enum _MY_THREAD_INFORMATION_CLASS
 {
@@ -27,13 +26,11 @@ typedef enum _MY_THREAD_INFORMATION_CLASS
     ThreadSetTlsArrayAddress,
     ThreadIsIoPending,
     ThreadHideFromDebugger
-} MY_THREAD_INFORMATION_CLASS, *PMY_THREAD_INFORMATION_CLASS;
-
-typedef struct _PEB PEB, *PPEB;
+} MY_THREAD_INFORMATION_CLASS;
 
 typedef long NTSTATUS;
 
-typedef LONG KPRIORITY, *PKPRIORITY;
+typedef LONG KPRIORITY;
 
 typedef struct _CLIENT_ID
 {
@@ -49,7 +46,7 @@ typedef struct _THREAD_BASIC_INFORMATION
     KAFFINITY AffinityMask;
     KPRIORITY Priority;
     KPRIORITY BasePriority;
-} THREAD_BASIC_INFORMATION, *PTHREAD_BASIC_INFORMATION;
+} THREAD_BASIC_INFORMATION;
 
 extern "C" NTSTATUS NTAPI NtQueryInformationThread(
     IN HANDLE ThreadHandle, IN MY_THREAD_INFORMATION_CLASS ThreadInformationClass, OUT PVOID ThreadInformation, IN ULONG ThreadInformationLength, OUT PULONG ReturnLength OPTIONAL);

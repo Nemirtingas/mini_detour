@@ -142,7 +142,6 @@ function(minidetour_add_library name)
   target_link_libraries(
     ${name}
     PUBLIC
-    $<$<BOOL:${WIN32}>:shell32>
     $<$<BOOL:${WIN32}>:ntdll>
     # For library UNIX loading
     $<$<NOT:$<BOOL:${WIN32}>>:dl>
@@ -152,7 +151,7 @@ function(minidetour_add_library name)
     ${name}
     PRIVATE
     $<BUILD_INTERFACE:MINIDETOUR_BUILD>
-    -DCAPSTONE_USE_SYS_DYN_MEM
+    CAPSTONE_USE_SYS_DYN_MEM
     PUBLIC
     $<$<BOOL:${BUILD_SHARED_LIBS}>:MINIDETOUR_SHARED>
   )
@@ -217,9 +216,19 @@ if(MINIDETOUR_BUILD_TESTS)
   endif()
 
   if(UNIX AND NOT APPLE)
-    # Imports reached through GOT entries (GLOB_DAT relocations) instead of PLT stubs.
+    # Imports reached through GOT entries (GLOB_DAT relocations) instead of PLT stubs. Some compilers ignore -fno-plt
+    # on some architectures (clang on ARM warns that it is unused): the library then keeps its PLT stubs.
     minidetour_add_test_library(no_plt_test_library tests/no_plt_test_library.c)
-    target_compile_options(no_plt_test_library PRIVATE -fno-plt)
+    # Any warning fails the check: clang only warns about the options it ignores, which CMake doesn't always detect.
+    include(CheckCCompilerFlag)
+    include(CMakePushCheckState)
+    cmake_push_check_state()
+    set(CMAKE_REQUIRED_FLAGS -Werror)
+    check_c_compiler_flag(-fno-plt MINIDETOUR_C_HAS_NO_PLT)
+    cmake_pop_check_state()
+    if(MINIDETOUR_C_HAS_NO_PLT)
+      target_compile_options(no_plt_test_library PRIVATE -fno-plt)
+    endif()
   endif()
 
   if(APPLE)
@@ -269,7 +278,7 @@ if(MINIDETOUR_BUILD_TESTS)
     tests
     ${MINIDETOUR_TEST_SOURCES}
   )
-  
+
   set_target_properties(tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>$<$<BOOL:${MINIDETOUR_DYNAMIC_RUNTIME}>:DLL>"
     C_VISIBILITY_PRESET hidden
@@ -292,18 +301,18 @@ if(MINIDETOUR_BUILD_TESTS)
     $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
     $<INSTALL_INTERFACE:include>
   )
-  
+
   target_compile_definitions(
     tests
     PRIVATE
     $<$<BOOL:${WIN32}>:_SILENCE_ALL_MS_EXT_DEPRECATION_WARNINGS>
   )
-  
+
   target_compile_options(
     tests
     PRIVATE
     $<$<BOOL:${MSVC}>:/MP>
-	$<$<BOOL:${MSVC}>:/utf-8>
+    $<$<BOOL:${MSVC}>:/utf-8>
   )
 
   # The tests run with shadow stacks (CET) on the CPUs that have them, like the programs built with /CETCOMPAT.
@@ -350,12 +359,12 @@ configure_package_config_file(
   NO_SET_AND_CHECK_MACRO
   NO_CHECK_REQUIRED_COMPONENTS_MACRO
 )
-  
+
 write_basic_package_version_file(
   ${CMAKE_CURRENT_BINARY_DIR}/MiniDetourConfigVersion.cmake
   VERSION ${PROJECT_VERSION}
   COMPATIBILITY SameMajorVersion)
-  
+
 install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/MiniDetourConfig.cmake
   ${CMAKE_CURRENT_BINARY_DIR}/MiniDetourConfigVersion.cmake
