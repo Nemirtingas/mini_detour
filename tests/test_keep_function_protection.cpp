@@ -1,8 +1,6 @@
 #include "catch.hpp"
 #include "test_utils.h"
 
-#if defined(TEST_HOOKS_CODE)
-
 static int KeepProtectionDetour()
 {
     return 100;
@@ -15,6 +13,8 @@ static MiniDetour::MemoryManipulation::MemoryRights CurrentRights(void *address)
     return infos.Rights;
 }
 
+// Apple Silicon never has writable and executable memory (W^X): there is no writable code to keep writable there.
+#if !(defined(MINIDETOUR_OS_APPLE) && defined(MINIDETOUR_ARCH_ARM64))
 // The hooked code was always left mem_rx: a JIT buffer (rwx) lost its write access when it was hooked or restored.
 TEST_CASE("Hooking keeps the rights of writable code", "[keep_function_protection]")
 {
@@ -50,6 +50,8 @@ TEST_CASE("Replacing keeps the rights of writable code", "[keep_function_protect
     CHECK(CurrentRights(code.Data()) == MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
 }
 
+#endif
+
 TEST_CASE("Hooking keeps read-only code read-only", "[keep_function_protection]")
 {
     CodeBuffer code;
@@ -64,5 +66,3 @@ TEST_CASE("Hooking keeps read-only code read-only", "[keep_function_protection]"
     CHECK(hook.RestoreFunction() != nullptr);
     CHECK(CurrentRights(code.Data()) == MiniDetour::MemoryManipulation::MemoryRights::mem_rx);
 }
-
-#endif

@@ -6,8 +6,6 @@
 #include <thread>
 #include <vector>
 
-#if defined(TEST_HOOKS_CODE)
-
 static int TEST_CALL ConcurrentDetour()
 {
     return 1000;
@@ -52,5 +50,3 @@ TEST_CASE("Hooks set from several threads", "[concurrent_hooks]")
 
     CHECK(failures == 0);
 }
-
-#endif

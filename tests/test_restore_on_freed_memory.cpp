@@ -2,8 +2,6 @@
 
 #include "test_utils.h"
 
-#if defined(TEST_HOOKS_CODE)
-
 static int TEST_CALL FreedMemoryDetour()
 {
     return 7;
@@ -38,5 +36,3 @@ TEST_CASE("Restore a hook on freed memory", "[restore_freed]")
     CHECK(hook.RestoreFunction() != nullptr);
     CHECK(function() == 43);
 }
-
-#endif

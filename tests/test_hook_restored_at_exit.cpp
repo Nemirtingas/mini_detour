@@ -3,8 +3,6 @@
 
 #include <spdlog/spdlog.h>
 
-#if defined(TEST_HOOKS_CODE)
-
 static int RestoredAtExitDetour()
 {
     return 100;
@@ -30,5 +28,3 @@ TEST_CASE("Hook left active is restored at exit", "[restore_at_exit]")
     REQUIRE(g_RestoredAtExitHook.HookFunction((void *)function, reinterpret_cast<void *>(&RestoredAtExitDetour)) != nullptr);
     CHECK(function() == 100);
 }
-
-#endif

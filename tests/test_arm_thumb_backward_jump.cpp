@@ -43,9 +43,10 @@ static void *ReserveAt(uintptr_t address, size_t size)
     return reserved;
 }
 
-// Start of size free bytes more than 16 MB (the B.W range) away from any executable memory, 0 if there are none: the
-// jump regions of the earlier tests, next to their code, are out of range from there.
-static uintptr_t FindIsolatedArea(size_t size)
+// Reserves size bytes more than 16 MB (the B.W range) away from any executable memory, 0 if it can't: the jump regions of
+// the earlier tests, next to their code, are out of range from there. The memory listed as free isn't always usable
+// (the stack guard gap is free but mmap refuses it): the area is reserved before being returned.
+static uintptr_t ReserveIsolatedArea(size_t size)
 {
     const uintptr_t range = 0x1000000 + 0x10000;
 
@@ -72,7 +73,7 @@ static uintptr_t FindIsolatedArea(size_t size)
                 isolated &= distance > range;
             }
 
-            if (isolated)
+            if (isolated && ReserveAt(start, size) != nullptr)
                 return start;
         }
     }
@@ -90,15 +91,15 @@ TEST_CASE("Thumb hook jumping backward to its jump slot", "[arm_thumb_backward_j
     // [free: 4 MB][first function][reserved][second function][reserved], far from the earlier jump regions.
     // The jump region of the first hook is allocated next to the first function, below it: the closest free memory.
     // The second function, 1 MB above, then uses a free slot of that region, below it.
-    const uintptr_t base = FindIsolatedArea(8 * mb);
+    const size_t areaSize = 8 * mb;
+    const uintptr_t base  = ReserveIsolatedArea(areaSize);
     REQUIRE(base != 0);
 
+    // The area is reserved: the free parts are released, the rest stays reserved.
     const uintptr_t firstAddress  = base + 4 * mb;
     const uintptr_t secondAddress = base + 5 * mb;
-    void *lowBlocker              = ReserveAt(firstAddress + pageSize, secondAddress - firstAddress - pageSize);
-    void *highBlocker             = ReserveAt(secondAddress + pageSize, 2 * mb);
-    REQUIRE(lowBlocker != nullptr);
-    REQUIRE(highBlocker != nullptr);
+    munmap(reinterpret_cast<void *>(base), firstAddress + pageSize - base);
+    munmap(reinterpret_cast<void *>(secondAddress), pageSize);
 
     CodeBuffer first(pageSize, reinterpret_cast<void *>(firstAddress));
     REQUIRE(first.Data() == reinterpret_cast<uint8_t *>(firstAddress));
@@ -132,8 +133,8 @@ TEST_CASE("Thumb hook jumping backward to its jump slot", "[arm_thumb_backward_j
     CHECK(function() == 43);
     CHECK(firstHook.RestoreFunction() != nullptr);
 
-    munmap(highBlocker, 2 * mb);
-    munmap(lowBlocker, secondAddress - firstAddress - pageSize);
+    munmap(reinterpret_cast<void *>(firstAddress + pageSize), secondAddress - firstAddress - pageSize);
+    munmap(reinterpret_cast<void *>(secondAddress + pageSize), base + areaSize - secondAddress - pageSize);
 }
 
 #endif

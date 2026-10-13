@@ -511,6 +511,12 @@ static inline uintptr_t _QueryMinUserAddress()
     return reinterpret_cast<uintptr_t>(systemInfo.lpMinimumApplicationAddress);
 }
 
+// Memory can be mapped writable and executable at the same time.
+static inline bool _QueryWritableExecutableMemory()
+{
+    return true;
+}
+
 // End of the user address space (lpMaximumApplicationAddress is its last byte).
 static inline uintptr_t _QueryMaxUserAddress()
 {

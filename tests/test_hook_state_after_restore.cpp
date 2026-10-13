@@ -1,8 +1,6 @@
 #include "catch.hpp"
 #include "test_utils.h"
 
-#if defined(TEST_HOOKS_CODE)
-
 static int HookStateDetour()
 {
     return 100;
@@ -46,5 +44,3 @@ TEST_CASE("A restored hook object can hook again", "[hook_state]")
     CHECK(hook.RestoreFunction() != nullptr);
     CHECK(second() == 2);
 }
-
-#endif

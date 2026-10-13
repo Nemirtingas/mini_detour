@@ -531,7 +531,6 @@ int Mydo_something2(int a, int b)
 static int (*volatile do_something_ptr)(int, int)  = &do_something;
 static int (*volatile do_something2_ptr)(int, int) = &do_something2;
 
-#if defined(TEST_HOOKS_CODE)
 TEST_CASE("Hook a C library function", "[Hook function]")
 {
     puts("Unhooked Test");
@@ -608,7 +607,6 @@ TEST_CASE("Hook function", "[Hook function]")
         CHECK(r == 4);
     }
 }
-#endif
 
 #if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
 void (*bkp)();

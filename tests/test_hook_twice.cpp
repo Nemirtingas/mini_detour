@@ -1,8 +1,6 @@
 #include "catch.hpp"
 #include "test_utils.h"
 
-#if defined(TEST_HOOKS_CODE)
-
 static int HookTwiceDetour()
 {
     return 100;
@@ -32,5 +30,3 @@ TEST_CASE("A hook object in use refuses to hook another function", "[hook_twice]
     CHECK(first() == 1);
     CHECK(second() == 2);
 }
-
-#endif
