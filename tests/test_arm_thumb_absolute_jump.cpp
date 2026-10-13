@@ -8,7 +8,7 @@
 // handler could overwrite them. The detour reads the word just below sp: the jump left its address there.
 TEST_CASE("Thumb absolute jump doesn't write below the stack pointer", "[arm_thumb_absolute_jump]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
 
     code.Write(0, {0x00, 0xBF, 0x00, 0xBF, 0x2A, 0x20, 0x70, 0x47}); // nop; nop; movs r0, #42; bx lr

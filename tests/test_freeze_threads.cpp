@@ -24,9 +24,9 @@ static int FreezeThreadsDetour()
 // Writes at offset a loop a thread can spin in: "jmp $" when spinInside is false, or "nop ; nop ; nop ; jmp -4"
 // (the thread never leaves offsets 1 to 3) when it is true. The loop ends when StopSpinning is called: the jump then
 // goes to the thread return written after it.
-class SpinningThread
+class SpinningThread_t
 {
-    CodeBuffer &_Code;
+    CodeBuffer_t &_Code;
     size_t _JumpOffset;
     bool _Running;
 #if defined(MINIDETOUR_OS_WINDOWS)
@@ -36,7 +36,7 @@ class SpinningThread
 #endif
 
   public:
-    SpinningThread(CodeBuffer &code, size_t offset, bool spinInside)
+    SpinningThread_t(CodeBuffer_t &code, size_t offset, bool spinInside)
         : _Code(code)
         , _Running(false)
     {
@@ -68,7 +68,7 @@ class SpinningThread
 #endif
     }
 
-    ~SpinningThread() { StopSpinning(); }
+    ~SpinningThread_t() { StopSpinning(); }
 
     bool IsValid() const { return _Running; }
 
@@ -78,7 +78,7 @@ class SpinningThread
             return;
 
         // A single byte write: the jump displacement now goes to the ret.
-        // The thread still runs the buffer, so it stays executable while written (CodeBuffer::Write makes it read/write).
+        // The thread still runs the buffer, so it stays executable while written (CodeBuffer_t::Write makes it read/write).
         uint8_t *displacement = _Code.Data(_JumpOffset + 1);
         MiniDetour::MemoryManipulation::MemoryProtect(displacement, 1, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
         *displacement = 0x00;
@@ -97,10 +97,10 @@ class SpinningThread
 // executed a part of the new jump.
 TEST_CASE("A function can't be hooked while a thread runs its first bytes", "[freeze_threads]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
 
-    SpinningThread thread(code, 0, true);
+    SpinningThread_t thread(code, 0, true);
     REQUIRE(thread.IsValid());
 
     const uint8_t original[] = {0x90, 0x90, 0x90, 0xEB, 0xFC};
@@ -121,11 +121,11 @@ TEST_CASE("A function can't be hooked while a thread runs its first bytes", "[fr
 
 TEST_CASE("A function can be hooked while a thread runs other code", "[freeze_threads]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     code.Write(0, {0xB8, 1, 0, 0, 0, 0xC3}); // mov eax, 1 ; ret
 
-    SpinningThread thread(code, 64, false);
+    SpinningThread_t thread(code, 64, false);
     REQUIRE(thread.IsValid());
 
     MiniDetour::Hook_t hook;
@@ -143,15 +143,15 @@ TEST_CASE("A function can be hooked while a thread runs other code", "[freeze_th
 #if defined(MINIDETOUR_ARCH_ARM64) && defined(MINIDETOUR_OS_WINDOWS)
 // Runs "loop: ldr w1, [x0] ; cbz w1, loop ; ret" with x0 pointing to a flag, until StopSpinning sets the flag: the loop
 // is stopped through data, not by rewriting its code while it runs.
-class FlagSpinningThread
+class FlagSpinningThread_t
 {
-    CodeBuffer _Code;
+    CodeBuffer_t _Code;
     volatile uint32_t _Stop;
     bool _Running;
     HANDLE _Thread;
 
   public:
-    FlagSpinningThread()
+    FlagSpinningThread_t()
         : _Stop(0)
         , _Running(false)
         , _Thread(nullptr)
@@ -166,10 +166,10 @@ class FlagSpinningThread
         Sleep(100);
     }
 
-    FlagSpinningThread(FlagSpinningThread const &)            = delete;
-    FlagSpinningThread &operator=(FlagSpinningThread const &) = delete;
+    FlagSpinningThread_t(FlagSpinningThread_t const &)            = delete;
+    FlagSpinningThread_t &operator=(FlagSpinningThread_t const &) = delete;
 
-    ~FlagSpinningThread() { StopSpinning(); }
+    ~FlagSpinningThread_t() { StopSpinning(); }
 
     bool IsValid() const { return _Running; }
 
@@ -189,11 +189,11 @@ class FlagSpinningThread
 // there is no ARM64 version of the test above. The other threads are still suspended, and their pc checked.
 TEST_CASE("A function can be hooked while a thread runs other code", "[freeze_threads]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     code.Write(0, {0x20, 0x00, 0x80, 0x52, 0xC0, 0x03, 0x5F, 0xD6}); // mov w0, #1 ; ret
 
-    FlagSpinningThread thread;
+    FlagSpinningThread_t thread;
     REQUIRE(thread.IsValid());
 
     MiniDetour::Hook_t hook;

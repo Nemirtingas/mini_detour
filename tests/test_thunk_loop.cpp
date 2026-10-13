@@ -14,7 +14,7 @@ static int ThunkLoopDetour()
 // other, never ended.
 TEST_CASE("A thunk loop doesn't hang the hook", "[thunk_loop]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
 
     code.Write(0, {0xE9, 0xFB, 0xFF, 0xFF, 0xFF}); // jmp $ (to itself)
@@ -34,7 +34,7 @@ TEST_CASE("A thunk loop doesn't hang the hook", "[thunk_loop]")
 
 TEST_CASE("A short thunk chain is followed to the function", "[thunk_loop]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
 
     code.Write(0, {0xE9, 0x1B, 0x00, 0x00, 0x00});  // jmp 32

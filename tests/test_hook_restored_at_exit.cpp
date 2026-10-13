@@ -12,7 +12,7 @@ static int RestoredAtExitDetour()
 // (a function local static) before the hook so it is destroyed after it.
 static bool g_LoggerCreated = spdlog::default_logger() != nullptr;
 // Declared before the hook so it is destroyed after it.
-static CodeBuffer g_RestoredAtExitCode;
+static CodeBuffer_t g_RestoredAtExitCode;
 static MiniDetour::Hook_t g_RestoredAtExitHook;
 
 // Hooks still active at exit are restored by the destructor of their global Hook_t, which uses the

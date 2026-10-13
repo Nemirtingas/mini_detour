@@ -75,7 +75,7 @@ using ElfRelocation_t    = ElfRel_t;
 
 // Other threads aren't suspended while hooked code is written: a process can't suspend its own threads
 // without ptrace or signal handlers.
-class _OtherThreadsFreezer_t
+class OtherThreadsFreezer_t
 {
   public:
     bool Freeze(void * /*code*/, size_t /*size*/) { return true; }
@@ -670,7 +670,7 @@ enum
     _ImportRelocationTableCount = 2,
 };
 
-struct _ImportRelocations_t
+struct ImportRelocations_t
 {
     ElfRelocation_t *Start[_ImportRelocationTableCount];
     ElfRelocation_t *End[_ImportRelocationTableCount];
@@ -693,7 +693,7 @@ static void _LoadRelocationTable(ElfDyn_t *dynamicTableStart, ElfSxword_t tableT
 static bool _LoadModuleIATDetails(
     void *moduleHandle,
     void **moduleBase,
-    _ImportRelocations_t *relocations,
+    ImportRelocations_t *relocations,
     ElfSymbol_t **dynamicSymbolsStart,
     ElfSymbol_t **dynamicSymbolsEnd,
     size_t *dynamicSymbolSize,
@@ -742,7 +742,7 @@ _GetImportSlotName(ElfRelocation_t *relocation, ElfSymbol_t *dynamicSymbolsStart
 
 static inline void **_GetIATAddress(
     void *moduleBase,
-    _ImportRelocations_t const &relocations,
+    ImportRelocations_t const &relocations,
     ElfSymbol_t *dynamicSymbolsStart,
     size_t dynamicSymbolSize,
     const char *dynamicSymbolsNames,
@@ -809,7 +809,7 @@ static size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *iatDetails, siz
     size_t dynamicSymbolSize         = 0;
     const char *dynStr;
     size_t dynStrSize;
-    _ImportRelocations_t relocations;
+    ImportRelocations_t relocations;
     size_t result  = 0;
     size_t ordinal = 0;
 
@@ -922,7 +922,7 @@ static size_t _ExchangeModuleIATs(
     size_t dynamicSymbolSize;
     const char *dynStr;
     size_t dynStrSize;
-    _ImportRelocations_t relocations;
+    ImportRelocations_t relocations;
     size_t result = 0;
 
     for (size_t i = 0; i < iatReplaceDetailsCount; ++i)

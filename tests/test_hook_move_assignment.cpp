@@ -12,7 +12,7 @@ static int HookMoveDetour()
 // so the hook it held was never restored (and the handle leaked).
 TEST_CASE("Move assigning over an active hook restores it", "[hook_move]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     GeneratedCode::WriteReturnConstant(code, 0, 1);
     auto function = GeneratedCode::Function(code);
@@ -27,7 +27,7 @@ TEST_CASE("Move assigning over an active hook restores it", "[hook_move]")
 
 TEST_CASE("Self move assignment keeps the hook", "[hook_move]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     GeneratedCode::WriteReturnConstant(code, 0, 1);
     auto function = GeneratedCode::Function(code);

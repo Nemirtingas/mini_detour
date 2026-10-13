@@ -34,7 +34,7 @@ TEST_CASE("Export jump is placed above the module base", "[export_jump_rva]")
     REQUIRE(hook.HookFunction(belowModule, (void *)&BelowModuleDetour) != nullptr);
 
     // A detour that isn't representable as an RVA (below the module) needs a jump slot.
-    CodeBuffer detour(4096);
+    CodeBuffer_t detour(4096);
     REQUIRE(detour.IsValid());
     // mov eax, 2; ret
     detour.Write(0, {0xB8, 2, 0, 0, 0, 0xC3});

@@ -82,7 +82,7 @@ static void _ForEachProcessThread(ACCESS_MASK access, Keep keep)
 
 // Suspends the other threads of the process while hooked code is written: a thread running the bytes being written
 // could execute half of the old and half of the new instructions.
-class _OtherThreadsFreezer_t
+class OtherThreadsFreezer_t
 {
     std::vector<HANDLE> _Threads;
 
@@ -152,7 +152,7 @@ class _OtherThreadsFreezer_t
     }
 
   public:
-    ~_OtherThreadsFreezer_t() { Unfreeze(); }
+    ~OtherThreadsFreezer_t() { Unfreeze(); }
 
     // Retries a few times when a thread is inside the code: it is most likely only passing through.
     bool Freeze(void *code, size_t size)
@@ -232,7 +232,7 @@ static std::vector<ThreadStackInfos_t> _GetProcessStackAddresses();
 
 // The heaps and thread stacks are only listed when a region that isn't a module must be named: listing the stacks
 // opens every thread of the process.
-struct _HeapsAndStacks_t
+struct HeapsAndStacks_t
 {
     bool Loaded = false;
     std::vector<void *> Heaps;
@@ -249,7 +249,7 @@ struct _HeapsAndStacks_t
     }
 };
 
-static void _GetRegionName(std::wstring &wmodule_name, void *address, char *regionName, size_t regionNameSize, _HeapsAndStacks_t &heapsAndStacks)
+static void _GetRegionName(std::wstring &wmodule_name, void *address, char *regionName, size_t regionNameSize, HeapsAndStacks_t &heapsAndStacks)
 {
     DWORD wmodule_name_size = 1024;
     HMODULE moduleHandle;
@@ -359,7 +359,7 @@ static size_t _GetRegions(MiniDetourMemoryManipulationRegionInfos_t *regions, si
     size_t writtenRegionCount = 0;
     size_t currentRegionCount = 0;
     std::wstring regionNameBuffer(1024, L'\0');
-    _HeapsAndStacks_t heapsAndStacks;
+    HeapsAndStacks_t heapsAndStacks;
 
     while (VirtualQueryEx(processHandle, searchAddress, &memoryBasicInformation, sizeof(memoryBasicInformation)) != 0)
     {
@@ -408,7 +408,7 @@ static void GetRegionInfos(void *address, MiniDetourMemoryManipulationRegionInfo
 {
     MEMORY_BASIC_INFORMATION infos;
     std::wstring regionNameBuffer;
-    _HeapsAndStacks_t heapsAndStacks;
+    HeapsAndStacks_t heapsAndStacks;
 
     // Values for an address that can't be queried, replaced below.
     regionInfos->Rights        = MemoryRights::mem_unset;

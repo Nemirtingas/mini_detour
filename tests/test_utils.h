@@ -9,7 +9,7 @@
 // Executable memory used to build small hand-written functions in tests.
 // The memory is never writable and executable at the same time: macOS on Apple Silicon refuses rwx pages. It is
 // readable and executable, and only made writable while bytes are written.
-class CodeBuffer
+class CodeBuffer_t
 {
     uint8_t *_Data;
     size_t _Size;
@@ -23,7 +23,7 @@ class CodeBuffer
     }
 
   public:
-    explicit CodeBuffer(size_t size = 4096, void *addressHint = nullptr)
+    explicit CodeBuffer_t(size_t size = 4096, void *addressHint = nullptr)
         : _Data(static_cast<uint8_t *>(MiniDetour::MemoryManipulation::MemoryAlloc(addressHint, size, MiniDetour::MemoryManipulation::MemoryRights::mem_rw)))
         , _Size(size)
     {
@@ -38,14 +38,14 @@ class CodeBuffer
         }
     }
 
-    ~CodeBuffer()
+    ~CodeBuffer_t()
     {
         if (_Data != nullptr)
             MiniDetour::MemoryManipulation::MemoryFree(_Data, _Size);
     }
 
-    CodeBuffer(CodeBuffer const &)            = delete;
-    CodeBuffer &operator=(CodeBuffer const &) = delete;
+    CodeBuffer_t(CodeBuffer_t const &)            = delete;
+    CodeBuffer_t &operator=(CodeBuffer_t const &) = delete;
 
     bool IsValid() const { return _Data != nullptr; }
 
@@ -107,7 +107,7 @@ static inline void *FunctionAddress(void *data)
 }
 
 template <typename T = int (*)()>
-static inline T Function(CodeBuffer &code, size_t offset = 0)
+static inline T Function(CodeBuffer_t &code, size_t offset = 0)
 {
     return reinterpret_cast<T>(FunctionAddress(code.Data(offset)));
 }
@@ -117,7 +117,7 @@ static inline T Function(CodeBuffer &code, size_t offset = 0)
 //   x86/x64: mov eax, value ; nop... ; ret
 //   Thumb:   movw r0, #value ; nop... ; bx lr (and a nop, so the function holds an absolute jump)
 //   ARM64:   movz w0, #value ; nop... ; ret
-static inline size_t WriteReturnConstant(CodeBuffer &code, size_t offset, uint16_t value, size_t nopCount = 0)
+static inline size_t WriteReturnConstant(CodeBuffer_t &code, size_t offset, uint16_t value, size_t nopCount = 0)
 {
 #if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
     code.Write(offset, {0xB8, static_cast<uint8_t>(value), static_cast<uint8_t>(value >> 8), 0, 0});
@@ -149,7 +149,7 @@ static inline size_t WriteReturnConstant(CodeBuffer &code, size_t offset, uint16
 }
 
 // Writes over a no-op instruction another instruction that does nothing either: a patch made by someone else.
-static inline void WriteOtherNop(CodeBuffer &code, size_t offset)
+static inline void WriteOtherNop(CodeBuffer_t &code, size_t offset)
 {
 #if defined(MINIDETOUR_ARCH_X86) || defined(MINIDETOUR_ARCH_X64)
     code.Write(offset, {0xF8}); // clc
@@ -161,7 +161,7 @@ static inline void WriteOtherNop(CodeBuffer &code, size_t offset)
 }
 
 // Writes a relative jump to destination at offset: jmp rel32 (x86/x64), B.W (Thumb), B (ARM64).
-static inline void WriteRelativeJump(CodeBuffer &code, size_t offset, void *destination)
+static inline void WriteRelativeJump(CodeBuffer_t &code, size_t offset, void *destination)
 {
     const intptr_t source = reinterpret_cast<intptr_t>(code.Data(offset));
     const intptr_t target = reinterpret_cast<intptr_t>(destination) & ~static_cast<intptr_t>(1);

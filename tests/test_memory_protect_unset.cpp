@@ -5,7 +5,7 @@
 // Restoring rights read from an unknown region (mem_unset) used to apply PROT_NONE.
 TEST_CASE("MemoryProtect refuses mem_unset", "[memprotect_unset]")
 {
-    CodeBuffer buffer;
+    CodeBuffer_t buffer;
     REQUIRE(buffer.IsValid());
 
     CHECK_FALSE(MiniDetour::MemoryManipulation::MemoryProtect(buffer.Data(), 16, MiniDetour::MemoryManipulation::MemoryRights::mem_unset));

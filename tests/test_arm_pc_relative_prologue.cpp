@@ -10,7 +10,7 @@
 #if defined(MINIDETOUR_ARCH_ARM)
 TEST_CASE("Hook a Thumb function starting with a pc relative load", "[arm_pc_relative]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
 
     // ldr r0, [pc, #8] (reads offset 12); nop; nop; bx lr; nop; nop; .word 42
@@ -23,7 +23,7 @@ TEST_CASE("Hook a Thumb function starting with a pc relative load", "[arm_pc_rel
 #else
 TEST_CASE("Hook an AArch64 function starting with a literal load", "[arm_pc_relative]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
 
     code.WriteValue<uint32_t>(0, 0x58000040); // ldr x0, #8 (reads offset 8)

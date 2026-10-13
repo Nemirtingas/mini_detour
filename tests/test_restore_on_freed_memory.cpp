@@ -14,7 +14,7 @@ TEST_CASE("Restore a hook on freed memory", "[restore_freed]")
     MiniDetour::Hook_t hook;
 
     {
-        CodeBuffer code;
+        CodeBuffer_t code;
         REQUIRE(code.IsValid());
         GeneratedCode::WriteReturnConstant(code, 0, 42);
         REQUIRE(hook.HookFunction((void *)GeneratedCode::Function(code), (void *)&FreedMemoryDetour) != nullptr);
@@ -24,7 +24,7 @@ TEST_CASE("Restore a hook on freed memory", "[restore_freed]")
     CHECK(hook.GetOriginalFunction() == nullptr);
 
     // The hook object can be used again.
-    CodeBuffer other;
+    CodeBuffer_t other;
     REQUIRE(other.IsValid());
     GeneratedCode::WriteReturnConstant(other, 0, 43);
     auto function = GeneratedCode::Function<int(TEST_CALL *)()>(other);

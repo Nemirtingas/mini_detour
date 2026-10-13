@@ -19,7 +19,7 @@ static int32_t RipDisp(size_t nextInstructionOffset)
     return static_cast<int32_t>(RipDataOffset - nextInstructionOffset);
 }
 
-static void CheckRipFunction(CodeBuffer &code, uint64_t expected)
+static void CheckRipFunction(CodeBuffer_t &code, uint64_t expected)
 {
     code.WriteValue<uint64_t>(RipDataOffset, RipDataValue);
 
@@ -39,7 +39,7 @@ static void CheckRipFunction(CodeBuffer &code, uint64_t expected)
 // and registers other than rax/rcx/rdx/rbx produced invalid code.
 TEST_CASE("Relocate mov rax, (rip + x)", "[rip_relocation]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     code.Write(0, {0x48, 0x8B, 0x05, 0, 0, 0, 0, 0xC3}); // mov rax, [rip + x] ; ret
     code.WriteValue<int32_t>(3, RipDisp(7));
@@ -48,7 +48,7 @@ TEST_CASE("Relocate mov rax, (rip + x)", "[rip_relocation]")
 
 TEST_CASE("Relocate mov eax, (rip + x)", "[rip_relocation]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     code.Write(0, {0x8B, 0x05, 0, 0, 0, 0, 0xC3}); // mov eax, [rip + x] ; ret
     code.WriteValue<int32_t>(2, RipDisp(6));
@@ -57,7 +57,7 @@ TEST_CASE("Relocate mov eax, (rip + x)", "[rip_relocation]")
 
 TEST_CASE("Relocate mov r11, (rip + x)", "[rip_relocation]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     code.Write(
         0,
@@ -80,7 +80,7 @@ TEST_CASE("Relocate mov r11, (rip + x)", "[rip_relocation]")
 
 TEST_CASE("Relocate mov r12, (rip + x) (SIB encoding)", "[rip_relocation]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     code.Write(
         0,
@@ -107,7 +107,7 @@ TEST_CASE("Relocate mov r12, (rip + x) (SIB encoding)", "[rip_relocation]")
 
 TEST_CASE("Relocate mov r13, (rip + x) (disp8 encoding)", "[rip_relocation]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     code.Write(
         0,
@@ -134,7 +134,7 @@ TEST_CASE("Relocate mov r13, (rip + x) (disp8 encoding)", "[rip_relocation]")
 
 TEST_CASE("Relocate lea rax, (rip + x)", "[rip_relocation]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     code.Write(0, {0x48, 0x8D, 0x05, 0, 0, 0, 0, 0xC3}); // lea rax, [rip + x] ; ret
     code.WriteValue<int32_t>(3, RipDisp(7));

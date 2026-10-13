@@ -8,7 +8,7 @@
 // already cleared: a Thumb function trampoline ended with an ARM jump, run in Thumb mode.
 TEST_CASE("Call the original of a hooked Thumb function", "[arm_thumb_original]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
 
     code.Write(0, {0x00, 0xBF, 0x00, 0xBF, 0x2A, 0x20, 0x70, 0x47}); // nop; nop; movs r0, #42; bx lr

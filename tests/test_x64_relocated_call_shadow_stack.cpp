@@ -11,7 +11,7 @@
 
 // Hand-written code placed in the tests executable itself. The tests are linked with /CETCOMPAT: Windows then enables
 // shadow stacks (on CPUs that have them) and kills the process on a return to this image that no call pushed. A return
-// to allocated memory would be let through, so a CodeBuffer can't be used.
+// to allocated memory would be let through, so a CodeBuffer_t can't be used.
 #pragma section(".mdcall", read, execute)
 __declspec(allocate(".mdcall")) static unsigned char g_CallFirstCode[64];
 

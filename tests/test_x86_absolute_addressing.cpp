@@ -14,7 +14,7 @@ static int AbsoluteAddressingDetour()
 // but it was handled like x64 rip relative addressing and the hook was refused.
 TEST_CASE("Hook a function reading an absolute address", "[x86_absolute]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
 
     const size_t dataOffset = 64;

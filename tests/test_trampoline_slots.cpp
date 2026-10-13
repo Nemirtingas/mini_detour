@@ -15,7 +15,7 @@ TEST_CASE("Many hooks use every trampoline slot without overflowing", "[trampoli
     const size_t functionCount  = 300; // Several trampoline pages on every arch.
     const size_t functionStride = 16;
 
-    CodeBuffer code(functionCount * functionStride);
+    CodeBuffer_t code(functionCount * functionStride);
     REQUIRE(code.IsValid());
 
     for (size_t i = 0; i < functionCount; ++i)
