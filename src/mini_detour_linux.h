@@ -473,6 +473,14 @@ namespace ModuleManipulation
 {
 namespace Implementation
 {
+// Its address is asked to the loader when the library starts: see ModuleFunctions_t. Not &dlinfo: when the (non PIE)
+// executable takes its address, its PLT entry becomes the address of the function, which jumps through the import slot.
+// RTLD_NEXT looks after the image of the library, where only the real function is.
+static ModuleFunctions_t _QueryModuleFunctions()
+{
+    return ModuleFunctions_t{reinterpret_cast<int (*)(void *, int, void *)>(dlsym(RTLD_NEXT, "dlinfo"))};
+}
+
 static ElfDyn_t *_FindElfDynFromTag(ElfDyn_t *dynamicSegment, ElfSxword_t tag)
 {
     for (; dynamicSegment->d_tag != DT_NULL; ++dynamicSegment)
@@ -542,7 +550,7 @@ static bool _LoadModuleDynamicTable(void *moduleHandle, void **moduleBase, ElfDy
     // l_addr is the load bias, not the ELF header: it is 0 for a non-PIE executable.
     // Symbol values and relocation offsets are relative to this bias.
     struct link_map *linkMap = nullptr;
-    if (moduleHandle == nullptr || dlinfo(moduleHandle, RTLD_DI_LINKMAP, &linkMap) != 0 || linkMap == nullptr || linkMap->l_ld == nullptr)
+    if (moduleHandle == nullptr || Globals_t::Instance().ModuleFunctions.dlinfo(moduleHandle, RTLD_DI_LINKMAP, &linkMap) != 0 || linkMap == nullptr || linkMap->l_ld == nullptr)
         return false;
 
     *moduleBase   = (void *)linkMap->l_addr;

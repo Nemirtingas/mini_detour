@@ -7,6 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <vector>
 
 static pid_t FakeGetPid()
@@ -87,6 +88,98 @@ TEST_CASE("Imports of the main executable can be replaced", "[macos_imports]")
     CHECK(parameter.NewIATAddress == reinterpret_cast<void *>(&FakeGetPid));
     CHECK(getpid() == pid);
 
+    dlclose(executable);
+}
+
+// The replacements call the real functions, so the rest of the process keeps working while they are in place, and count
+// their calls: the library must not make any.
+static std::atomic<int> g_DyldCalls(0);
+static void *(*g_Dlopen)(const char *, int);
+static int (*g_Dlclose)(void *);
+static void *(*g_Dlsym)(void *, const char *);
+
+static void *CountingDlopen(const char *path, int mode)
+{
+    ++g_DyldCalls;
+    return g_Dlopen(path, mode);
+}
+
+static int CountingDlclose(void *handle)
+{
+    ++g_DyldCalls;
+    return g_Dlclose(handle);
+}
+
+static void *CountingDlsym(void *handle, const char *name)
+{
+    ++g_DyldCalls;
+    return g_Dlsym(handle, name);
+}
+
+// Calls dlopen and dlclose through the imports of the executable, in a function of its own: in the test, the compiler can
+// keep the imports read before the replacement.
+__attribute__((noinline)) static void CallDlopenDlclose()
+{
+    void *libSystem = dlopen("/usr/lib/libSystem.B.dylib", RTLD_NOW | RTLD_NOLOAD);
+    if (libSystem != nullptr)
+        dlclose(libSystem);
+}
+
+// The library called dlopen, dlclose and dlsym through the imports of the image linking it, the tests executable here:
+// once they were replaced there, it called the replacements to find the images and the symbols.
+TEST_CASE("dlopen, dlclose and dlsym replaced in the executable aren't called by the library", "[macos_imports]")
+{
+    void *executable = ExecutableHandle();
+    REQUIRE(executable != nullptr);
+    const size_t importCount = GetImports(executable).size();
+
+    // Set before the replacements: another thread may call them as soon as they are written.
+    // Asked to dyld: the address of an imported function can be the stub of the executable, which jumps through the
+    // replaced slot.
+    g_Dlopen  = reinterpret_cast<void *(*)(const char *, int)>(dlsym(RTLD_DEFAULT, "dlopen"));
+    g_Dlclose = reinterpret_cast<int (*)(void *)>(dlsym(RTLD_DEFAULT, "dlclose"));
+    g_Dlsym   = reinterpret_cast<void *(*)(void *, const char *)>(dlsym(RTLD_DEFAULT, "dlsym"));
+    REQUIRE(g_Dlopen != nullptr);
+    REQUIRE(g_Dlclose != nullptr);
+    REQUIRE(g_Dlsym != nullptr);
+
+    MiniDetour::ModuleManipulation::IATReplaceParameter_t dyld[3]{};
+    const char *names[]  = {"dlopen", "dlclose", "dlsym"};
+    void *replacements[] = {reinterpret_cast<void *>(&CountingDlopen), reinterpret_cast<void *>(&CountingDlclose), reinterpret_cast<void *>(&CountingDlsym)};
+    for (size_t i = 0; i < 3; ++i)
+    {
+        dyld[i].IATModuleName = "libSystem.B.dylib";
+        dyld[i].IATName       = names[i];
+        dyld[i].NewIATAddress = replacements[i];
+    }
+    REQUIRE(MiniDetour::ModuleManipulation::ReplaceModuleIATs(executable, dyld, 3) == 3);
+
+    // The replacements are called through the imports of the executable.
+    g_DyldCalls = 0;
+    CallDlopenDlclose();
+    const int testCalls = g_DyldCalls;
+
+    // The library finds the images (listing, replacing and restoring) and the symbols (lazy imports).
+    MiniDetour::ModuleManipulation::IATReplaceParameter_t parameter{};
+    parameter.IATModuleName = "libSystem.B.dylib";
+    parameter.IATName       = "getpid";
+    parameter.NewIATAddress = reinterpret_cast<void *>(&FakeGetPid);
+
+    g_DyldCalls             = 0;
+    const size_t listed     = GetImports(executable).size();
+    const size_t replaced   = MiniDetour::ModuleManipulation::ReplaceModuleIATs(executable, &parameter, 1);
+    const pid_t replacedPid = getpid();
+    const size_t restored   = MiniDetour::ModuleManipulation::RestoreModuleIATs(executable, &parameter, 1);
+    const int libraryCalls  = g_DyldCalls;
+
+    REQUIRE(MiniDetour::ModuleManipulation::RestoreModuleIATs(executable, dyld, 3) == 3);
+
+    CHECK(testCalls == 2);
+    CHECK(libraryCalls == 0);
+    CHECK(listed == importCount);
+    CHECK(replaced == 1);
+    CHECK(replacedPid == 12345);
+    CHECK(restored == 1);
     dlclose(executable);
 }
 

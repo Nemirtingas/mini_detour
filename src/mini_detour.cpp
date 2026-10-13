@@ -59,6 +59,14 @@ struct fmt::formatter<MiniDetour::MemoryManipulation::MemoryRights>
 
 #include <capstone/capstone.h>
 
+// The system types the globals need. The platform headers include them too, with the same options.
+#if defined(MINIDETOUR_OS_WINDOWS)
+#define WIN32_LEAN_AND_MEAN
+#define VC_EXTRALEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 class CodeDisasm
 {
     csh _DisasmHandle;
@@ -512,6 +520,25 @@ class MemoryManager
 
 namespace MiniDetour
 {
+// The system functions the library calls to find the modules and their symbols. Calling them through the imports of the
+// image that links the library (the executable, when it is linked statically) would call their replacements once they are
+// replaced there, and the loader functions often are.
+struct ModuleFunctions_t
+{
+#if defined(MINIDETOUR_OS_WINDOWS)
+    // Finds a module from its name, or from an address in it (GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS).
+    BOOL(WINAPI *GetModuleHandleExA)(DWORD flags, LPCSTR moduleName, HMODULE *module);
+    FARPROC(WINAPI *GetProcAddress)(HMODULE module, LPCSTR name);
+    DWORD(WINAPI *GetModuleFileNameW)(HMODULE module, LPWSTR fileName, DWORD size);
+#elif defined(MINIDETOUR_OS_LINUX)
+    int (*dlinfo)(void *handle, int request, void *info);
+#elif defined(MINIDETOUR_OS_APPLE)
+    void *(*dlopen)(const char *path, int mode);
+    int (*dlclose)(void *handle);
+    void *(*dlsym)(void *handle, const char *name);
+#endif
+};
+
 // Holds what the library keeps between calls, instead of separate statics: the objects it needs (with a constructor or a
 // destructor) and the values computed once and cached (like the page size, queried from the system). They are built in
 // the order they are declared here, which C++ doesn't guarantee for statics.
@@ -531,6 +558,8 @@ class Globals_t
     // Whether memory can be writable and executable at the same time, which code writes rely on. When it can't (Apple
     // Silicon, hardened runtime on macOS), they go through the platform JIT memory instead.
     bool WritableExecutableMemory;
+    // Taken when the library starts, before any import of its image can be replaced.
+    ModuleFunctions_t ModuleFunctions;
 
     // Serializes the operations that write code or import/export tables: they share the memory manager slots and
     // change the rights of pages shared between hooks, and hooks can be set from several threads.
@@ -593,14 +622,15 @@ static bool _ExchangeTableEntry(T *entry, T value, T *previous)
 
 namespace MiniDetour
 {
-// The platform gives _QueryPageSize, _QueryAllocationGranularity, _QueryMinUserAddress, _QueryMaxUserAddress and
-// _QueryWritableExecutableMemory.
+// The platform gives _QueryPageSize, _QueryAllocationGranularity, _QueryMinUserAddress, _QueryMaxUserAddress,
+// _QueryWritableExecutableMemory and _QueryModuleFunctions.
 Globals_t::Globals_t()
     : PageSize(MemoryManipulation::Implementation::_QueryPageSize())
     , AllocationGranularity(MemoryManipulation::Implementation::_QueryAllocationGranularity())
     , MinUserAddress(MemoryManipulation::Implementation::_QueryMinUserAddress())
     , MaxUserAddress(MemoryManipulation::Implementation::_QueryMaxUserAddress())
     , WritableExecutableMemory(MemoryManipulation::Implementation::_QueryWritableExecutableMemory())
+    , ModuleFunctions(ModuleManipulation::Implementation::_QueryModuleFunctions())
 {
 }
 } // namespace MiniDetour
