@@ -68,9 +68,10 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -DMINIDETOUR_BUILD_TESTS=ON ${{ runner.os != 'Windows' && format('-DCMAKE_BUILD_TYPE={0}', matrix.build_type) || '' }} ${{ matrix.target.cmake_args }}
 
+      # The runners have 3 or 4 cores. Without a count, make would run any number of jobs.
       - name: Build
         id: build
-        run: cmake --build build --config ${{ matrix.build_type }}
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel 4
 
       - name: Test
         working-directory: ${{ runner.os == 'Windows' && format('build/{0}', matrix.build_type) || 'build' }}
