@@ -1021,6 +1021,9 @@ class Hook_t
         size_t totalOriginalTrampolineSize = 0;
         // Finished in the error path too once the function was prepared for writing.
         _FunctionCodeWriter writer;
+        // The jump slot the hook goes through, freed in the error path. The size of the jump written in the function.
+        void *jump_mem  = nullptr;
+        size_t hookSize = relativeJumpSize;
         SPDLOG_INFO("Needed relocatable size: found({}), rel({})", relocatableSize, relativeJumpSize);
 
         if (relocatableSize < relativeJumpSize)
@@ -1029,9 +1032,24 @@ class Hook_t
             goto error;
         }
 
+        // The function jumps to a jump slot next to it, which jumps to the detour. When no slot can be reached from the
+        // function (no free memory in range of a relative jump, like next to the macOS shared cache on ARM64), the
+        // function jumps straight to the detour with an absolute jump, if it is long enough for one.
+        jump_mem = Globals_t::Instance().Memory.GetFreeJump(functionToHook);
+        if (jump_mem == nullptr)
+        {
+            if (relocatableSize < absoluteJumpSize)
+            {
+                SPDLOG_ERROR("Failed to get memory for jump, and the function is too small for an absolute jump.");
+                goto error;
+            }
+
+            hookSize = absoluteJumpSize;
+        }
+
         // Only the bytes overwritten by the jump are saved and restored: the next ones may be changed by someone else
         // while the hook is set.
-        _SavedCode.assign(reinterpret_cast<uint8_t *>(functionToHook), reinterpret_cast<uint8_t *>(functionToHook) + relativeJumpSize);
+        _SavedCode.assign(reinterpret_cast<uint8_t *>(functionToHook), reinterpret_cast<uint8_t *>(functionToHook) + hookSize);
 
         // Upper bound of the trampoline code: the relocated code + the jump back to the function (its size can depend
         // on its destination). Used to check the slot size, and to protect and flush the whole trampoline.
@@ -1052,9 +1070,9 @@ class Hook_t
 
         {
             // A failed relocation leaves the trampoline without its jump back to the original function.
-            const size_t relocatedSize = _RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, relativeJumpSize, func_mode);
+            const size_t relocatedSize = _RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, hookSize, func_mode);
             MemoryManipulation::Implementation::EndCodeWrite(_OriginalTrampolineAddress, totalOriginalTrampolineSize);
-            if (relocatedSize < relativeJumpSize)
+            if (relocatedSize < hookSize)
             {
                 SPDLOG_ERROR("Failed to relocate code.");
                 goto error;
@@ -1069,24 +1087,19 @@ class Hook_t
             goto error;
         }
 
-        // Only a relative jump is written in the function: shorter code was refused above.
         {
-            SPDLOG_INFO("Relative hook");
-
-            // Setup the trampoline
-            void *jump_mem = Globals_t::Instance().Memory.GetFreeJump(functionToHook);
-            if (jump_mem == nullptr)
+            if (jump_mem != nullptr)
             {
-                SPDLOG_ERROR("Failed to get memory for jump.");
-                goto error;
+                SPDLOG_INFO("Relative hook, through the jump slot at {}", jump_mem);
+                if (!_WriteJumpSlot(jump_mem, newFunction, func_mode, hook_mode))
+                {
+                    SPDLOG_ERROR("Failed to write the jump slot.");
+                    goto error;
+                }
             }
-
-            SPDLOG_INFO("Trampoline located at: {}", jump_mem);
-            if (!_WriteJumpSlot(jump_mem, newFunction, func_mode, hook_mode))
+            else
             {
-                Globals_t::Instance().Memory.FreeJump(jump_mem);
-                SPDLOG_ERROR("Failed to protect jump memory.");
-                goto error;
+                SPDLOG_INFO("Absolute hook");
             }
 
 #ifdef USE_SPDLOG
@@ -1101,10 +1114,13 @@ class Hook_t
             }
 #endif
 
-            // Relative jump shoud have the same mode as the hooked function.
-            // A shorter encoding than relativeJumpSize keeps the original bytes after it.
+            // The relative jump has the mode of the hooked function, as its jump slot. A shorter encoding than the saved
+            // size keeps the original bytes after it.
             _HookCode = _SavedCode;
-            RelJump::WriteOpcodes(_HookCode.data(), functionToHook, jump_mem, func_mode, func_mode);
+            if (jump_mem != nullptr)
+                RelJump::WriteOpcodes(_HookCode.data(), functionToHook, jump_mem, func_mode, func_mode);
+            else
+                AbsJump::WriteOpcodes(_HookCode.data(), newFunction, func_mode, hook_mode);
             {
                 // Nothing can be logged while the other threads are suspended: it would allocate.
                 bool frozen  = false;
@@ -1117,7 +1133,6 @@ class Hook_t
 
                 if (!written)
                 {
-                    Globals_t::Instance().Memory.FreeJump(jump_mem);
                     SPDLOG_ERROR(frozen ? "Failed to write the hook." : "A thread is running the code to hook.");
                     goto error;
                 }
@@ -1125,7 +1140,7 @@ class Hook_t
 
 #ifdef USE_SPDLOG
             {
-                size_t dbg_opcode_size = relativeJumpSize;
+                size_t dbg_opcode_size = hookSize;
                 std::stringstream sstr;
                 for (size_t i = 0; i < dbg_opcode_size; ++i)
                 {
@@ -1149,6 +1164,9 @@ class Hook_t
     error:
         // The function code wasn't modified: only its rights may have been.
         writer.Finish();
+
+        if (jump_mem != nullptr)
+            Globals_t::Instance().Memory.FreeJump(jump_mem);
 
         _SavedCode.clear();
         _HookCode.clear();
@@ -1220,6 +1238,13 @@ class Hook_t
         {
             // Our Hook code has been modified, we have to nullify the hook:
             // the jump to the detour now goes to the original function trampoline, which stays allocated.
+            // An absolute hook jumps to the detour directly: nothing can be redirected, the hook stays in place.
+            if (_TrampolineAddress == nullptr)
+            {
+                SPDLOG_ERROR("The hooked code was changed by someone else, and the hook has no jump slot to bypass the detour.");
+                return nullptr;
+            }
+
             // The jump is reached from the hooked function and goes to its relocated code: both use the function mode.
             const int func_mode = _GetCodeMode(_OriginalTrampolineCallAddress);
             if (!_WriteJumpSlot(_TrampolineAddress, _OriginalTrampolineAddress, func_mode, func_mode))
