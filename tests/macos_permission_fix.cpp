@@ -4,7 +4,7 @@
 #include <iostream>
 #include <vector>
 
-struct section_t
+struct Section_t
 {
     segment_command_64 cmd;
     std::vector<section_64> sections;
@@ -23,7 +23,7 @@ int main(int argc, char *argv[])
         mach_header_64 hdr;
         f.read((char *)&hdr, sizeof(hdr));
 
-        std::vector<section_t> section_headers;
+        std::vector<Section_t> section_headers;
 
         section_headers.resize(hdr.ncmds);
 

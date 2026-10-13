@@ -9,7 +9,7 @@
 TEST_CASE("Thumb hook with a jump region 20 MB away", "[arm_thumb_jump_range]")
 {
     // A first hook creates a jump region next to its function, with free slots left.
-    CodeBuffer first;
+    CodeBuffer_t first;
     REQUIRE(first.IsValid());
     first.Write(0, {0x00, 0xBF, 0x00, 0xBF, 0x2A, 0x20, 0x70, 0x47}); // nop; nop; movs r0, #42; bx lr
     first.Write(64, {0x07, 0x20, 0x70, 0x47});                        // movs r0, #7; bx lr
@@ -17,7 +17,7 @@ TEST_CASE("Thumb hook with a jump region 20 MB away", "[arm_thumb_jump_range]")
     REQUIRE(firstHook.HookFunction(ThumbAddress(first.Data()), ThumbAddress(first.Data(64))) != nullptr);
 
     // A second function 20 MB away: in reach of that region for ARM, not for Thumb.
-    CodeBuffer second(4096, first.Data(0x1400000));
+    CodeBuffer_t second(4096, first.Data(0x1400000));
     REQUIRE(second.IsValid());
     const uintptr_t distance = reinterpret_cast<uintptr_t>(second.Data()) - reinterpret_cast<uintptr_t>(first.Data());
     REQUIRE(distance > 0x1100000);

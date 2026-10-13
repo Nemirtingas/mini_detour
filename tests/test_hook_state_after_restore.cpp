@@ -10,7 +10,7 @@ static int HookStateDetour()
 // (which can be given to another hook) and GetHookFunction the old detour.
 TEST_CASE("Restored hook doesn't expose its old trampoline", "[hook_state]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     GeneratedCode::WriteReturnConstant(code, 0, 1);
 
@@ -26,7 +26,7 @@ TEST_CASE("Restored hook doesn't expose its old trampoline", "[hook_state]")
 
 TEST_CASE("A restored hook object can hook again", "[hook_state]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     GeneratedCode::WriteReturnConstant(code, 0, 1);
     GeneratedCode::WriteReturnConstant(code, 32, 2);

@@ -117,7 +117,7 @@ static std::string kern_return_t_2_str(kern_return_t v)
 
 // Suspends the other threads of the process while hooked code is written: a thread running the bytes being written
 // could execute half of the old and half of the new instructions.
-class _OtherThreadsFreezer_t
+class OtherThreadsFreezer_t
 {
     // Allocated by task_threads (not on the heap). The threads that aren't suspended are set to MACH_PORT_NULL.
     thread_act_array_t _Threads;
@@ -190,13 +190,13 @@ class _OtherThreadsFreezer_t
     }
 
   public:
-    _OtherThreadsFreezer_t()
+    OtherThreadsFreezer_t()
         : _Threads(nullptr)
         , _ThreadCount(0)
     {
     }
 
-    ~_OtherThreadsFreezer_t() { Unfreeze(); }
+    ~OtherThreadsFreezer_t() { Unfreeze(); }
 
     // Retries a few times when a thread is inside the code: it is most likely only passing through.
     bool Freeze(void *code, size_t size)
@@ -854,7 +854,7 @@ static size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportD
 // importing it. Their own sections lose their type and stay empty. These slots are found from the stubs, which the
 // indirect symbol table names too. Replacing one replaces the import in every shared cache image calling it through a
 // stub.
-struct _ImportSlot_t
+struct ImportSlot_t
 {
     // Without the leading '_' of C symbols.
     const char *Name;
@@ -907,7 +907,7 @@ static void **_GetStubSlot(const uint8_t *stub)
 #endif
 }
 
-// Calls callback(_ImportSlot_t const&) for every import slot of the image, until it returns false.
+// Calls callback(ImportSlot_t const&) for every import slot of the image, until it returns false.
 template <typename Callback>
 static bool _ForEachImportSlot(void *moduleHandle, Callback callback)
 {
@@ -1024,7 +1024,7 @@ static bool _ForEachImportSlot(void *moduleHandle, Callback callback)
                         ++name;
 
                     const uint32_t ordinal = GET_LIBRARY_ORDINAL(symbol.n_desc);
-                    _ImportSlot_t importSlot;
+                    ImportSlot_t importSlot;
                     importSlot.Name       = name;
                     importSlot.ModuleName = ordinal >= 1 && ordinal <= libraryCount ? libraries[ordinal - 1] : "";
                     importSlot.Slot       = slot;
@@ -1042,7 +1042,7 @@ static bool _ForEachImportSlot(void *moduleHandle, Callback callback)
 
 // The address a slot leads to. An unresolved lazy slot points to dyld's binding stub: calling it would bind the slot
 // again, over a replacement. The function is then resolved from the library the symbol is imported from.
-static void *_GetImportTarget(_ImportSlot_t const &importSlot)
+static void *_GetImportTarget(ImportSlot_t const &importSlot)
 {
     if (!importSlot.Lazy)
         return *importSlot.Slot;
@@ -1096,7 +1096,7 @@ static bool _WriteImportSlot(void **slot, void *value)
 // Where dyld looks the exports of an image up (dlsym, binding of the images loaded later): the export trie. Its location
 // is read once when the image is loaded, so it can only be modified in place. The padding between the load commands and
 // the first section of __TEXT is kept too: it is where the export jumps are written.
-struct _ExportTrie_t
+struct ExportTrie_t
 {
     uintptr_t Base;
     uint8_t *Start;
@@ -1112,7 +1112,7 @@ static const dyld_info_command *_FindDyldInfo(const MachHeader_t *header)
     return dyldInfo != nullptr ? dyldInfo : _FindLoadCommand<dyld_info_command>(header, LC_DYLD_INFO);
 }
 
-static bool _GetExportTrie(void *moduleHandle, _ExportTrie_t *exportTrie)
+static bool _GetExportTrie(void *moduleHandle, ExportTrie_t *exportTrie)
 {
     const MachHeader_t *header;
     uintptr_t slide;
@@ -1192,7 +1192,7 @@ static bool _WriteUleb128(uint64_t value, uint8_t *buffer, size_t size)
 
 // Finds the address of an exported symbol in the trie: an offset from the image header, encoded on *fieldSize bytes.
 // Re-exports, resolvers, absolute and thread local symbols are refused.
-static uint8_t *_FindExportAddressField(_ExportTrie_t const &exportTrie, const char *exportName, size_t *fieldSize)
+static uint8_t *_FindExportAddressField(ExportTrie_t const &exportTrie, const char *exportName, size_t *fieldSize)
 {
     // C symbols start with '_' on macOS.
     const std::string symbolName = std::string("_") + exportName;
@@ -1261,20 +1261,20 @@ static uint8_t *_FindExportAddressField(_ExportTrie_t const &exportTrie, const c
 
 static size_t _ExportJumpSlotSize()
 {
-    return (AbsJump::GetMaxOpcodeSize() + 15) & ~static_cast<size_t>(15);
+    return (AbsJump_t::GetMaxOpcodeSize() + 15) & ~static_cast<size_t>(15);
 }
 
-static bool _IsExportJump(_ExportTrie_t const &exportTrie, uintptr_t address)
+static bool _IsExportJump(ExportTrie_t const &exportTrie, uintptr_t address)
 {
     return address >= exportTrie.PaddingStart && address + _ExportJumpSlotSize() <= exportTrie.PaddingEnd;
 }
 
 // The export offset keeps its encoded size, often 2 bytes (16 KB from the header): a jump above the image is out of
 // reach, but the zero filled padding after the load commands isn't. A slot is free when it is all zeros (a jump never is).
-static void *_WriteExportJump(_ExportTrie_t const &exportTrie, void *target)
+static void *_WriteExportJump(ExportTrie_t const &exportTrie, void *target)
 {
     const size_t slotSize = _ExportJumpSlotSize();
-    uint8_t code[AbsJump::GetMaxOpcodeSize()];
+    uint8_t code[AbsJump_t::GetMaxOpcodeSize()];
     const size_t jumpSize = MiniDetour::MemoryManipulation::WriteAbsoluteJump(code, target);
 
     for (uintptr_t slot = (exportTrie.PaddingStart + 15) & ~static_cast<uintptr_t>(15); slot + slotSize <= exportTrie.PaddingEnd; slot += slotSize)
@@ -1299,7 +1299,7 @@ static void *_WriteExportJump(_ExportTrie_t const &exportTrie, void *target)
 
 static void _FreeExportJump(void *jump)
 {
-    uint8_t zeros[AbsJump::GetMaxOpcodeSize() + 16] = {};
+    uint8_t zeros[AbsJump_t::GetMaxOpcodeSize() + 16] = {};
     _WriteProtected(jump, zeros, _ExportJumpSlotSize());
 }
 
@@ -1308,7 +1308,7 @@ static size_t GetAllIATSymbols(void *moduleHandle, IATDetails_t *iatDetails, siz
     size_t result = 0;
     _ForEachImportSlot(
         moduleHandle,
-        [&](_ImportSlot_t const &importSlot)
+        [&](ImportSlot_t const &importSlot)
         {
             if (iatDetails != nullptr)
             {
@@ -1336,7 +1336,7 @@ static size_t ReplaceModuleExports(void *moduleHandle, ExportReplaceParameter_t 
     for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
         exportReplaceDetails[i].ExportCallAddress = nullptr;
 
-    _ExportTrie_t exportTrie;
+    ExportTrie_t exportTrie;
     if (!_GetExportTrie(moduleHandle, &exportTrie))
         return result;
 
@@ -1392,7 +1392,7 @@ static size_t RestoreModuleExports(void *moduleHandle, ExportReplaceParameter_t 
     for (size_t i = 0; i < exportReplaceDetailsCount; ++i)
         exportReplaceDetails[i].NewExportAddress = nullptr;
 
-    _ExportTrie_t exportTrie;
+    ExportTrie_t exportTrie;
     if (!_GetExportTrie(moduleHandle, &exportTrie))
         return result;
 
@@ -1451,7 +1451,7 @@ static size_t _ExchangeModuleIATs(
         bool exchanged = false;
         _ForEachImportSlot(
             moduleHandle,
-            [&](_ImportSlot_t const &importSlot)
+            [&](ImportSlot_t const &importSlot)
             {
                 if (strcmp(importSlot.Name, parameter.IATName) != 0 || !_ImportModuleMatches(parameter.IATModuleName, importSlot.ModuleName))
                     return true;

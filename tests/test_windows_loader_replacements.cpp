@@ -127,9 +127,9 @@ TEST_CASE("Loader functions replaced in the executable aren't called by the libr
     tickCount.IATName       = "GetTickCount";
     tickCount.NewIATAddress = (void *)&LoaderReplacementsGetTickCount;
 
-    struct RegionInfos : MiniDetour::MemoryManipulation::RegionInfos_t
+    struct NamedRegionInfos_t : MiniDetour::MemoryManipulation::RegionInfos_t
     {
-        RegionInfos() { StructSize = sizeof(*this); }
+        NamedRegionInfos_t() { StructSize = sizeof(*this); }
 
         char extraNameSpace[512];
     } infos;

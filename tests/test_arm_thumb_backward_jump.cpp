@@ -101,7 +101,7 @@ TEST_CASE("Thumb hook jumping backward to its jump slot", "[arm_thumb_backward_j
     munmap(reinterpret_cast<void *>(base), firstAddress + pageSize - base);
     munmap(reinterpret_cast<void *>(secondAddress), pageSize);
 
-    CodeBuffer first(pageSize, reinterpret_cast<void *>(firstAddress));
+    CodeBuffer_t first(pageSize, reinterpret_cast<void *>(firstAddress));
     REQUIRE(first.Data() == reinterpret_cast<uint8_t *>(firstAddress));
     first.Write(0, {0x00, 0xBF, 0x00, 0xBF, 0x2A, 0x20, 0x70, 0x47}); // nop; nop; movs r0, #42; bx lr
     first.Write(64, {0x07, 0x20, 0x70, 0x47});                        // movs r0, #7; bx lr
@@ -113,7 +113,7 @@ TEST_CASE("Thumb hook jumping backward to its jump slot", "[arm_thumb_backward_j
     INFO("First function: " << (void *)firstAddress << ", its jump slot: " << (void *)firstSlot);
     REQUIRE(firstSlot < firstAddress);
 
-    CodeBuffer second(pageSize, reinterpret_cast<void *>(secondAddress));
+    CodeBuffer_t second(pageSize, reinterpret_cast<void *>(secondAddress));
     REQUIRE(second.Data() == reinterpret_cast<uint8_t *>(secondAddress));
     second.Write(0, {0x00, 0xBF, 0x00, 0xBF, 0x2B, 0x20, 0x70, 0x47}); // nop; nop; movs r0, #43; bx lr
     second.Write(64, {0x08, 0x20, 0x70, 0x47});                        // movs r0, #8; bx lr

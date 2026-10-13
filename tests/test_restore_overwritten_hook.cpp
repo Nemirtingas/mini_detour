@@ -10,7 +10,7 @@ static int OverwrittenHookDetour()
 // instead of redirecting it to the original code, so the detour stayed active.
 TEST_CASE("Restoring a hook overwritten by someone else bypasses the detour", "[restore_overwritten]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     GeneratedCode::WriteReturnConstant(code, 0, 1);
     auto function = GeneratedCode::Function(code);

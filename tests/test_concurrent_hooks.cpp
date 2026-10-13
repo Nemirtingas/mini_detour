@@ -19,7 +19,7 @@ TEST_CASE("Hooks set from several threads", "[concurrent_hooks]")
     static constexpr int iterations  = 300;
 
     // All the functions share one page.
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     for (int i = 0; i < threadCount; ++i)
         GeneratedCode::WriteReturnConstant(code, i * 64, static_cast<uint16_t>(i));

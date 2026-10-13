@@ -10,7 +10,7 @@ static int TEST_CALL RestoreOnlyHookBytesDetour()
 // the hook only overwrote the bytes of its relative jump: a change made after them in the meantime was undone.
 TEST_CASE("Restoring a hook only writes back the bytes it overwrote", "[restore_hook_bytes]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     // No-op instructions after the return value: room for an absolute jump.
     GeneratedCode::WriteReturnConstant(code, 0, 1, 32 / GeneratedCode::NopSize);

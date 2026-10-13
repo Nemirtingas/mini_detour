@@ -13,7 +13,7 @@ static int StartsWithCallDetour()
 // A function starting with "call" was treated as a thunk, so the callee was hooked instead.
 TEST_CASE("Hook a function starting with a call", "[call_prologue]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
 
     const size_t calleeOffset = 32;

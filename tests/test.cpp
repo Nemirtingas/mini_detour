@@ -74,7 +74,7 @@ static void _EnterRecursiveThunk(void *&_pCode)
 // The helper decoded jmp [rip + disp32] (x64) as jmp [disp32] (x86), and followed calls.
 TEST_CASE("Test thunk helper follows jmp [address]", "[test_thunk_helper]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
 
     // The jump target, followed by nothing the helper follows.
@@ -636,7 +636,7 @@ TEST_CASE("Hook small function with call", "[Hook function]")
     // Executable copy of: push eax/rax; call nothing; pop eax/rax; ret
     // (the code used to be a string literal, modified in place in read-only data).
     // Allocated near nothing for the rel32 call, and before the hook so it outlives it.
-    CodeBuffer code(4096, nothing_addr);
+    CodeBuffer_t code(4096, nothing_addr);
     REQUIRE(code.IsValid());
     code.Write(0, {0x50, 0xE8, 0x00, 0x00, 0x00, 0x00, 0x58, 0xC3});
     auto test_func = code.As<void (*)()>();

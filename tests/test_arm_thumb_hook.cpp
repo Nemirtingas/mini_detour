@@ -10,7 +10,7 @@
 TEST_CASE("Hook a Thumb function with a close detour", "[arm_thumb_hook]")
 {
     // 64 KB: the function is at the start, so the jump slot, allocated next to the buffer, is far from it.
-    CodeBuffer code(0x10000);
+    CodeBuffer_t code(0x10000);
     REQUIRE(code.IsValid());
 
     code.Write(0, {0x00, 0xBF, 0x00, 0xBF, 0x2A, 0x20, 0x70, 0x47}); // nop; nop; movs r0, #42; bx lr

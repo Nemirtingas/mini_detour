@@ -102,7 +102,7 @@ TEST_CASE("A function with no free memory in range is hooked with an absolute ju
     REQUIRE(function != 0);
 
     {
-        CodeBuffer code(static_cast<size_t>(unit), reinterpret_cast<void *>(function));
+        CodeBuffer_t code(static_cast<size_t>(unit), reinterpret_cast<void *>(function));
         REQUIRE(code.Data() == reinterpret_cast<uint8_t *>(function));
         // Room for an absolute jump.
         GeneratedCode::WriteReturnConstant(code, 0, 1, 32 / GeneratedCode::NopSize);

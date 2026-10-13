@@ -10,7 +10,7 @@ static int TEST_CALL JccDetour(int)
     return 100;
 }
 
-static void CheckJccFunction(CodeBuffer &code)
+static void CheckJccFunction(CodeBuffer_t &code)
 {
     auto function = code.As<JccFunc_t>();
     REQUIRE(function(0) == 2);
@@ -35,7 +35,7 @@ static void CheckJccFunction(CodeBuffer &code)
 // A conditional jump in the relocated prologue was turned into an unconditional jump.
 TEST_CASE("Relocate a short conditional jump", "[jcc_relocation]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
 
     code.Write(
@@ -65,7 +65,7 @@ TEST_CASE("Relocate a short conditional jump", "[jcc_relocation]")
 
 TEST_CASE("Relocate a near conditional jump", "[jcc_relocation]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
 
     code.Write(

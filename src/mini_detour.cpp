@@ -67,7 +67,7 @@ struct fmt::formatter<MiniDetour::MemoryManipulation::MemoryRights>
 #include <windows.h>
 #endif
 
-class CodeDisasm
+class CodeDisasm_t
 {
     csh _DisasmHandle;
     cs_insn _CurrentInstruction;
@@ -85,7 +85,7 @@ class CodeDisasm
     }
 
   public:
-    CodeDisasm()
+    CodeDisasm_t()
         : _DisasmHandle{}
         , _CurrentInstruction{}
         , _InstructionImplementation{}
@@ -93,7 +93,7 @@ class CodeDisasm
         _CurrentInstruction.detail = &_InstructionImplementation;
     }
 
-    ~CodeDisasm() { _CloseHandle(); }
+    ~CodeDisasm_t() { _CloseHandle(); }
 
     cs_err Init(cs_arch arch, cs_mode mode)
     {
@@ -293,7 +293,7 @@ inline size_t _RegionSize()
 
 inline size_t _JumpsInRegion()
 {
-    return _RegionSize() / AbsJump::GetMaxOpcodeSize();
+    return _RegionSize() / AbsJump_t::GetMaxOpcodeSize();
 }
 
 inline size_t _PageAddrSize(void *addr, size_t len, size_t page_size)
@@ -318,20 +318,20 @@ void EndCodeWrite(void *address, size_t size);
 } // namespace MemoryManipulation
 } // namespace MiniDetour
 
-class MemoryManager
+class MemoryManager_t
 {
     struct JumpRegion_t
     {
         std::vector<bool> bitmap;
-        struct jump_t
+        struct JumpSlot_t
         {
-            uint8_t code[AbsJump::GetMaxOpcodeSize()];
+            uint8_t code[AbsJump_t::GetMaxOpcodeSize()];
         };
-        jump_t *jump_table;
+        JumpSlot_t *jump_table;
     };
 
-    std::vector<JumpRegion_t> jumps_regions;     // Jumps next to functions addresses
-    std::vector<memory_t *> trampolines_regions; // memory regions for trampolines
+    std::vector<JumpRegion_t> jumps_regions;             // Jumps next to functions addresses
+    std::vector<TrampolineSlot_t *> trampolines_regions; // memory regions for trampolines
 
   public:
     // Allocates near hint_addr. When the closest free memory isn't usable from reference (for example below a module
@@ -396,7 +396,7 @@ class MemoryManager
             auto &region = *jumps_regions.rbegin();
             region.bitmap.resize(_JumpsInRegion(), false);
             region.bitmap[0]  = true;
-            region.jump_table = (JumpRegion_t::jump_t *)jump_table;
+            region.jump_table = (JumpRegion_t::JumpSlot_t *)jump_table;
         }
 
         return jump_table;
@@ -436,7 +436,7 @@ class MemoryManager
     {
         SPDLOG_DEBUG("Freeing jump {}", jump);
 
-        JumpRegion_t::jump_t *jump_addr = reinterpret_cast<JumpRegion_t::jump_t *>(jump);
+        JumpRegion_t::JumpSlot_t *jump_addr = reinterpret_cast<JumpRegion_t::JumpSlot_t *>(jump);
 
         for (auto &region : jumps_regions)
         {
@@ -448,9 +448,9 @@ class MemoryManager
         }
     }
 
-    memory_t *AllocTrampolineRegion()
+    TrampolineSlot_t *AllocTrampolineRegion()
     {
-        memory_t *mem = (memory_t *)MiniDetour::MemoryManipulation::Implementation::AllocCode(nullptr, _RegionSize());
+        TrampolineSlot_t *mem = (TrampolineSlot_t *)MiniDetour::MemoryManipulation::Implementation::AllocCode(nullptr, _RegionSize());
         if (mem == nullptr)
             return nullptr;
 
@@ -470,36 +470,36 @@ class MemoryManager
     uint8_t *GetFreeTrampoline(size_t mem_size)
     {
         // A larger trampoline would be written over the next slot.
-        if (mem_size > sizeof(memory_t::data))
+        if (mem_size > sizeof(TrampolineSlot_t::data))
         {
-            SPDLOG_ERROR("Trampoline of {} bytes doesn't fit in a {} bytes slot.", mem_size, sizeof(memory_t::data));
+            SPDLOG_ERROR("Trampoline of {} bytes doesn't fit in a {} bytes slot.", mem_size, sizeof(TrampolineSlot_t::data));
             return nullptr;
         }
 
         for (auto memory : trampolines_regions)
         {
-            memory_t *end = memory + _RegionSize() / sizeof(memory_t);
+            TrampolineSlot_t *end = memory + _RegionSize() / sizeof(TrampolineSlot_t);
             for (; memory != end; ++memory)
             {
                 if (!memory->used)
                 {
                     SPDLOG_DEBUG("Using free memory at {}", (void *)memory);
-                    if (!MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(memory, sizeof(memory_t)))
+                    if (!MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(memory, sizeof(TrampolineSlot_t)))
                         return nullptr;
 
                     memory->used = 1;
-                    MiniDetour::MemoryManipulation::Implementation::EndCodeWrite(memory, sizeof(memory_t));
+                    MiniDetour::MemoryManipulation::Implementation::EndCodeWrite(memory, sizeof(TrampolineSlot_t));
                     return memory->data;
                 }
             }
         }
 
-        memory_t *mem_region = AllocTrampolineRegion();
-        if (mem_region == nullptr || !MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(mem_region, sizeof(memory_t)))
+        TrampolineSlot_t *mem_region = AllocTrampolineRegion();
+        if (mem_region == nullptr || !MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(mem_region, sizeof(TrampolineSlot_t)))
             return nullptr;
 
         mem_region->used = 1;
-        MiniDetour::MemoryManipulation::Implementation::EndCodeWrite(mem_region, sizeof(memory_t));
+        MiniDetour::MemoryManipulation::Implementation::EndCodeWrite(mem_region, sizeof(TrampolineSlot_t));
         SPDLOG_DEBUG("Using new memory at {}", (void *)mem_region);
 
         return mem_region->data;
@@ -508,13 +508,13 @@ class MemoryManager
     void FreeTrampoline(void *trampoline)
     {
         SPDLOG_DEBUG("Freeing trampoline {}", trampoline);
-        memory_t *mem = reinterpret_cast<memory_t *>(reinterpret_cast<uint8_t *>(trampoline) - offsetof(memory_t, data));
+        TrampolineSlot_t *mem = reinterpret_cast<TrampolineSlot_t *>(reinterpret_cast<uint8_t *>(trampoline) - offsetof(TrampolineSlot_t, data));
 
-        if (!MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(mem, sizeof(memory_t)))
+        if (!MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(mem, sizeof(TrampolineSlot_t)))
             return;
 
         mem->used = 0;
-        MiniDetour::MemoryManipulation::Implementation::EndCodeWrite(mem, sizeof(memory_t));
+        MiniDetour::MemoryManipulation::Implementation::EndCodeWrite(mem, sizeof(TrampolineSlot_t));
     }
 };
 
@@ -564,7 +564,7 @@ class Globals_t
     // Serializes the operations that write code or import/export tables: they share the memory manager slots and
     // change the rights of pages shared between hooks, and hooks can be set from several threads.
     std::mutex HookMutex;
-    MemoryManager Memory;
+    MemoryManager_t Memory;
 
     // Never destroyed: Hook_t objects with static storage restore their hook (and use the globals) during static
     // destruction, possibly after the globals would have been destroyed.
@@ -579,11 +579,11 @@ class Globals_t
 // Writes an absolute jump in a jump slot.
 static bool _WriteJumpSlot(void *jump, void *destination, int sourceMode, int destinationMode)
 {
-    const size_t jumpSize = AbsJump::GetMaxOpcodeSize();
+    const size_t jumpSize = AbsJump_t::GetMaxOpcodeSize();
     if (!MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(jump, jumpSize))
         return false;
 
-    AbsJump::WriteOpcodes(jump, destination, sourceMode, destinationMode);
+    AbsJump_t::WriteOpcodes(jump, destination, sourceMode, destinationMode);
     MiniDetour::MemoryManipulation::Implementation::EndCodeWrite(jump, jumpSize);
     return true;
 }
@@ -753,9 +753,9 @@ size_t WriteAbsoluteJump(void *address, void *destination)
     int destination_mode = _GetCodeMode(destination);
 
     if (address == nullptr)
-        return AbsJump::GetOpcodeSize(destination, source_mode, destination_mode);
+        return AbsJump_t::GetOpcodeSize(destination, source_mode, destination_mode);
 
-    return AbsJump::WriteOpcodes(address, destination, source_mode, destination_mode);
+    return AbsJump_t::WriteOpcodes(address, destination, source_mode, destination_mode);
 }
 } // namespace Implementation
 } // namespace MemoryManipulation
@@ -763,7 +763,7 @@ size_t WriteAbsoluteJump(void *address, void *destination)
 
 // Writes over the code of a hooked function, which the library doesn't own. Prepare runs before the other threads are
 // frozen (it may allocate), Write while they are, and Finish once they run again.
-class _FunctionCodeWriter
+class FunctionCodeWriter_t
 {
     void *_Address;
     size_t _Size;
@@ -771,7 +771,7 @@ class _FunctionCodeWriter
     MiniDetour::MemoryManipulation::MemoryRights _OldRights;
 
   public:
-    _FunctionCodeWriter()
+    FunctionCodeWriter_t()
         : _Address(nullptr)
         , _Size(0)
         , _ByRemap(false)
@@ -911,7 +911,7 @@ class Hook_t
         if (_OriginalFuncAddress != nullptr)
             return false;
 
-        CodeDisasm disasm;
+        CodeDisasm_t disasm;
 
         // Before reading the mode: on ARM, a PLT entry and the function it leads to can use different modes.
         _EnterRecursiveThunk(func);
@@ -921,8 +921,8 @@ class Hook_t
         if (_InitDisasm(disasm, code_mode) != cs_err::CS_ERR_OK)
             return false;
 
-        size_t relativeJumpSize          = RelJump::GetOpcodeSize(func, reinterpret_cast<void *>(static_cast<uintptr_t>(0xfffffff0)), code_mode, code_mode);
-        size_t absoluteJumpSize          = AbsJump::GetOpcodeSize(func, code_mode, code_mode);
+        size_t relativeJumpSize          = RelJump_t::GetOpcodeSize(func, reinterpret_cast<void *>(static_cast<uintptr_t>(0xfffffff0)), code_mode, code_mode);
+        size_t absoluteJumpSize          = AbsJump_t::GetOpcodeSize(func, code_mode, code_mode);
         size_t smallest_jump_size        = std::min(relativeJumpSize, absoluteJumpSize);
         size_t relocatedOriginalCodeSize = 0;
 
@@ -933,7 +933,7 @@ class Hook_t
         void *&functionToHook,
         void *&newFunction,
         bool ignoreRelocations,
-        CodeDisasm &disasm,
+        CodeDisasm_t &disasm,
         size_t &relativeJumpSize,
         size_t &absoluteJumpSize,
         size_t &relocatableSize,
@@ -953,8 +953,8 @@ class Hook_t
 
         // The relative jump goes to a jump slot that isn't allocated yet, not to newFunction: its size can't be known here
         // (Thumb has 2 and 4 bytes encodings), so the bytes of the longest encoding are relocated.
-        relativeJumpSize = RelJump::GetMaxOpcodeSize();
-        absoluteJumpSize = AbsJump::GetOpcodeSize(newFunction, func_mode, hook_mode);
+        relativeJumpSize = RelJump_t::GetMaxOpcodeSize();
+        absoluteJumpSize = AbsJump_t::GetOpcodeSize(newFunction, func_mode, hook_mode);
         relocatableSize  = _GetRelocatableSize(functionToHook, relocatedOriginalCodeSize, ignoreRelocations, disasm, absoluteJumpSize);
 
         return true;
@@ -964,7 +964,7 @@ class Hook_t
     {
         int func_mode;
         int hook_mode;
-        CodeDisasm disasm;
+        CodeDisasm_t disasm;
 
         size_t relativeJumpSize          = 0;
         size_t absoluteJumpSize          = 0;
@@ -994,7 +994,7 @@ class Hook_t
         void *jump_mem = nullptr;
         if (relocatableSize >= absoluteJumpSize)
         {
-            AbsJump::WriteOpcodes(code.data(), newFunction, func_mode, hook_mode);
+            AbsJump_t::WriteOpcodes(code.data(), newFunction, func_mode, hook_mode);
         }
         else
         {
@@ -1009,14 +1009,14 @@ class Hook_t
                 return false;
             }
 
-            RelJump::WriteOpcodes(code.data(), functionToReplace, jump_mem, func_mode, hook_mode);
+            RelJump_t::WriteOpcodes(code.data(), functionToReplace, jump_mem, func_mode, hook_mode);
         }
 
-        _FunctionCodeWriter writer;
+        FunctionCodeWriter_t writer;
         bool written = false;
         if (writer.Prepare(functionToReplace, relocatableSize))
         {
-            _OtherThreadsFreezer_t freezer;
+            OtherThreadsFreezer_t freezer;
             written = freezer.Freeze(functionToReplace, relocatableSize) && writer.Write(code.data());
         }
         writer.Finish();
@@ -1038,7 +1038,7 @@ class Hook_t
 
         int func_mode;
         int hook_mode;
-        CodeDisasm disasm;
+        CodeDisasm_t disasm;
 
         size_t relativeJumpSize          = 0;
         size_t absoluteJumpSize          = 0;
@@ -1050,7 +1050,7 @@ class Hook_t
 
         size_t totalOriginalTrampolineSize = 0;
         // Finished in the error path too once the function was prepared for writing.
-        _FunctionCodeWriter writer;
+        FunctionCodeWriter_t writer;
         // The jump slot the hook goes through, freed in the error path. The size of the jump written in the function.
         void *jump_mem  = nullptr;
         size_t hookSize = relativeJumpSize;
@@ -1083,7 +1083,7 @@ class Hook_t
 
         // Upper bound of the trampoline code: the relocated code + the jump back to the function (its size can depend
         // on its destination). Used to check the slot size, and to protect and flush the whole trampoline.
-        totalOriginalTrampolineSize = relocatedOriginalCodeSize + AbsJump::GetMaxOpcodeSize();
+        totalOriginalTrampolineSize = relocatedOriginalCodeSize + AbsJump_t::GetMaxOpcodeSize();
 
         _OriginalTrampolineAddress = Globals_t::Instance().Memory.GetFreeTrampoline(totalOriginalTrampolineSize);
         if (_OriginalTrampolineAddress == nullptr)
@@ -1148,15 +1148,15 @@ class Hook_t
             // size keeps the original bytes after it.
             _HookCode = _SavedCode;
             if (jump_mem != nullptr)
-                RelJump::WriteOpcodes(_HookCode.data(), functionToHook, jump_mem, func_mode, func_mode);
+                RelJump_t::WriteOpcodes(_HookCode.data(), functionToHook, jump_mem, func_mode, func_mode);
             else
-                AbsJump::WriteOpcodes(_HookCode.data(), newFunction, func_mode, hook_mode);
+                AbsJump_t::WriteOpcodes(_HookCode.data(), newFunction, func_mode, hook_mode);
             {
                 // Nothing can be logged while the other threads are suspended: it would allocate.
                 bool frozen  = false;
                 bool written = false;
                 {
-                    _OtherThreadsFreezer_t freezer;
+                    OtherThreadsFreezer_t freezer;
                     frozen  = freezer.Freeze(functionToHook, _HookCode.size());
                     written = frozen && writer.Write(_HookCode.data());
                 }
@@ -1240,7 +1240,7 @@ class Hook_t
         // buffer has the size of _HookCode.
         if (std::equal(buffer.begin(), buffer.end(), _HookCode.begin()))
         { // Our hook code is still there, we can restore the old instructions.
-            _FunctionCodeWriter writer;
+            FunctionCodeWriter_t writer;
             if (!writer.Prepare(_OriginalFuncAddress, _SavedCode.size()))
             {
                 writer.Finish();
@@ -1249,7 +1249,7 @@ class Hook_t
 
             bool written = false;
             {
-                _OtherThreadsFreezer_t freezer;
+                OtherThreadsFreezer_t freezer;
                 written = freezer.Freeze(_OriginalFuncAddress, _SavedCode.size()) && writer.Write(_SavedCode.data());
             }
             writer.Finish();

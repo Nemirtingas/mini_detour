@@ -18,11 +18,11 @@ static MiniDetour::MemoryManipulation::MemoryRights CurrentRights(void *address)
 // The hooked code was always left mem_rx: a JIT buffer (rwx) lost its write access when it was hooked or restored.
 TEST_CASE("Hooking keeps the rights of writable code", "[keep_function_protection]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     GeneratedCode::WriteReturnConstant(code, 0, 1);
     auto function = GeneratedCode::Function(code);
-    // A CodeBuffer is only readable and executable: make it writable code, like a JIT buffer.
+    // A CodeBuffer_t is only readable and executable: make it writable code, like a JIT buffer.
     REQUIRE(MiniDetour::MemoryManipulation::MemoryProtect(code.Data(), 4096, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx));
     REQUIRE(CurrentRights(code.Data()) == MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
 
@@ -38,7 +38,7 @@ TEST_CASE("Hooking keeps the rights of writable code", "[keep_function_protectio
 
 TEST_CASE("Replacing keeps the rights of writable code", "[keep_function_protection]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     // Room for an absolute jump.
     GeneratedCode::WriteReturnConstant(code, 0, 1, 32 / GeneratedCode::NopSize);
@@ -54,7 +54,7 @@ TEST_CASE("Replacing keeps the rights of writable code", "[keep_function_protect
 
 TEST_CASE("Hooking keeps read-only code read-only", "[keep_function_protection]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     GeneratedCode::WriteReturnConstant(code, 0, 1);
     REQUIRE(MiniDetour::MemoryManipulation::MemoryProtect(code.Data(), 4096, MiniDetour::MemoryManipulation::MemoryRights::mem_rx));

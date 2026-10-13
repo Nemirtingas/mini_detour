@@ -10,9 +10,9 @@
 // The region listing tests only printed the regions: they now check what is listed.
 
 template <size_t ExtraNameSpace>
-struct NamedRegionInfos : MiniDetour::MemoryManipulation::RegionInfos_t
+struct NamedRegionInfos_t : MiniDetour::MemoryManipulation::RegionInfos_t
 {
-    NamedRegionInfos() { StructSize = sizeof(*this); }
+    NamedRegionInfos_t() { StructSize = sizeof(*this); }
 
     char extraNameSpace[ExtraNameSpace];
 };
@@ -92,7 +92,7 @@ static bool HasRights(MiniDetour::MemoryManipulation::MemoryRights rights, MiniD
 
 static std::string FullRegionName(const void *address)
 {
-    NamedRegionInfos<1024> infos;
+    NamedRegionInfos_t<1024> infos;
     MiniDetour::MemoryManipulation::GetRegionInfos(const_cast<void *>(address), &infos);
     return infos.ModuleName;
 }
@@ -100,7 +100,7 @@ static std::string FullRegionName(const void *address)
 TEST_CASE("Memory mappings", "[vmmap]")
 {
     SPDLOG_INFO("Memory mappings with big enough name space");
-    auto regions = ListAllRegions<NamedRegionInfos<1024>>();
+    auto regions = ListAllRegions<NamedRegionInfos_t<1024>>();
     LogRegions(regions);
     REQUIRE(!regions.empty());
     CheckSortedWithoutOverlap(regions);
@@ -127,11 +127,11 @@ TEST_CASE("Memory mappings", "[vmmap]")
 
 TEST_CASE("Memory mappings with name buffer too small", "[vmmap]")
 {
-    using SmallRegionInfos = NamedRegionInfos<7>;
-    const size_t capacity  = NameCapacity<SmallRegionInfos>();
+    using SmallRegionInfos_t = NamedRegionInfos_t<7>;
+    const size_t capacity    = NameCapacity<SmallRegionInfos_t>();
 
     SPDLOG_INFO("Memory mappings with small module name");
-    auto regions = ListAllRegions<SmallRegionInfos>();
+    auto regions = ListAllRegions<SmallRegionInfos_t>();
     LogRegions(regions);
     REQUIRE(!regions.empty());
     CheckSortedWithoutOverlap(regions);

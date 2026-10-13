@@ -21,13 +21,13 @@ static bool _AddressesAreRelativeJumpable(void *source, void *dest)
 #pragma pack(push, 1)
 
 // Struct used by the memory manager to allocate trampolines
-struct memory_t
+struct TrampolineSlot_t
 {
     uint8_t used;
     uint8_t data[32]; // Max absolute jump size is 6 bytes
 };
 
-struct AbsJump
+struct AbsJump_t
 {
     static inline size_t WriteOpcodes(void *buffer, void *jump_destination, int /*source_mode*/, int /*dest_mode*/)
     {
@@ -62,7 +62,7 @@ struct AbsJump
     }
 };
 
-struct RelJump
+struct RelJump_t
 {
     static inline size_t WriteOpcodes(void *buffer, void *source, void *jump_destination, int /*source_mode*/, int /*dest_mode*/)
     {
@@ -95,7 +95,7 @@ struct RelJump
     }
 };
 
-struct CpuPush
+struct CpuPush_t
 {
     static size_t WriteOpcodes(void *source, uint32_t value)
     {
@@ -168,9 +168,9 @@ static inline void *_GetCallAddress(void *code, int /*mode*/)
     return code;
 }
 
-static inline cs_err _InitDisasm(CodeDisasm &disasm, int /*mode*/)
+static inline cs_err _InitDisasm(CodeDisasm_t &disasm, int /*mode*/)
 {
-    return disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_32 | CodeDisasm::RuntimeEndianness()));
+    return disasm.Init(cs_arch::CS_ARCH_X86, (cs_mode)(cs_mode::CS_MODE_32 | CodeDisasm_t::RuntimeEndianness()));
 }
 
 static void _EnterRecursiveThunk(void *&_pCode)
@@ -198,7 +198,7 @@ static void _EnterRecursiveThunk(void *&_pCode)
     _pCode = pCode;
 }
 
-static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatable_size)
+static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm_t &disasm, size_t wanted_relocatable_size)
 {
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
@@ -232,14 +232,14 @@ static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize
                 else if (_GetJccConditionCode(disasm.GetInstruction(), conditionCode))
                 {
                     // Jcc rel8 over the not taken jump + not taken jump (the taken jump is the jump back)
-                    relocatedOriginalCodeSize += 2 + AbsJump::GetMaxOpcodeSize();
+                    relocatedOriginalCodeSize += 2 + AbsJump_t::GetMaxOpcodeSize();
                     relocatable_size += disasm.GetInstruction().size;
                 }
             }
             else if (disasm.GetJumpType() == 5)
             {
                 // Return address push (the call itself is the jump back)
-                relocatedOriginalCodeSize += CpuPush::GetMaxOpcodeSize();
+                relocatedOriginalCodeSize += CpuPush_t::GetMaxOpcodeSize();
                 relocatable_size += disasm.GetInstruction().size;
             }
 
@@ -263,7 +263,7 @@ static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize
     return relocatable_size;
 }
 
-static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatable_size, int /*func_mode*/)
+static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm_t &disasm, size_t wanted_relocatable_size, int /*func_mode*/)
 {
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
@@ -296,15 +296,15 @@ static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, 
                 // taken: JMP target  ; absolute jump to the Jcc target (written below)
                 relocatedSize += disasm.GetInstruction().size;
                 *pTrampolineCode++ = 0x70 | conditionCode;
-                *pTrampolineCode++ = static_cast<uint8_t>(AbsJump::GetMaxOpcodeSize());
-                pTrampolineCode += AbsJump::WriteOpcodes(reinterpret_cast<void *>(pTrampolineCode), reinterpret_cast<void *>(code_addr), 0, 0);
+                *pTrampolineCode++ = static_cast<uint8_t>(AbsJump_t::GetMaxOpcodeSize());
+                pTrampolineCode += AbsJump_t::WriteOpcodes(reinterpret_cast<void *>(pTrampolineCode), reinterpret_cast<void *>(code_addr), 0, 0);
                 originalCodeTarget = reinterpret_cast<void *>(disasm.GetInstruction().detail->x86.operands[0].imm);
                 break;
             }
             else if (disasm.GetJumpType() == 5)
             {
                 relocatedSize += disasm.GetInstruction().size;
-                pTrampolineCode += CpuPush::WriteOpcodes(
+                pTrampolineCode += CpuPush_t::WriteOpcodes(
                     reinterpret_cast<void *>(pTrampolineCode),
                     static_cast<uint32_t>(code_addr) // Where to return
                 );
@@ -329,7 +329,7 @@ static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, 
     if (originalCodeTarget == nullptr)
         originalCodeTarget = reinterpret_cast<void *>(code_addr);
 
-    AbsJump::WriteOpcodes(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pTrampolineCode)), originalCodeTarget, 0, 0);
+    AbsJump_t::WriteOpcodes(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pTrampolineCode)), originalCodeTarget, 0, 0);
 
     return relocatedSize;
 }

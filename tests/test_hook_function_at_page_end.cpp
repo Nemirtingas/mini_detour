@@ -15,7 +15,7 @@ TEST_CASE("Hook a function at the end of a readable page", "[page_end]")
 {
     const size_t pageSize = MiniDetour::MemoryManipulation::PageSize();
 
-    CodeBuffer code(pageSize * 2);
+    CodeBuffer_t code(pageSize * 2);
     REQUIRE(code.IsValid());
 
     // nop; mov eax, 42; ret -- ends exactly at the end of the first page.

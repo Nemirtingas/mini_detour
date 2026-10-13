@@ -10,7 +10,7 @@ static int HookTwiceDetour()
 // so the first hook could never be restored.
 TEST_CASE("A hook object in use refuses to hook another function", "[hook_twice]")
 {
-    CodeBuffer code;
+    CodeBuffer_t code;
     REQUIRE(code.IsValid());
     GeneratedCode::WriteReturnConstant(code, 0, 1);
     GeneratedCode::WriteReturnConstant(code, 32, 2);

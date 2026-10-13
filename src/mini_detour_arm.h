@@ -12,14 +12,14 @@ static bool _AddressesAreRelativeJumpable(void *source, void *dest)
 #pragma pack(push, 1)
 
 // Struct used by the memory manager to allocate trampolines
-struct memory_t
+struct TrampolineSlot_t
 {
     uint8_t used;
     uint8_t padding[3]; // arm is aligned on 4 bytes
     uint8_t data[40];   // Max absolute jump size is 20 bytes
 };
 
-struct AbsJump
+struct AbsJump_t
 {
     static inline size_t WriteThumbOpcodes(void *buffer, uint32_t addr)
     {
@@ -66,7 +66,7 @@ struct AbsJump
     static constexpr size_t GetMaxOpcodeSize() { return 12; }
 };
 
-struct RelJump
+struct RelJump_t
 {
     static inline size_t WriteOpcodes(void *buffer, void *source, void *jump_destination, int source_mode, int /*dest_mode*/)
     {
@@ -177,9 +177,9 @@ static inline void *_GetCallAddress(void *code, int mode)
     return reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(code) | (mode ? 1 : 0));
 }
 
-static inline cs_err _InitDisasm(CodeDisasm &disasm, int mode)
+static inline cs_err _InitDisasm(CodeDisasm_t &disasm, int mode)
 {
-    return disasm.Init(cs_arch::CS_ARCH_ARM, (cs_mode)((mode ? cs_mode::CS_MODE_THUMB : cs_mode::CS_MODE_ARM) | CodeDisasm::RuntimeEndianness()));
+    return disasm.Init(cs_arch::CS_ARCH_ARM, (cs_mode)((mode ? cs_mode::CS_MODE_THUMB : cs_mode::CS_MODE_ARM) | CodeDisasm_t::RuntimeEndianness()));
 }
 
 // Immediate of an ARM data processing instruction: imm8 rotated right by twice the 4 bits rotation.
@@ -237,7 +237,7 @@ static bool _UsesInstructionPointer(cs_insn const &instruction)
     return false;
 }
 
-static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm &disasm, size_t wanted_relocatableSize)
+static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm_t &disasm, size_t wanted_relocatableSize)
 {
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
@@ -277,7 +277,7 @@ static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize
 }
 
 // func_mode: 1 for Thumb code. pCode has no mode bit, it was cleared by the caller.
-static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, size_t wanted_relocatableSize, int func_mode)
+static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm_t &disasm, size_t wanted_relocatableSize, int func_mode)
 {
     uint8_t code_buffer[80];
     const uint8_t *code_iterator = code_buffer;
@@ -310,7 +310,7 @@ static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm &disasm, 
     }
 
     // The trampoline runs the relocated code in the function mode, and goes back to the function in that mode.
-    AbsJump::WriteOpcodes(pTrampolineCode, reinterpret_cast<void *>(code_addr), func_mode, func_mode);
+    AbsJump_t::WriteOpcodes(pTrampolineCode, reinterpret_cast<void *>(code_addr), func_mode, func_mode);
 
     return relocatedSize;
 }
