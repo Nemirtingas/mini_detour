@@ -3,8 +3,6 @@
 
 #include <utility>
 
-#if defined(TEST_HOOKS_CODE)
-
 static int HookMoveDetour()
 {
     return 100;
@@ -45,5 +43,3 @@ TEST_CASE("Self move assignment keeps the hook", "[hook_move]")
     CHECK(hook.RestoreFunction() != nullptr);
     CHECK(function() == 1);
 }
-
-#endif

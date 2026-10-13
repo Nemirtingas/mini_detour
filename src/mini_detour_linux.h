@@ -172,6 +172,12 @@ static inline uintptr_t _QueryMinUserAddress()
     return static_cast<uintptr_t>(minAddress);
 }
 
+// Memory can be mapped writable and executable at the same time.
+static inline bool _QueryWritableExecutableMemory()
+{
+    return true;
+}
+
 // The end of the user address space (TASK_SIZE) depends on the kernel: 47, 48 or 39 bits on 64 bits, 3 or 4 GB
 // on 32 bits. It isn't exposed, so it is searched with mmap, which fails with ENOMEM above it.
 static uintptr_t _QueryMaxUserAddress()

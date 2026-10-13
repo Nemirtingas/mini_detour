@@ -295,6 +295,21 @@ inline size_t _PageAddrSize(void *addr, size_t len, size_t page_size)
     return end_addr - start_addr;
 }
 
+namespace MiniDetour
+{
+namespace MemoryManipulation
+{
+namespace Implementation
+{
+// The code the library writes (jump slots, trampolines) is in memory from AllocCode, readable and executable. It is
+// only written between BeginCodeWrite and EndCodeWrite, which also flushes the instruction cache.
+void *AllocCode(void *addressHint, size_t size);
+bool BeginCodeWrite(void *address, size_t size);
+void EndCodeWrite(void *address, size_t size);
+} // namespace Implementation
+} // namespace MemoryManipulation
+} // namespace MiniDetour
+
 class MemoryManager
 {
     struct JumpRegion_t
@@ -316,7 +331,7 @@ class MemoryManager
     void *_AllocUsableJumpsRegion(void *hint_addr, void *reference, bool (*isUsable)(void *, void *))
     {
         const size_t regionSize = _RegionSize();
-        void *jump_table        = MiniDetour::MemoryManipulation::MemoryAlloc(hint_addr, regionSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
+        void *jump_table        = MiniDetour::MemoryManipulation::Implementation::AllocCode(hint_addr, regionSize);
         if (jump_table == nullptr || isUsable(reference, jump_table))
             return jump_table;
 
@@ -337,7 +352,7 @@ class MemoryManager
                 if (!isUsable(reference, reinterpret_cast<void *>(candidate)))
                     continue;
 
-                jump_table = MiniDetour::MemoryManipulation::MemoryAlloc(reinterpret_cast<void *>(candidate), regionSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
+                jump_table = MiniDetour::MemoryManipulation::Implementation::AllocCode(reinterpret_cast<void *>(candidate), regionSize);
                 if (jump_table != nullptr && isUsable(reference, jump_table))
                     return jump_table;
 
@@ -360,10 +375,14 @@ class MemoryManager
         {
             SPDLOG_INFO("Jump region {} is usable from {}", jump_table, reference);
 
-            memset(jump_table, 0xCC, _RegionSize());
+            if (!MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(jump_table, _RegionSize()))
+            {
+                MiniDetour::MemoryManipulation::MemoryFree(jump_table, _RegionSize());
+                return nullptr;
+            }
 
-            // Protect trampoline region memory
-            MiniDetour::MemoryManipulation::MemoryProtect(jump_table, _RegionSize(), MiniDetour::MemoryManipulation::MemoryRights::mem_rx);
+            memset(jump_table, 0xCC, _RegionSize());
+            MiniDetour::MemoryManipulation::Implementation::EndCodeWrite(jump_table, _RegionSize());
 
             jumps_regions.emplace_back();
             auto &region = *jumps_regions.rbegin();
@@ -423,14 +442,20 @@ class MemoryManager
 
     memory_t *AllocTrampolineRegion()
     {
-        memory_t *mem = (memory_t *)MiniDetour::MemoryManipulation::MemoryAlloc(nullptr, _RegionSize(), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
+        memory_t *mem = (memory_t *)MiniDetour::MemoryManipulation::Implementation::AllocCode(nullptr, _RegionSize());
         if (mem == nullptr)
             return nullptr;
 
-        trampolines_regions.emplace_back(mem);
+        if (!MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(mem, _RegionSize()))
+        {
+            MiniDetour::MemoryManipulation::MemoryFree(mem, _RegionSize());
+            return nullptr;
+        }
 
         memset(mem, 0, _RegionSize());
+        MiniDetour::MemoryManipulation::Implementation::EndCodeWrite(mem, _RegionSize());
 
+        trampolines_regions.emplace_back(mem);
         return mem;
     }
 
@@ -451,21 +476,22 @@ class MemoryManager
                 if (!memory->used)
                 {
                     SPDLOG_DEBUG("Using free memory at {}", (void *)memory);
-                    if (!MiniDetour::MemoryManipulation::MemoryProtect(memory, sizeof(memory_t), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx))
+                    if (!MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(memory, sizeof(memory_t)))
                         return nullptr;
 
                     memory->used = 1;
-                    MiniDetour::MemoryManipulation::MemoryProtect(memory, sizeof(memory_t), MiniDetour::MemoryManipulation::MemoryRights::mem_rx);
+                    MiniDetour::MemoryManipulation::Implementation::EndCodeWrite(memory, sizeof(memory_t));
                     return memory->data;
                 }
             }
         }
 
         memory_t *mem_region = AllocTrampolineRegion();
-        if (mem_region == nullptr)
+        if (mem_region == nullptr || !MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(mem_region, sizeof(memory_t)))
             return nullptr;
 
         mem_region->used = 1;
+        MiniDetour::MemoryManipulation::Implementation::EndCodeWrite(mem_region, sizeof(memory_t));
         SPDLOG_DEBUG("Using new memory at {}", (void *)mem_region);
 
         return mem_region->data;
@@ -476,11 +502,11 @@ class MemoryManager
         SPDLOG_DEBUG("Freeing trampoline {}", trampoline);
         memory_t *mem = reinterpret_cast<memory_t *>(reinterpret_cast<uint8_t *>(trampoline) - offsetof(memory_t, data));
 
-        if (!MiniDetour::MemoryManipulation::MemoryProtect(mem, sizeof(memory_t), MiniDetour::MemoryManipulation::MemoryRights::mem_rwx))
+        if (!MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(mem, sizeof(memory_t)))
             return;
-        mem->used = 0;
 
-        MiniDetour::MemoryManipulation::MemoryProtect(mem, sizeof(memory_t), MiniDetour::MemoryManipulation::MemoryRights::mem_rx);
+        mem->used = 0;
+        MiniDetour::MemoryManipulation::Implementation::EndCodeWrite(mem, sizeof(memory_t));
     }
 };
 
@@ -502,6 +528,9 @@ class Globals_t
     // Bounds of the user address space, MaxUserAddress being its end.
     uintptr_t MinUserAddress;
     uintptr_t MaxUserAddress;
+    // Whether memory can be writable and executable at the same time, which code writes rely on. When it can't (Apple
+    // Silicon, hardened runtime on macOS), they go through the platform JIT memory instead.
+    bool WritableExecutableMemory;
 
     // Serializes the operations that write code or import/export tables: they share the memory manager slots and
     // change the rights of pages shared between hooks, and hooks can be set from several threads.
@@ -518,26 +547,15 @@ class Globals_t
 };
 } // namespace MiniDetour
 
-// Gives back to hooked code the rights it had before being made writable: forcing mem_rx would remove the write
-// access of code that needs it (JIT buffers). If they couldn't be read, the code is at least made executable again.
-static void _RestoreCodeRights(void *address, size_t size, MiniDetour::MemoryManipulation::MemoryRights oldRights)
-{
-    if (oldRights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
-        oldRights = MiniDetour::MemoryManipulation::MemoryRights::mem_rx;
-
-    MiniDetour::MemoryManipulation::MemoryProtect(address, size, oldRights);
-}
-
-// Writes an absolute jump in a jump slot, which is read/execute the rest of the time, and flushes it.
+// Writes an absolute jump in a jump slot.
 static bool _WriteJumpSlot(void *jump, void *destination, int sourceMode, int destinationMode)
 {
     const size_t jumpSize = AbsJump::GetMaxOpcodeSize();
-    if (!MiniDetour::MemoryManipulation::MemoryProtect(jump, jumpSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx))
+    if (!MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(jump, jumpSize))
         return false;
 
     AbsJump::WriteOpcodes(jump, destination, sourceMode, destinationMode);
-    MiniDetour::MemoryManipulation::MemoryProtect(jump, jumpSize, MiniDetour::MemoryManipulation::MemoryRights::mem_rx);
-    MiniDetour::MemoryManipulation::FlushInstructionCache(jump, jumpSize);
+    MiniDetour::MemoryManipulation::Implementation::EndCodeWrite(jump, jumpSize);
     return true;
 }
 
@@ -575,12 +593,14 @@ static bool _ExchangeTableEntry(T *entry, T value, T *previous)
 
 namespace MiniDetour
 {
-// The platform gives _QueryPageSize, _QueryAllocationGranularity, _QueryMinUserAddress and _QueryMaxUserAddress.
+// The platform gives _QueryPageSize, _QueryAllocationGranularity, _QueryMinUserAddress, _QueryMaxUserAddress and
+// _QueryWritableExecutableMemory.
 Globals_t::Globals_t()
     : PageSize(MemoryManipulation::Implementation::_QueryPageSize())
     , AllocationGranularity(MemoryManipulation::Implementation::_QueryAllocationGranularity())
     , MinUserAddress(MemoryManipulation::Implementation::_QueryMinUserAddress())
     , MaxUserAddress(MemoryManipulation::Implementation::_QueryMaxUserAddress())
+    , WritableExecutableMemory(MemoryManipulation::Implementation::_QueryWritableExecutableMemory())
 {
 }
 } // namespace MiniDetour
@@ -592,9 +612,10 @@ namespace MemoryManipulation
 namespace Implementation
 {
 
-// Allocates as close as possible to the hint, so hooks can reach the memory with relative jumps.
-// The platform gives _MemoryAllocAt and _MemoryAllocAnywhere.
-void *MemoryAlloc(void *_addressHint, size_t size, MemoryRights rights)
+// Allocates as close as possible to the hint, so hooks can reach the memory with relative jumps: allocAt(address, size)
+// allocates at this exact address, allocAnywhere(size) anywhere.
+template <typename AllocAt, typename AllocAnywhere>
+static void *_AllocNear(void *_addressHint, size_t size, AllocAt allocAt, AllocAnywhere allocAnywhere)
 {
     const uintptr_t minAddress = Globals_t::Instance().MinUserAddress;
     const uintptr_t maxAddress = Globals_t::Instance().MaxUserAddress;
@@ -606,7 +627,7 @@ void *MemoryAlloc(void *_addressHint, size_t size, MemoryRights rights)
     size             = _PageAddrSize((void *)addressHint, size, pageSize);
 
     if (_addressHint == nullptr)
-        return _MemoryAllocAnywhere(size, rights);
+        return allocAnywhere(size);
 
     auto freeRegions = _GetFreeRegions();
 
@@ -623,14 +644,77 @@ void *MemoryAlloc(void *_addressHint, size_t size, MemoryRights rights)
     const size_t granularity = Globals_t::Instance().AllocationGranularity;
     for (auto const &region : freeRegions)
     {
-        void *address = _AllocInFreeRegion(region, addressHint, size, granularity, [&](uintptr_t allocAddress) { return _MemoryAllocAt((void *)allocAddress, size, rights); });
+        void *address = _AllocInFreeRegion(region, addressHint, size, granularity, [&](uintptr_t allocAddress) { return allocAt((void *)allocAddress, size); });
 
         if (address != nullptr)
             return address;
     }
 
     // Fallback to anywhere alloc
-    return _MemoryAllocAnywhere(size, rights);
+    return allocAnywhere(size);
+}
+
+// The platform gives _MemoryAllocAt and _MemoryAllocAnywhere.
+void *MemoryAlloc(void *addressHint, size_t size, MemoryRights rights)
+{
+    return _AllocNear(
+        addressHint,
+        size,
+        [rights](void *address, size_t allocSize) { return _MemoryAllocAt(address, allocSize, rights); },
+        [rights](size_t allocSize) { return _MemoryAllocAnywhere(allocSize, rights); });
+}
+
+// Code memory is read/execute, and made writable while it is written. Without writable and executable memory, it is
+// the platform JIT memory.
+static void *_CodeAllocAt(void *address, size_t size)
+{
+#if defined(MINIDETOUR_JIT_CODE_MEMORY)
+    if (!Globals_t::Instance().WritableExecutableMemory)
+        return _JitCodeAllocAt(address, size);
+#endif
+
+    return _MemoryAllocAt(address, size, MemoryRights::mem_rx);
+}
+
+static void *_CodeAllocAnywhere(size_t size)
+{
+#if defined(MINIDETOUR_JIT_CODE_MEMORY)
+    if (!Globals_t::Instance().WritableExecutableMemory)
+        return _JitCodeAllocAnywhere(size);
+#endif
+
+    return _MemoryAllocAnywhere(size, MemoryRights::mem_rx);
+}
+
+bool BeginCodeWrite(void *address, size_t size)
+{
+#if defined(MINIDETOUR_JIT_CODE_MEMORY)
+    if (!Globals_t::Instance().WritableExecutableMemory)
+        return _BeginJitCodeWrite(address, size);
+#endif
+
+    return MemoryProtect(address, size, MemoryRights::mem_rwx, nullptr);
+}
+
+void EndCodeWrite(void *address, size_t size)
+{
+#if defined(MINIDETOUR_JIT_CODE_MEMORY)
+    if (!Globals_t::Instance().WritableExecutableMemory)
+        _EndJitCodeWrite(address, size);
+    else
+#endif
+        MemoryProtect(address, size, MemoryRights::mem_rx, nullptr);
+
+    FlushInstructionCache(address, size);
+}
+
+void *AllocCode(void *addressHint, size_t size)
+{
+    return _AllocNear(
+        addressHint,
+        size,
+        [](void *address, size_t allocSize) { return _CodeAllocAt(address, allocSize); },
+        [](size_t allocSize) { return _CodeAllocAnywhere(allocSize); });
 }
 
 size_t WriteAbsoluteJump(void *address, void *destination)
@@ -646,6 +730,78 @@ size_t WriteAbsoluteJump(void *address, void *destination)
 } // namespace Implementation
 } // namespace MemoryManipulation
 } // namespace MiniDetour
+
+// Writes over the code of a hooked function, which the library doesn't own. Prepare runs before the other threads are
+// frozen (it may allocate), Write while they are, and Finish once they run again.
+class _FunctionCodeWriter
+{
+    void *_Address;
+    size_t _Size;
+    bool _ByRemap;
+    MiniDetour::MemoryManipulation::MemoryRights _OldRights;
+
+  public:
+    _FunctionCodeWriter()
+        : _Address(nullptr)
+        , _Size(0)
+        , _ByRemap(false)
+        , _OldRights(MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
+    {
+    }
+
+    bool Prepare(void *address, size_t size)
+    {
+#if defined(MINIDETOUR_JIT_CODE_MEMORY)
+        // Without writable and executable memory, the code is written in a copy of its pages, which replaces them: they
+        // stay executable all along.
+        if (!MiniDetour::Globals_t::Instance().WritableExecutableMemory)
+        {
+            _Address = address;
+            _Size    = size;
+            _ByRemap = true;
+            return true;
+        }
+#endif
+
+        // Otherwise the code is made writable. Its rights are given back after: forcing mem_rx would remove the write
+        // access of code that needs it (JIT buffers). If they couldn't be read, the code is at least made executable
+        // again.
+        if (!MiniDetour::MemoryManipulation::MemoryProtect(address, size, MiniDetour::MemoryManipulation::MemoryRights::mem_rwx, &_OldRights))
+            return false;
+
+        _Address = address;
+        _Size    = size;
+        return true;
+    }
+
+    bool Write(const void *data)
+    {
+#if defined(MINIDETOUR_JIT_CODE_MEMORY)
+        if (_ByRemap)
+        {
+            if (!MiniDetour::MemoryManipulation::Implementation::_WriteFunctionCodeByRemap(_Address, data, _Size))
+                return false;
+        }
+        else
+#endif
+            memcpy(_Address, data, _Size);
+
+        MiniDetour::MemoryManipulation::FlushInstructionCache(_Address, _Size);
+        return true;
+    }
+
+    void Finish()
+    {
+        if (_Address == nullptr || _ByRemap)
+            return;
+
+        if (_OldRights == MiniDetour::MemoryManipulation::MemoryRights::mem_unset)
+            _OldRights = MiniDetour::MemoryManipulation::MemoryRights::mem_rx;
+
+        MiniDetour::MemoryManipulation::MemoryProtect(_Address, _Size, _OldRights);
+        _Address = nullptr;
+    }
+};
 
 namespace MiniDetour
 {
@@ -803,55 +959,42 @@ class Hook_t
         if (relocatableSize < smallestJumpSize)
             return false;
 
-        // Restored if the replace fails after this point.
-        MemoryManipulation::MemoryRights functionOldRights;
-        if (!MemoryManipulation::MemoryProtect(functionToReplace, relocatableSize, MemoryManipulation::MemoryRights::mem_rwx, &functionOldRights))
-            return false;
-
-        _OtherThreadsFreezer_t freezer;
+        // The new start of the function, with the original bytes after the jump.
+        std::vector<uint8_t> code(reinterpret_cast<uint8_t *>(functionToReplace), reinterpret_cast<uint8_t *>(functionToReplace) + relocatableSize);
+        void *jump_mem = nullptr;
         if (relocatableSize >= absoluteJumpSize)
         {
-            if (!freezer.Freeze(functionToReplace, relocatableSize))
-            {
-                _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
-                return false;
-            }
-
-            AbsJump::WriteOpcodes(functionToReplace, newFunction, func_mode, hook_mode);
+            AbsJump::WriteOpcodes(code.data(), newFunction, func_mode, hook_mode);
         }
         else
         {
             // Setup the trampoline
-            void *jump_mem = Globals_t::Instance().Memory.GetFreeJump(functionToReplace);
+            jump_mem = Globals_t::Instance().Memory.GetFreeJump(functionToReplace);
             if (jump_mem == nullptr)
-            {
-                _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
                 return false;
-            }
 
             if (!_WriteJumpSlot(jump_mem, newFunction, func_mode, hook_mode))
             {
                 Globals_t::Instance().Memory.FreeJump(jump_mem);
-                _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
                 return false;
             }
 
-            if (!freezer.Freeze(functionToReplace, relocatableSize))
-            {
-                Globals_t::Instance().Memory.FreeJump(jump_mem);
-                _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
-                return false;
-            }
-
-            RelJump::WriteOpcodes(functionToReplace, functionToReplace, jump_mem, func_mode, hook_mode);
+            RelJump::WriteOpcodes(code.data(), functionToReplace, jump_mem, func_mode, hook_mode);
         }
 
-        MemoryManipulation::FlushInstructionCache(functionToReplace, relocatableSize);
-        freezer.Unfreeze();
+        _FunctionCodeWriter writer;
+        bool written = false;
+        if (writer.Prepare(functionToReplace, relocatableSize))
+        {
+            _OtherThreadsFreezer_t freezer;
+            written = freezer.Freeze(functionToReplace, relocatableSize) && writer.Write(code.data());
+        }
+        writer.Finish();
 
-        _RestoreCodeRights(functionToReplace, relocatableSize, functionOldRights);
+        if (!written && jump_mem != nullptr)
+            Globals_t::Instance().Memory.FreeJump(jump_mem);
 
-        return true;
+        return written;
     }
 
     void *HookFunc(void *functionToHook, void *newFunction)
@@ -876,9 +1019,8 @@ class Hook_t
             return nullptr;
 
         size_t totalOriginalTrampolineSize = 0;
-        // Restored in the error path once the function was made writable.
-        bool functionRightsChanged                         = false;
-        MemoryManipulation::MemoryRights functionOldRights = MemoryManipulation::MemoryRights::mem_unset;
+        // Finished in the error path too once the function was prepared for writing.
+        _FunctionCodeWriter writer;
         SPDLOG_INFO("Needed relocatable size: found({}), rel({})", relocatableSize, relativeJumpSize);
 
         if (relocatableSize < relativeJumpSize)
@@ -902,29 +1044,28 @@ class Hook_t
             goto error;
         }
 
-        // RWX on our original trampoline func
-        if (!MemoryManipulation::MemoryProtect(_OriginalTrampolineAddress, totalOriginalTrampolineSize, MemoryManipulation::MemoryRights::mem_rwx))
+        if (!MemoryManipulation::Implementation::BeginCodeWrite(_OriginalTrampolineAddress, totalOriginalTrampolineSize))
         {
-            MiniDetour::MemoryManipulation::RegionInfos_t regionInfos;
-            MemoryManipulation::GetRegionInfos(_OriginalTrampolineAddress, &regionInfos);
-            SPDLOG_ERROR("Failed to protect trampoline memory ({} : {}), current rights: {}.", _OriginalTrampolineAddress, totalOriginalTrampolineSize, regionInfos.Rights);
+            SPDLOG_ERROR("Failed to make the trampoline memory writable ({} : {}).", _OriginalTrampolineAddress, totalOriginalTrampolineSize);
             goto error;
         }
 
-        // RWX on the orignal func
-        if (!MemoryManipulation::MemoryProtect(functionToHook, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rwx, &functionOldRights))
+        {
+            // A failed relocation leaves the trampoline without its jump back to the original function.
+            const size_t relocatedSize = _RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, relativeJumpSize, func_mode);
+            MemoryManipulation::Implementation::EndCodeWrite(_OriginalTrampolineAddress, totalOriginalTrampolineSize);
+            if (relocatedSize < relativeJumpSize)
+            {
+                SPDLOG_ERROR("Failed to relocate code.");
+                goto error;
+            }
+        }
+
+        if (!writer.Prepare(functionToHook, _SavedCode.size()))
         {
             MiniDetour::MemoryManipulation::RegionInfos_t regionInfos;
             MemoryManipulation::GetRegionInfos(functionToHook, &regionInfos);
-            SPDLOG_ERROR("Failed to protect function memory ({} : {}), current rights: {}.", functionToHook, _SavedCode.size(), regionInfos.Rights);
-            goto error;
-        }
-        functionRightsChanged = true;
-
-        // A failed relocation leaves the trampoline without its jump back to the original function.
-        if (_RelocateCode(functionToHook, _OriginalTrampolineAddress, disasm, relativeJumpSize, func_mode) < relativeJumpSize)
-        {
-            SPDLOG_ERROR("Failed to relocate code.");
+            SPDLOG_ERROR("Failed to make the function memory writable ({} : {}), current rights: {}.", functionToHook, _SavedCode.size(), regionInfos.Rights);
             goto error;
         }
 
@@ -966,16 +1107,20 @@ class Hook_t
             RelJump::WriteOpcodes(_HookCode.data(), functionToHook, jump_mem, func_mode, func_mode);
             {
                 // Nothing can be logged while the other threads are suspended: it would allocate.
-                _OtherThreadsFreezer_t freezer;
-                if (!freezer.Freeze(functionToHook, _HookCode.size()))
+                bool frozen  = false;
+                bool written = false;
                 {
-                    Globals_t::Instance().Memory.FreeJump(jump_mem);
-                    SPDLOG_ERROR("A thread is running the code to hook.");
-                    goto error;
+                    _OtherThreadsFreezer_t freezer;
+                    frozen  = freezer.Freeze(functionToHook, _HookCode.size());
+                    written = frozen && writer.Write(_HookCode.data());
                 }
 
-                memcpy(functionToHook, _HookCode.data(), _HookCode.size());
-                MemoryManipulation::FlushInstructionCache(functionToHook, _HookCode.size());
+                if (!written)
+                {
+                    Globals_t::Instance().Memory.FreeJump(jump_mem);
+                    SPDLOG_ERROR(frozen ? "Failed to write the hook." : "A thread is running the code to hook.");
+                    goto error;
+                }
             }
 
 #ifdef USE_SPDLOG
@@ -992,12 +1137,7 @@ class Hook_t
             _TrampolineAddress = jump_mem;
         }
 
-        // Try to restore memory rights, if it fails, no problem, we are just a bit too permissive
-        MemoryManipulation::MemoryProtect(_OriginalTrampolineAddress, totalOriginalTrampolineSize, MemoryManipulation::MemoryRights::mem_rx);
-        MemoryManipulation::FlushInstructionCache(_OriginalTrampolineAddress, totalOriginalTrampolineSize);
-
-        _RestoreCodeRights(functionToHook, _SavedCode.size(), functionOldRights);
-        MemoryManipulation::FlushInstructionCache(functionToHook, _SavedCode.size());
+        writer.Finish();
 
         _OriginalFuncAddress = functionToHook;
         _DetourFunc          = newFunction;
@@ -1007,9 +1147,8 @@ class Hook_t
 
         return _OriginalTrampolineCallAddress;
     error:
-        // The function code wasn't modified yet: only its rights.
-        if (functionRightsChanged)
-            _RestoreCodeRights(functionToHook, _SavedCode.size(), functionOldRights);
+        // The function code wasn't modified: only its rights may have been.
+        writer.Finish();
 
         _SavedCode.clear();
         _HookCode.clear();
@@ -1053,25 +1192,26 @@ class Hook_t
         // buffer has the size of _HookCode.
         if (std::equal(buffer.begin(), buffer.end(), _HookCode.begin()))
         { // Our hook code is still there, we can restore the old instructions.
-            MemoryManipulation::MemoryRights functionOldRights;
-            if (!MemoryManipulation::MemoryProtect(_OriginalFuncAddress, _SavedCode.size(), MemoryManipulation::MemoryRights::mem_rwx, &functionOldRights))
-                return res;
-
+            _FunctionCodeWriter writer;
+            if (!writer.Prepare(_OriginalFuncAddress, _SavedCode.size()))
             {
-                _OtherThreadsFreezer_t freezer;
-                if (!freezer.Freeze(_OriginalFuncAddress, _SavedCode.size()))
-                {
-                    // The hook stays in place: restoring it can be tried again.
-                    _RestoreCodeRights(_OriginalFuncAddress, _SavedCode.size(), functionOldRights);
-                    SPDLOG_ERROR("A thread is running the hooked code, it can't be restored.");
-                    return nullptr;
-                }
-
-                memcpy(_OriginalFuncAddress, _SavedCode.data(), _SavedCode.size());
-                MemoryManipulation::FlushInstructionCache(_OriginalFuncAddress, _SavedCode.size());
+                writer.Finish();
+                return res;
             }
 
-            _RestoreCodeRights(_OriginalFuncAddress, _SavedCode.size(), functionOldRights);
+            bool written = false;
+            {
+                _OtherThreadsFreezer_t freezer;
+                written = freezer.Freeze(_OriginalFuncAddress, _SavedCode.size()) && writer.Write(_SavedCode.data());
+            }
+            writer.Finish();
+
+            if (!written)
+            {
+                // The hook stays in place: restoring it can be tried again.
+                SPDLOG_ERROR("The hooked code couldn't be restored (a thread may be running it).");
+                return nullptr;
+            }
 
             Reset(true);
             SPDLOG_INFO("Restored hook");

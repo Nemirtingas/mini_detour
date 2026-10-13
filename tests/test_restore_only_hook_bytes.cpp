@@ -1,8 +1,6 @@
 #include "catch.hpp"
 #include "test_utils.h"
 
-#if defined(TEST_HOOKS_CODE)
-
 static int TEST_CALL RestoreOnlyHookBytesDetour()
 {
     return 100;
@@ -36,5 +34,3 @@ TEST_CASE("Restoring a hook only writes back the bytes it overwrote", "[restore_
     CHECK(memcmp(code.Data(patchOffset), patch, sizeof(patch)) == 0);
     CHECK(function() == 1);
 }
-
-#endif

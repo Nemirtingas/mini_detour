@@ -85,11 +85,6 @@ static inline void *ThumbAddress(void *address)
 }
 #endif
 
-// The tests that hook code run on every target, except ARM64 macOS: code can't be hooked there yet (the library needs
-// pages that are writable and executable at the same time, which Apple Silicon refuses).
-#if !(defined(MINIDETOUR_OS_APPLE) && defined(MINIDETOUR_ARCH_ARM64))
-#define TEST_HOOKS_CODE
-
 // Small functions written by hand for those tests, in the instruction set of the architecture.
 namespace GeneratedCode
 {
@@ -220,7 +215,6 @@ static inline uintptr_t RelativeJumpTarget(const void *address)
 #endif
 }
 } // namespace GeneratedCode
-#endif
 
 #if defined(MINIDETOUR_ARCH_X86)
 // First integer argument in ecx on x86, so generated code doesn't depend on the stack layout.

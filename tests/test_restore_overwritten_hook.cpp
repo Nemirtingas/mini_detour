@@ -1,8 +1,6 @@
 #include "catch.hpp"
 #include "test_utils.h"
 
-#if defined(TEST_HOOKS_CODE)
-
 static int OverwrittenHookDetour()
 {
     return 100;
@@ -35,5 +33,3 @@ TEST_CASE("Restoring a hook overwritten by someone else bypasses the detour", "[
     // The other tool's hook still goes through our jump, which must now lead to the original code.
     CHECK(function() == 1);
 }
-
-#endif

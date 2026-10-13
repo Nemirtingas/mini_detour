@@ -3,8 +3,6 @@
 
 #include <vector>
 
-#if defined(TEST_HOOKS_CODE)
-
 static int TrampolineSlotsDetour()
 {
     return -1;
@@ -44,5 +42,3 @@ TEST_CASE("Many hooks use every trampoline slot without overflowing", "[trampoli
         CHECK(GeneratedCode::Function(code, i * functionStride)() == static_cast<int>(i));
     }
 }
-
-#endif

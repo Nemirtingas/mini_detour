@@ -12,6 +12,8 @@
 #include <mach-o/nlist.h>
 #include <dlfcn.h>
 #include <libkern/OSCacheControl.h>
+#include <pthread.h>
+#include <sys/mman.h>
 #include <libproc.h>
 
 #include <unistd.h>
@@ -608,6 +610,123 @@ static int FlushInstructionCache(void *address, size_t size)
     // Required on Apple Silicon after writing code, a no-op on x86.
     sys_icache_invalidate(address, size);
     return 1;
+}
+
+// Apple Silicon never maps memory writable and executable at the same time (W^X), and neither do the processes with
+// the hardened runtime: code can't be made rwx to be written. Globals_t tells it once. The code memory of the library is
+// then MAP_JIT memory: a thread switches it between writable and executable for itself only (Apple Silicon), the other
+// threads keep running it. The hooked functions are written in a copy of their pages, which replaces them in one call:
+// they stay executable all along.
+#define MINIDETOUR_JIT_CODE_MEMORY
+
+// Tries to map a page writable and executable.
+static bool _QueryWritableExecutableMemory()
+{
+    const size_t pageSize = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+    void *memory          = mmap(nullptr, pageSize, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (memory == MAP_FAILED)
+        return false;
+
+    munmap(memory, pageSize);
+    return true;
+}
+
+// MAP_JIT can't be used with MAP_FIXED: the address is a hint, taken when it is free.
+static void *_JitCodeAllocAt(void *address, size_t size)
+{
+    void *code = mmap(address, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
+    if (code == MAP_FAILED)
+        return nullptr;
+
+    if (code != address)
+    {
+        munmap(code, size);
+        return nullptr;
+    }
+
+    return code;
+}
+
+static void *_JitCodeAllocAnywhere(size_t size)
+{
+    void *code = mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
+    return code == MAP_FAILED ? nullptr : code;
+}
+
+// The switch is for the whole thread: nested writes only switch back at the end of the outermost one. On x64, MAP_JIT
+// memory is writable and executable: there is nothing to switch.
+static thread_local int _JitCodeWriteDepth = 0;
+
+static bool _BeginJitCodeWrite(void *, size_t)
+{
+#if defined(MINIDETOUR_ARCH_ARM64)
+    if (_JitCodeWriteDepth++ == 0)
+        pthread_jit_write_protect_np(0);
+#endif
+
+    return true;
+}
+
+static void _EndJitCodeWrite(void *, size_t)
+{
+#if defined(MINIDETOUR_ARCH_ARM64)
+    if (--_JitCodeWriteDepth == 0)
+        pthread_jit_write_protect_np(1);
+#endif
+}
+
+// Writes size bytes of code at address: its pages are copied in new memory, written there, given the rights of the
+// original pages, then mapped over them. Only system calls are made: the other threads may be suspended. The instruction
+// cache isn't flushed.
+static bool _WriteFunctionCodeByRemap(void *address, const void *data, size_t size)
+{
+    const size_t pageSize         = Globals_t::Instance().PageSize;
+    const mach_vm_address_t start = reinterpret_cast<mach_vm_address_t>(address) & ~static_cast<mach_vm_address_t>(pageSize - 1);
+    const mach_vm_address_t end   = (reinterpret_cast<mach_vm_address_t>(address) + size + pageSize - 1) & ~static_cast<mach_vm_address_t>(pageSize - 1);
+    const mach_vm_size_t length   = end - start;
+    mach_vm_address_t mapping     = start;
+    mach_vm_size_t mappingSize    = 0;
+    vm_prot_t protection          = VM_PROT_NONE;
+    mach_vm_address_t submapEnd   = 0;
+    if (!_NextMapping(&mapping, &mappingSize, &protection, &submapEnd) || mapping > start)
+        return false;
+
+    void *copy = mmap(nullptr, length, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (copy == MAP_FAILED)
+        return false;
+
+    memcpy(copy, reinterpret_cast<void *>(start), length);
+    memcpy(static_cast<uint8_t *>(copy) + (reinterpret_cast<mach_vm_address_t>(address) - start), data, size);
+
+    // Never writable and executable: the code is executable.
+    if ((protection & VM_PROT_EXECUTE) != 0)
+        protection &= ~VM_PROT_WRITE;
+
+    if (mach_vm_protect(mach_task_self(), reinterpret_cast<mach_vm_address_t>(copy), length, FALSE, protection) != KERN_SUCCESS)
+    {
+        munmap(copy, length);
+        return false;
+    }
+
+    vm_prot_t current;
+    vm_prot_t maximum;
+    mach_vm_address_t target   = start;
+    const kern_return_t result = mach_vm_remap(
+        mach_task_self(),
+        &target,
+        length,
+        0,
+        VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
+        mach_task_self(),
+        reinterpret_cast<mach_vm_address_t>(copy),
+        FALSE,
+        &current,
+        &maximum,
+        VM_INHERIT_COPY);
+
+    // The pages stay mapped over the original ones.
+    munmap(copy, length);
+    return result == KERN_SUCCESS;
 }
 } // namespace Implementation
 } // namespace MemoryManipulation
