@@ -58,8 +58,8 @@ static int AbsoluteHookDetour()
     return 100;
 }
 
-// When no jump slot can be placed in range, use an absolute jump if the architecture supports a safe trampoline.
-TEST_CASE("A function with no free memory in range uses an absolute jump when safe", "[absolute_hook]")
+// When no jump slot can be placed in range, the function is patched with an absolute jump.
+TEST_CASE("A function with no free memory in range is hooked with an absolute jump", "[absolute_hook]")
 {
 #if defined(MINIDETOUR_ARCH_X64)
     const uint64_t range = 0x80000000; // jmp rel32
@@ -108,11 +108,6 @@ TEST_CASE("A function with no free memory in range uses an absolute jump when sa
 
         MiniDetour::Hook_t hook;
         auto original = reinterpret_cast<int (*)()>(hook.HookFunction((void *)target, reinterpret_cast<void *>(&AbsoluteHookDetour)));
-#if defined(MINIDETOUR_ARCH_ARM64)
-        // An out-of-range trampoline would need an indirect branch that clobbers a live register.
-        CHECK(original == nullptr);
-        CHECK(target() == 1);
-#else
         REQUIRE(original != nullptr);
 
         // No relative jump: the start of the function is an absolute jump to the detour.
@@ -122,7 +117,6 @@ TEST_CASE("A function with no free memory in range uses an absolute jump when sa
 
         CHECK(hook.RestoreFunction() != nullptr);
         CHECK(target() == 1);
-#endif
     }
 
     Release(function - static_cast<uintptr_t>(side), static_cast<size_t>(side));
