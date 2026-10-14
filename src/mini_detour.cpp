@@ -1231,7 +1231,11 @@ class Hook_t
             return nullptr;
         }
 
-        memcpy(buffer.data(), _OriginalFuncAddress, buffer.size());
+        if (MemoryManipulation::SafeMemoryRead(_OriginalFuncAddress, buffer.data(), buffer.size()) != buffer.size())
+        {
+            SPDLOG_ERROR("Couldn't read the hooked code before restoring it.");
+            return nullptr;
+        }
 
         res = _OriginalFuncAddress;
 
