@@ -252,7 +252,7 @@ if(MINIDETOUR_BUILD_TESTS)
   minidetour_add_library(mini_detour_test)
 
   set_target_properties(mini_detour_test PROPERTIES
-    CXX_STANDARD 14
+    CXX_STANDARD 11
   )
 
   target_compile_definitions(
