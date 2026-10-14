@@ -138,9 +138,7 @@ TEST_CASE("A function can be hooked while a thread runs other code", "[freeze_th
 }
 #endif
 
-// Not on macOS ARM64: a function in allocated memory can't be hooked there yet, its trampoline memory can't be made
-// executable.
-#if defined(MINIDETOUR_ARCH_ARM64) && defined(MINIDETOUR_OS_WINDOWS)
+#if defined(MINIDETOUR_ARCH_ARM64) && (defined(MINIDETOUR_OS_WINDOWS) || defined(MINIDETOUR_OS_APPLE))
 // Runs "loop: ldr w1, [x0] ; cbz w1, loop ; ret" with x0 pointing to a flag, until StopSpinning sets the flag: the loop
 // is stopped through data, not by rewriting its code while it runs.
 class FlagSpinningThread_t
@@ -148,7 +146,11 @@ class FlagSpinningThread_t
     CodeBuffer_t _Code;
     volatile uint32_t _Stop;
     bool _Running;
+#if defined(MINIDETOUR_OS_WINDOWS)
     HANDLE _Thread;
+#else
+    pthread_t _Thread;
+#endif
 
   public:
     FlagSpinningThread_t()
@@ -160,10 +162,15 @@ class FlagSpinningThread_t
             return;
 
         _Code.Write(0, {0x01, 0x00, 0x40, 0xB9, 0xE1, 0xFF, 0xFF, 0x34, 0xC0, 0x03, 0x5F, 0xD6});
+#if defined(MINIDETOUR_OS_WINDOWS)
         _Thread  = CreateThread(nullptr, 0, _Code.As<LPTHREAD_START_ROUTINE>(), const_cast<uint32_t *>(&_Stop), 0, nullptr);
         _Running = _Thread != nullptr;
         // Leaves time for the thread to reach its loop.
         Sleep(100);
+#else
+        _Running = pthread_create(&_Thread, nullptr, _Code.As<void *(*)(void *)>(), const_cast<uint32_t *>(&_Stop)) == 0;
+        usleep(100 * 1000);
+#endif
     }
 
     FlagSpinningThread_t(FlagSpinningThread_t const &)            = delete;
@@ -179,8 +186,12 @@ class FlagSpinningThread_t
             return;
 
         _Stop = 1;
+#if defined(MINIDETOUR_OS_WINDOWS)
         WaitForSingleObject(_Thread, INFINITE);
         CloseHandle(_Thread);
+#else
+        pthread_join(_Thread, nullptr);
+#endif
         _Running = false;
     }
 };

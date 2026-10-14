@@ -18,13 +18,14 @@ library: only the disassembler of the target architecture is compiled.
 |---------|:---:|:---:|:-----------:|:-----:|
 | Windows | ✅  | ✅  |      ¹      |  ✅   |
 | Linux   | ✅  | ✅  |     ✅      |  ✅   |
-| macOS   |     | ✅  |             |   ²   |
+| macOS   |     | ✅  |             | ✅²  |
 
 ¹ Not built nor tested.
-² Module imports and exports, and the memory functions, work. Inline hooks don't yet: the pages the library allocates
-can't be read-write-execute on Apple Silicon.
+² Inline hooks, module imports and exports, and the memory functions are implemented. Inline hooks use `MAP_JIT` on
+Apple Silicon. Applications using the Hardened Runtime need Apple's `com.apple.security.cs.allow-jit` entitlement;
+the target image's segment protections and macOS executable-memory restrictions can still prevent a hook.
 
-On macOS, code can only be hooked in images whose segments allow it: see [macOS](#macos).
+On macOS, code can only be hooked when the target image's segment protections allow it: see [macOS](#macos).
 
 The CI runs the tests on Windows x86/x64/ARM64, Linux x86/x64/ARM64, Linux ARM (under qemu) and macOS ARM64. macOS x64
 is tested on a local machine.
@@ -133,6 +134,10 @@ cd build && ./tests            # build/Debug/tests.exe with Visual Studio
 The tests need `export_hook_test_library` in the working directory. On macOS, run `./macos_permission_fix tests` first.
 
 ## macOS
+
+On Apple Silicon, generated code uses `MAP_JIT` and switches between writable and executable access while it is being
+updated. Applications using the Hardened Runtime must include Apple's `com.apple.security.cs.allow-jit` entitlement.
+The library cannot add this entitlement to the host application.
 
 A segment can't be given more rights than its `maxprot`, and executables are linked with a read-execute `maxprot` for
 `__TEXT`: their functions can't be made writable. `macos_permission_fix <executable>` rewrites the `__TEXT` `maxprot` of
