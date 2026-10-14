@@ -449,13 +449,49 @@ class MemoryManager_t
     TrampolineSlot_t *AllocTrampolineRegion(void *addressHint, void *reference, bool (*isUsable)(void *, void *))
     {
         TrampolineSlot_t *mem = (TrampolineSlot_t *)MiniDetour::MemoryManipulation::Implementation::AllocCode(addressHint, _RegionSize());
-        if (mem == nullptr)
-            return nullptr;
-
-        if (isUsable != nullptr && !isUsable(reference, mem->data))
+        if (mem == nullptr || (isUsable != nullptr && !isUsable(reference, mem->data)))
         {
-            MiniDetour::MemoryManipulation::MemoryFree(mem, _RegionSize());
-            return nullptr;
+            if (mem != nullptr)
+            {
+                MiniDetour::MemoryManipulation::MemoryFree(mem, _RegionSize());
+                mem = nullptr;
+            }
+
+            if (isUsable == nullptr)
+                return nullptr;
+
+            auto freeRegions = _GetFreeRegions();
+            _SortByDistance(freeRegions, reinterpret_cast<uintptr_t>(addressHint));
+
+            for (auto const &region : freeRegions)
+            {
+                const size_t regionSize = _RegionSize();
+                if (region.End - region.Start < regionSize)
+                    continue;
+
+                const uintptr_t candidates[] = {region.Start, region.End - regionSize};
+                for (auto candidate : candidates)
+                {
+                    if (!isUsable(reference, reinterpret_cast<void *>(candidate)))
+                        continue;
+
+                    mem = (TrampolineSlot_t *)MiniDetour::MemoryManipulation::Implementation::AllocCode(reinterpret_cast<void *>(candidate), regionSize);
+                    if (mem != nullptr && isUsable(reference, mem->data))
+                        break;
+
+                    if (mem != nullptr)
+                    {
+                        MiniDetour::MemoryManipulation::MemoryFree(mem, regionSize);
+                        mem = nullptr;
+                    }
+                }
+
+                if (mem != nullptr)
+                    break;
+            }
+
+            if (mem == nullptr)
+                return nullptr;
         }
 
         if (!MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(mem, _RegionSize()))
