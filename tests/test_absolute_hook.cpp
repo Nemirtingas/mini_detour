@@ -108,6 +108,11 @@ TEST_CASE("A function with no free memory in range is hooked with an absolute ju
 
         MiniDetour::Hook_t hook;
         auto original = reinterpret_cast<int (*)()>(hook.HookFunction((void *)target, reinterpret_cast<void *>(&AbsoluteHookDetour)));
+#if defined(MINIDETOUR_ARCH_ARM64)
+        // An absolute trampoline return would clobber a live register, so the hook must fail safely.
+        CHECK(original == nullptr);
+        CHECK(target() == 1);
+#else
         REQUIRE(original != nullptr);
 
         // No relative jump: the start of the function is an absolute jump to the detour.
@@ -117,6 +122,7 @@ TEST_CASE("A function with no free memory in range is hooked with an absolute ju
 
         CHECK(hook.RestoreFunction() != nullptr);
         CHECK(target() == 1);
+#endif
     }
 
     Release(function - static_cast<uintptr_t>(side), static_cast<size_t>(side));

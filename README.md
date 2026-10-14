@@ -134,6 +134,10 @@ The tests need `export_hook_test_library` in the working directory. On macOS, ru
 
 ## macOS
 
+On Apple Silicon, an inline hook needs an executable trampoline within the ±128 MiB range of the original function so
+its return branch preserves the function's registers. If no such memory is available, `HookFunction` fails without
+patching the target.
+
 A segment can't be given more rights than its `maxprot`, and executables are linked with a read-execute `maxprot` for
 `__TEXT`: their functions can't be made writable. `macos_permission_fix <executable>` rewrites the `__TEXT` `maxprot` of
 an executable to read-write-execute (the tests use it on `tests`).

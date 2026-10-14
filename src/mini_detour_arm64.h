@@ -134,28 +134,6 @@ struct AbsJump_t
     }
 };
 
-// Trampoline return jumps use IP0 so the relocated function's live IP1 value remains intact.
-struct AbsJumpX16_t
-{
-    static inline size_t WriteOpcodes(void *buffer, void *jump_destination)
-    {
-        const uintptr_t address = reinterpret_cast<uintptr_t>(jump_destination);
-        const uint32_t opcodes[] = {
-            0xd2800010 | uint32_t(address & 0xffff) << 5,        // movz x16, imm16
-            0xf2a00010 | uint32_t((address >> 16) & 0xffff) << 5, // movk x16, imm16, lsl 16
-            0xf2c00010 | uint32_t((address >> 32) & 0xffff) << 5, // movk x16, imm16, lsl 32
-            0xf2e00010 | uint32_t((address >> 48) & 0xffff) << 5, // movk x16, imm16, lsl 48
-            0xd61f0200,                                           // br x16
-        };
-
-        const size_t size = AbsJump_t::GetOpcodeSize(jump_destination, 0, 0);
-        memcpy(buffer, opcodes, size);
-        return size;
-    }
-
-    static constexpr size_t GetMaxOpcodeSize() { return AbsJump_t::GetMaxOpcodeSize(); }
-};
-
 struct RelJump_t
 {
     static inline size_t WriteOpcodes(void *buffer, void *source, void *jump_destination, int /*source_mode*/, int /*dest_mode*/)
@@ -181,6 +159,17 @@ struct RelJump_t
 
     static constexpr size_t GetMaxOpcodeSize() { return 4; }
 };
+
+// Leave room for the whole trampoline slot so its direct return branch can reach the original function.
+static bool _IsTrampolineNearFunction(void *function, void *trampoline)
+{
+    const uintptr_t functionAddress   = reinterpret_cast<uintptr_t>(function);
+    const uintptr_t trampolineAddress = reinterpret_cast<uintptr_t>(trampoline);
+    const uintptr_t distance          = functionAddress > trampolineAddress ? functionAddress - trampolineAddress : trampolineAddress - functionAddress;
+    constexpr uintptr_t branchRange   = 0x7FFFFFC;
+    constexpr uintptr_t slack         = 128 + sizeof(TrampolineSlot_t::data);
+    return distance <= branchRange - slack;
+}
 
 #pragma pack(pop)
 
@@ -356,10 +345,10 @@ static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm_t &disasm
     }
 
     void *resumeAddress = reinterpret_cast<void *>(code_addr);
-    if (_AddressesAreRelativeJumpable(pTrampolineCode, resumeAddress))
-        RelJump_t::WriteOpcodes(pTrampolineCode, pTrampolineCode, resumeAddress, 0, 0);
-    else
-        AbsJumpX16_t::WriteOpcodes(pTrampolineCode, resumeAddress);
+    if (!_AddressesAreRelativeJumpable(pTrampolineCode, resumeAddress))
+        return 0;
+
+    RelJump_t::WriteOpcodes(pTrampolineCode, pTrampolineCode, resumeAddress, 0, 0);
 
     return relocatedSize;
 }
