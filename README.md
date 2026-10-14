@@ -83,6 +83,7 @@ void Uninstall()
   refuses to hook rather than generate wrong code: a function too short for a jump, or starting with instructions it
   can't relocate, is not hooked. `CanHook` tells it without hooking.
 - A `Hook_t` restores its hook when destroyed, unless `RestoreOnDestroy(false)` was called. It can't be copied, only moved.
+- If `RestoreFunction` finds that another hook has replaced this hook's patch, MiniDetour redirects the jump slot to the original trampoline. It retains that slot and trampoline for the process lifetime because the later hook may still call through them.
 - `Hook_t::ReplaceFunction(function, newFunction)` overwrites the start of a function with a jump, without trampoline:
   the original function can't be called anymore.
 
