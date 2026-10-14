@@ -150,6 +150,21 @@ static bool _GetJccConditionCode(cs_insn const &instruction, uint8_t &conditionC
     return false;
 }
 
+// Keep the sizing and emission passes in agreement about which instructions they can relocate.
+static bool _CanRelocateInstruction(CodeDisasm_t &disasm, bool ignore_relocation)
+{
+    if (!disasm.IsInstructionTerminating() || ignore_relocation)
+        return true;
+
+    if (disasm.GetJumpType() == 3)
+    {
+        uint8_t conditionCode;
+        return disasm.GetInstruction().id == X86_INS_JMP || _GetJccConditionCode(disasm.GetInstruction(), conditionCode);
+    }
+
+    return disasm.GetJumpType() == 5;
+}
+
 // The code mode is carried by the address on ARM (Thumb bit): x86 has a single mode.
 static inline int _GetCodeMode(void * /*address*/)
 {
@@ -215,6 +230,14 @@ static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize
         if (!disasm.Disasm(&code_iterator, &code_size, &code_addr))
             break;
 
+        if (!_CanRelocateInstruction(disasm, ignore_relocation))
+        {
+#ifdef USE_SPDLOG
+            SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
+#endif
+            break;
+        }
+
         if (disasm.IsInstructionTerminating())
         {
             if (ignore_relocation) // Last instruction, overwrite it if we're ignoring relocations
@@ -279,6 +302,9 @@ static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm_t &disasm
     {
         if (!disasm.Disasm(&code_iterator, &code_size, &code_addr))
             break;
+
+        if (!_CanRelocateInstruction(disasm, false))
+            return 0;
 
         if (disasm.IsInstructionTerminating())
         {

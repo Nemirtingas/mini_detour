@@ -351,6 +351,37 @@ static size_t _WriteRipRelativeLoad(uint8_t *code, uint8_t reg, bool is64, bool 
     return code - start;
 }
 
+// Keep the sizing and emission passes in agreement about which instructions they can relocate.
+static bool _CanRelocateInstruction(CodeDisasm_t &disasm, bool ignore_relocation)
+{
+    auto const &instruction = disasm.GetInstruction();
+    if (disasm.IsInstructionTerminating())
+    {
+        if (ignore_relocation)
+            return true;
+
+        if (disasm.GetJumpType() == 3)
+        {
+            uint8_t conditionCode;
+            return instruction.id == X86_INS_JMP || _GetJccConditionCode(instruction, conditionCode);
+        }
+
+        return disasm.GetJumpType() == 5;
+    }
+
+    static constexpr auto modrm_mask = 0xC7;
+    if ((instruction.detail->x86.modrm & modrm_mask) == 0x05 && !ignore_relocation)
+    {
+        uint8_t reg;
+        bool is64;
+        bool dereference;
+        uint64_t address;
+        return _GetRipRelativeLoad(instruction, reg, is64, dereference, address);
+    }
+
+    return true;
+}
+
 static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm_t &disasm, size_t wanted_relocatable_size)
 {
     // MOD-REG-R/M Byte
@@ -374,6 +405,14 @@ static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize
     {
         if (!disasm.Disasm(&code_iterator, &code_size, &code_addr))
             break;
+
+        if (!_CanRelocateInstruction(disasm, ignore_relocation))
+        {
+#ifdef USE_SPDLOG
+            SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
+#endif
+            break;
+        }
 
         if (disasm.IsInstructionTerminating())
         {
@@ -466,6 +505,9 @@ static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm_t &disasm
     {
         if (!disasm.Disasm(&code_iterator, &code_size, &code_addr))
             break;
+
+        if (!_CanRelocateInstruction(disasm, false))
+            return 0;
 
         if (disasm.IsInstructionTerminating())
         {

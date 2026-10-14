@@ -236,6 +236,15 @@ static bool _UsesInstructionPointer(cs_insn const &instruction)
     return adr == 0x10000000 || adr == 0x90000000 || (raw & 0x3B000000) == 0x18000000;
 }
 
+// Keep the sizing and emission passes in agreement about which instructions they can relocate.
+static bool _CanRelocateInstruction(CodeDisasm_t &disasm, bool ignore_relocation)
+{
+    if (disasm.IsInstructionTerminating())
+        return ignore_relocation;
+
+    return ignore_relocation || !_UsesInstructionPointer(disasm.GetInstruction());
+}
+
 static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize, bool ignore_relocation, CodeDisasm_t &disasm, size_t wanted_relocatable_size)
 {
     uint8_t code_buffer[80];
@@ -250,6 +259,14 @@ static size_t _GetRelocatableSize(void *pCode, size_t &relocatedOriginalCodeSize
     {
         if (!disasm.Disasm(&code_iterator, &code_size, &code_addr))
             break;
+
+        if (!_CanRelocateInstruction(disasm, ignore_relocation))
+        {
+#ifdef USE_SPDLOG
+            SPDLOG_INFO("Can't relocate \"{} {}\"", disasm.GetInstruction().mnemonic, disasm.GetInstruction().op_str);
+#endif
+            break;
+        }
 
         if (disasm.IsInstructionTerminating())
         {
@@ -307,6 +324,9 @@ static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm_t &disasm
     {
         if (!disasm.Disasm(&code_iterator, &code_size, &code_addr))
             break;
+
+        if (!_CanRelocateInstruction(disasm, false))
+            return 0;
 
         if (disasm.IsInstructionTerminating())
         {
