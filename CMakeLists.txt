@@ -209,6 +209,9 @@ if(MINIDETOUR_BUILD_TESTS)
   endfunction()
 
   minidetour_add_test_library(export_hook_test_library tests/dll_test.c)
+  if(APPLE)
+    target_link_options(export_hook_test_library PRIVATE "-Wl,-alias,_add,_add_alias")
+  endif()
 
   if(UNIX AND NOT APPLE)
     # Shared library without any exported symbol: its GNU hash table has no hashed symbol.

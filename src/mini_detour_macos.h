@@ -20,6 +20,10 @@
 #include <errno.h>
 #include <string.h>
 
+#include <algorithm>
+#include <string>
+#include <vector>
+
 #if defined(MINIDETOUR_ARCH_X64) || defined(MINIDETOUR_ARCH_ARM64)
 
 using MachHeader_t     = mach_header_64;
@@ -789,14 +793,16 @@ static bool _FindLoadedImage(void *moduleHandle, const MachHeader_t **header, ui
     return false;
 }
 
-// slide: what the image was moved by from its link address, to add to symbol values.
-static bool _LoadModuleExportDetails(void *moduleHandle, uintptr_t *slide, NList_t **dynamicSymbols, const char **dynamicSymbolsNames, uint32_t *dynamicSymbolsCount)
+static bool _LoadModuleExportDetails(
+    void *moduleHandle,
+    uintptr_t *slide,
+    NList_t **dynamicSymbols,
+    const char **dynamicSymbolsNames,
+    uint32_t *dynamicSymbolsCount,
+    uint32_t *dynamicSymbolsNamesSize)
 {
     const MachHeader_t *machHeader;
     if (!_FindLoadedImage(moduleHandle, &machHeader, slide))
-        return false;
-
-    if (machHeader->flags & MH_DYLIB_IN_CACHE) // TODO: Handle shared cache
         return false;
 
     const SymTabCommand_t *symTabCommand = _FindLoadCommand<SymTabCommand_t>(machHeader, LC_SYMTAB);
@@ -804,46 +810,11 @@ static bool _LoadModuleExportDetails(void *moduleHandle, uintptr_t *slide, NList
     if (symTabCommand == nullptr || linkEditBase == 0)
         return false;
 
-    *dynamicSymbols      = (NList_t *)(linkEditBase + symTabCommand->symoff);
-    *dynamicSymbolsNames = (const char *)(linkEditBase + symTabCommand->stroff);
+    *dynamicSymbols      = reinterpret_cast<NList_t *>(linkEditBase + symTabCommand->symoff);
+    *dynamicSymbolsNames = reinterpret_cast<const char *>(linkEditBase + symTabCommand->stroff);
     *dynamicSymbolsCount = symTabCommand->nsyms;
-
+    *dynamicSymbolsNamesSize = symTabCommand->strsize;
     return true;
-}
-
-static size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails, size_t exportDetailsCount)
-{
-    uintptr_t slide;
-    NList_t *dynamicSymbols;
-    uint32_t dynamicSymbolsCount;
-    const char *dynamicSymbolsNames;
-    size_t result = 0;
-
-    if (!_LoadModuleExportDetails(moduleHandle, &slide, &dynamicSymbols, &dynamicSymbolsNames, &dynamicSymbolsCount))
-        return result;
-
-    // Without exportDetails, the exports are only counted. The undefined external symbols are the imports.
-    for (uint32_t i = 0; i < dynamicSymbolsCount; ++i)
-    {
-        if (!(dynamicSymbols[i].n_type & N_EXT) || (dynamicSymbols[i].n_type & N_TYPE) == N_UNDF)
-            continue;
-
-        if (exportDetails != nullptr)
-        {
-            if (result >= exportDetailsCount)
-                break;
-
-            // C symbols start with '_' on macOS.
-            const char *symbolName                  = dynamicSymbolsNames + dynamicSymbols[i].n_un.n_strx;
-            exportDetails[result].ExportName        = symbolName[0] == '_' ? symbolName + 1 : symbolName;
-            exportDetails[result].ExportCallAddress = (void *)(slide + dynamicSymbols[i].n_value);
-            exportDetails[result].ExportOrdinal     = i;
-        }
-
-        ++result;
-    }
-
-    return result;
 }
 
 // Import slots of a Mach-O image: the lazy (__la_symbol_ptr) and non lazy (__got, __auth_got, __nl_symbol_ptr) symbol
@@ -1171,11 +1142,157 @@ static bool _ReadUleb128(const uint8_t *&p, const uint8_t *end, uint64_t &value)
             return false;
 
         const uint8_t byte = *p++;
+        if (shift == 63 && (byte & 0x7E) != 0)
+            return false;
+
         value |= static_cast<uint64_t>(byte & 0x7F) << shift;
         shift += 7;
         if ((byte & 0x80) == 0)
             return true;
     }
+}
+
+// Resolves an nlist symbol to its address. N_INDR stores the target symbol's
+// string-table offset in n_value, so follow aliases in this image's symbol
+// table. The symbol-count bound also prevents alias cycles without allocating
+// a visited set.
+static bool _GetNListSymbolAddress(
+    const NList_t *symbols,
+    uint32_t symbolCount,
+    const char *symbolNames,
+    uint32_t symbolNamesSize,
+    uint32_t symbolIndex,
+    uintptr_t slide,
+    uintptr_t *address)
+{
+    for (uint32_t aliasDepth = 0; aliasDepth < symbolCount; ++aliasDepth)
+    {
+        const NList_t &symbol = symbols[symbolIndex];
+        switch (symbol.n_type & N_TYPE)
+        {
+            case N_ABS:
+                *address = static_cast<uintptr_t>(symbol.n_value);
+                return true;
+            case N_SECT:
+                *address = slide + static_cast<uintptr_t>(symbol.n_value);
+                return true;
+            case N_INDR:
+            {
+                if (symbol.n_value >= symbolNamesSize)
+                    return false;
+
+                const uint32_t targetNameOffset = static_cast<uint32_t>(symbol.n_value);
+                const char *targetName = symbolNames + targetNameOffset;
+                const size_t targetNameSize = symbolNamesSize - targetNameOffset;
+                const size_t targetNameLength = strnlen(targetName, targetNameSize);
+                if (targetNameLength == targetNameSize || targetNameLength == 0)
+                    return false;
+
+                uint32_t targetIndex = symbolCount;
+                for (uint32_t i = 0; i < symbolCount; ++i)
+                {
+                    const NList_t &candidate = symbols[i];
+                    if (!(candidate.n_type & N_EXT) || (candidate.n_type & N_TYPE) == N_UNDF)
+                        continue;
+
+                    const uint32_t candidateNameOffset = candidate.n_un.n_strx;
+                    if (candidateNameOffset >= symbolNamesSize)
+                        continue;
+
+                    const char *candidateName = symbolNames + candidateNameOffset;
+                    const size_t candidateNameSize = symbolNamesSize - candidateNameOffset;
+                    const size_t candidateNameLength = strnlen(candidateName, candidateNameSize);
+                    if (candidateNameLength == targetNameLength &&
+                        candidateNameLength < candidateNameSize &&
+                        memcmp(candidateName, targetName, targetNameLength) == 0)
+                    {
+                        targetIndex = i;
+                        break;
+                    }
+                }
+
+                if (targetIndex == symbolCount)
+                    return false;
+
+                symbolIndex = targetIndex;
+                break;
+            }
+            default:
+                return false;
+        }
+    }
+
+    return false;
+}
+
+static size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails, size_t exportDetailsCount)
+{
+    uintptr_t slide;
+    NList_t *dynamicSymbols;
+    uint32_t dynamicSymbolsCount;
+    const char *dynamicSymbolsNames;
+    uint32_t dynamicSymbolsNamesSize;
+    if (!_LoadModuleExportDetails(
+            moduleHandle,
+            &slide,
+            &dynamicSymbols,
+            &dynamicSymbolsNames,
+            &dynamicSymbolsCount,
+            &dynamicSymbolsNamesSize))
+        return 0;
+
+    const MachHeader_t *header;
+    if (!_FindLoadedImage(moduleHandle, &header, nullptr))
+        return 0;
+    const bool isSharedCacheImage = (header->flags & MH_DYLIB_IN_CACHE) != 0;
+
+    // The shared cache keeps an optimized nlist string pool in LINKEDIT. Return pointers into that mapped pool,
+    // just as for non-cache images, so ExportName remains valid while the image is loaded.
+    size_t result = 0;
+    for (uint32_t i = 0; i < dynamicSymbolsCount; ++i)
+    {
+        const uint8_t symbolType = dynamicSymbols[i].n_type & N_TYPE;
+        if (!(dynamicSymbols[i].n_type & N_EXT) || symbolType == N_UNDF ||
+            (isSharedCacheImage && (dynamicSymbols[i].n_type & N_PEXT) != 0))
+            continue;
+        if (isSharedCacheImage && symbolType != N_ABS && symbolType != N_SECT && symbolType != N_INDR)
+            continue;
+
+        const uint32_t stringOffset = dynamicSymbols[i].n_un.n_strx;
+        if (stringOffset >= dynamicSymbolsNamesSize)
+            continue;
+
+        const char *symbolName = dynamicSymbolsNames + stringOffset;
+        const size_t remainingStringBytes = dynamicSymbolsNamesSize - stringOffset;
+        if (strnlen(symbolName, remainingStringBytes) == remainingStringBytes || symbolName[0] == '\0')
+            continue;
+
+        if (exportDetails != nullptr)
+        {
+            if (result >= exportDetailsCount)
+                break;
+
+            const char *exportName           = symbolName[0] == '_' ? symbolName + 1 : symbolName;
+            exportDetails[result].ExportName = exportName;
+            uintptr_t address = 0;
+            exportDetails[result].ExportCallAddress =
+                _GetNListSymbolAddress(
+                    dynamicSymbols,
+                    dynamicSymbolsCount,
+                    dynamicSymbolsNames,
+                    dynamicSymbolsNamesSize,
+                    i,
+                    slide,
+                    &address)
+                    ? reinterpret_cast<void *>(address)
+                    : nullptr;
+            exportDetails[result].ExportOrdinal     = i;
+        }
+
+        ++result;
+    }
+
+    return result;
 }
 
 // Encodes value on exactly size bytes: ULEB128 can be padded with continuation bytes, dyld reads it the same way.
