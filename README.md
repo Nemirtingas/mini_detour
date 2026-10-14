@@ -103,6 +103,14 @@ if (MiniDetour::ModuleManipulation::ReplaceModuleExports(module, &parameter, 1) 
 pointers on macOS) of a module, and `GetAllExportedSymbols` / `GetAllIATSymbols` list them: pass `nullptr` to get the
 count first.
 
+## Thread safety
+
+MiniDetour serializes its own hook-management operations. This does not stop application threads from executing the
+function being patched. On Windows and macOS, the library attempts to suspend the other threads while it writes the
+hook and refuses the write if a suspended thread is inside the overwritten instructions. Linux does not suspend other
+threads: the caller must arrange that no other thread can execute the target while `HookFunction`, `ReplaceFunction`, or
+`RestoreFunction` changes its instructions.
+
 ### C API
 
 Every C++ function is an inline wrapper over a C function, declared in the same header:
