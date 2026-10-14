@@ -16,6 +16,16 @@ EXPORT_SYMBOL int add(int a, int b)
     return a + b;
 }
 
+#if defined(TESTS_OS_LINUX)
+EXPORT_SYMBOL int add_alias(int a, int b) __attribute__((alias("add")));
+#elif defined(_MSC_VER)
+#if defined(_M_IX86)
+#pragma comment(linker, "/export:add_alias=_add")
+#else
+#pragma comment(linker, "/export:add_alias=add")
+#endif
+#endif
+
 EXPORT_SYMBOL int some_integer = 0;
 
 EXPORT_SYMBOL void iat_puts()

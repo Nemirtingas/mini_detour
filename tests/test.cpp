@@ -180,15 +180,26 @@ TEST_CASE("List modules exported symbols", "[module_list_export_symbols]")
     REQUIRE(h != nullptr);
 
     exportedSymbolsCount = MiniDetour::ModuleManipulation::GetAllExportedSymbols(h, nullptr, 0);
-    CHECK(exportedSymbolsCount == 3);
+    CHECK(exportedSymbolsCount == 4);
 
     exportedSymbols = (MiniDetour::ModuleManipulation::ExportDetails_t *)malloc(sizeof(MiniDetour::ModuleManipulation::ExportDetails_t) * exportedSymbolsCount);
     CHECK(MiniDetour::ModuleManipulation::GetAllExportedSymbols(h, exportedSymbols, exportedSymbolsCount) == exportedSymbolsCount);
+
+    void *addAddress = GET_LIBRARY_PROC(h, "add");
+    void *addAliasAddress = GET_LIBRARY_PROC(h, "add_alias");
+    REQUIRE(addAddress != nullptr);
+    REQUIRE(addAliasAddress == addAddress);
+    bool foundAlias = false;
 
     SPDLOG_INFO("Module: {}", EXPORT_HOOK_TEST_LIBRARY);
     for (size_t i = 0; i < exportedSymbolsCount; ++i)
     {
         CHECK(GET_LIBRARY_PROC(h, exportedSymbols[i].ExportName) == exportedSymbols[i].ExportCallAddress);
+        if (strcmp(exportedSymbols[i].ExportName, "add_alias") == 0)
+        {
+            foundAlias = true;
+            CHECK(exportedSymbols[i].ExportCallAddress == addAddress);
+        }
         SPDLOG_INFO(
             "  Symbol export: {}, [ordinal]{} at {} - {}",
             exportedSymbols[i].ExportName == nullptr ? "" : exportedSymbols[i].ExportName,
@@ -196,6 +207,7 @@ TEST_CASE("List modules exported symbols", "[module_list_export_symbols]")
             exportedSymbols[i].ExportCallAddress,
             GET_LIBRARY_PROC(h, exportedSymbols[i].ExportName));
     }
+    CHECK(foundAlias);
 
     free(exportedSymbols);
     FREE_LIBRARY(h);

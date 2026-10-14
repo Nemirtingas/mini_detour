@@ -1152,6 +1152,79 @@ static bool _ReadUleb128(const uint8_t *&p, const uint8_t *end, uint64_t &value)
     }
 }
 
+// Resolves an nlist symbol to its address. N_INDR stores the target symbol's
+// string-table offset in n_value, so follow aliases in this image's symbol
+// table. The symbol-count bound also prevents alias cycles without allocating
+// a visited set.
+static bool _GetNListSymbolAddress(
+    const NList_t *symbols,
+    uint32_t symbolCount,
+    const char *symbolNames,
+    uint32_t symbolNamesSize,
+    uint32_t symbolIndex,
+    uintptr_t slide,
+    uintptr_t *address)
+{
+    for (uint32_t aliasDepth = 0; aliasDepth < symbolCount; ++aliasDepth)
+    {
+        const NList_t &symbol = symbols[symbolIndex];
+        switch (symbol.n_type & N_TYPE)
+        {
+            case N_ABS:
+                *address = static_cast<uintptr_t>(symbol.n_value);
+                return true;
+            case N_SECT:
+                *address = slide + static_cast<uintptr_t>(symbol.n_value);
+                return true;
+            case N_INDR:
+            {
+                if (symbol.n_value >= symbolNamesSize)
+                    return false;
+
+                const uint32_t targetNameOffset = static_cast<uint32_t>(symbol.n_value);
+                const char *targetName = symbolNames + targetNameOffset;
+                const size_t targetNameSize = symbolNamesSize - targetNameOffset;
+                const size_t targetNameLength = strnlen(targetName, targetNameSize);
+                if (targetNameLength == targetNameSize || targetNameLength == 0)
+                    return false;
+
+                uint32_t targetIndex = symbolCount;
+                for (uint32_t i = 0; i < symbolCount; ++i)
+                {
+                    const NList_t &candidate = symbols[i];
+                    if (!(candidate.n_type & N_EXT) || (candidate.n_type & N_TYPE) == N_UNDF)
+                        continue;
+
+                    const uint32_t candidateNameOffset = candidate.n_un.n_strx;
+                    if (candidateNameOffset >= symbolNamesSize)
+                        continue;
+
+                    const char *candidateName = symbolNames + candidateNameOffset;
+                    const size_t candidateNameSize = symbolNamesSize - candidateNameOffset;
+                    const size_t candidateNameLength = strnlen(candidateName, candidateNameSize);
+                    if (candidateNameLength == targetNameLength &&
+                        candidateNameLength < candidateNameSize &&
+                        memcmp(candidateName, targetName, targetNameLength) == 0)
+                    {
+                        targetIndex = i;
+                        break;
+                    }
+                }
+
+                if (targetIndex == symbolCount)
+                    return false;
+
+                symbolIndex = targetIndex;
+                break;
+            }
+            default:
+                return false;
+        }
+    }
+
+    return false;
+}
+
 static size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportDetails, size_t exportDetailsCount)
 {
     uintptr_t slide;
@@ -1201,24 +1274,18 @@ static size_t GetAllExportedSymbols(void *moduleHandle, ExportDetails_t *exportD
 
             const char *exportName           = symbolName[0] == '_' ? symbolName + 1 : symbolName;
             exportDetails[result].ExportName = exportName;
-            if (isSharedCacheImage)
-            {
-                switch (symbolType)
-                {
-                    case N_ABS:
-                        exportDetails[result].ExportCallAddress = reinterpret_cast<void *>(static_cast<uintptr_t>(dynamicSymbols[i].n_value));
-                        break;
-                    case N_SECT:
-                        exportDetails[result].ExportCallAddress = reinterpret_cast<void *>(slide + dynamicSymbols[i].n_value);
-                        break;
-                    default:
-                        // N_INDR exports are aliases and do not have an address in this image.
-                        exportDetails[result].ExportCallAddress = nullptr;
-                        break;
-                }
-            }
-            else
-                exportDetails[result].ExportCallAddress = reinterpret_cast<void *>(slide + dynamicSymbols[i].n_value);
+            uintptr_t address = 0;
+            exportDetails[result].ExportCallAddress =
+                _GetNListSymbolAddress(
+                    dynamicSymbols,
+                    dynamicSymbolsCount,
+                    dynamicSymbolsNames,
+                    dynamicSymbolsNamesSize,
+                    i,
+                    slide,
+                    &address)
+                    ? reinterpret_cast<void *>(address)
+                    : nullptr;
             exportDetails[result].ExportOrdinal     = i;
         }
 
