@@ -160,6 +160,17 @@ struct RelJump_t
     static constexpr size_t GetMaxOpcodeSize() { return 4; }
 };
 
+// Leave room for the whole trampoline slot so its direct return branch can reach the original function.
+static bool _IsTrampolineNearFunction(void *function, void *trampoline)
+{
+    const uintptr_t functionAddress   = reinterpret_cast<uintptr_t>(function);
+    const uintptr_t trampolineAddress = reinterpret_cast<uintptr_t>(trampoline);
+    const uintptr_t distance          = functionAddress > trampolineAddress ? functionAddress - trampolineAddress : trampolineAddress - functionAddress;
+    constexpr uintptr_t branchRange   = 0x7FFFFFC;
+    constexpr uintptr_t slack         = 128 + sizeof(TrampolineSlot_t::data);
+    return distance <= branchRange - slack;
+}
+
 #pragma pack(pop)
 
 // The code mode is carried by the address on ARM (Thumb bit): ARM64 has a single mode.
@@ -333,7 +344,11 @@ static size_t _RelocateCode(void *pCode, void *pTrampoline, CodeDisasm_t &disasm
         pTrampolineCode += disasm.GetInstruction().size;
     }
 
-    AbsJump_t::WriteOpcodes(pTrampolineCode, reinterpret_cast<void *>(code_addr), 0, 0);
+    void *resumeAddress = reinterpret_cast<void *>(code_addr);
+    if (!_AddressesAreRelativeJumpable(pTrampolineCode, resumeAddress))
+        return 0;
+
+    RelJump_t::WriteOpcodes(pTrampolineCode, pTrampolineCode, resumeAddress, 0, 0);
 
     return relocatedSize;
 }

@@ -446,12 +446,45 @@ class MemoryManager_t
         }
     }
 
-    TrampolineSlot_t *AllocTrampolineRegion()
+    TrampolineSlot_t *AllocTrampolineRegion(void *addressHint, void *reference, bool (*isUsable)(void *, void *))
     {
-        TrampolineSlot_t *mem = (TrampolineSlot_t *)MiniDetour::MemoryManipulation::Implementation::AllocCode(nullptr, _RegionSize());
-        if (mem == nullptr)
-            return nullptr;
+        TrampolineSlot_t *mem = (TrampolineSlot_t *)MiniDetour::MemoryManipulation::Implementation::AllocCode(addressHint, _RegionSize());
+        if (mem != nullptr && (isUsable == nullptr || isUsable(reference, mem->data)))
+            goto initialize;
 
+        if (mem != nullptr)
+            MiniDetour::MemoryManipulation::MemoryFree(mem, _RegionSize());
+
+        if (isUsable != nullptr)
+        {
+            auto freeRegions = _GetFreeRegions();
+            _SortByDistance(freeRegions, reinterpret_cast<uintptr_t>(addressHint));
+
+            for (auto const &region : freeRegions)
+            {
+                const size_t regionSize = _RegionSize();
+                if (region.End - region.Start < regionSize)
+                    continue;
+
+                const uintptr_t candidates[] = {region.Start, region.End - regionSize};
+                for (auto candidate : candidates)
+                {
+                    if (!isUsable(reference, reinterpret_cast<void *>(candidate)))
+                        continue;
+
+                    mem = (TrampolineSlot_t *)MiniDetour::MemoryManipulation::Implementation::AllocCode(reinterpret_cast<void *>(candidate), regionSize);
+                    if (mem != nullptr && isUsable(reference, mem->data))
+                        goto initialize;
+
+                    if (mem != nullptr)
+                        MiniDetour::MemoryManipulation::MemoryFree(mem, regionSize);
+                }
+            }
+        }
+
+        return nullptr;
+
+    initialize:
         if (!MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(mem, _RegionSize()))
         {
             MiniDetour::MemoryManipulation::MemoryFree(mem, _RegionSize());
@@ -465,7 +498,7 @@ class MemoryManager_t
         return mem;
     }
 
-    uint8_t *GetFreeTrampoline(size_t mem_size)
+    uint8_t *GetFreeTrampoline(size_t mem_size, void *addressHint = nullptr, void *reference = nullptr, bool (*isUsable)(void *, void *) = nullptr)
     {
         // A larger trampoline would be written over the next slot.
         if (mem_size > sizeof(TrampolineSlot_t::data))
@@ -479,7 +512,7 @@ class MemoryManager_t
             TrampolineSlot_t *end = memory + _RegionSize() / sizeof(TrampolineSlot_t);
             for (; memory != end; ++memory)
             {
-                if (!memory->used)
+                if (!memory->used && (isUsable == nullptr || isUsable(reference, memory->data)))
                 {
                     SPDLOG_DEBUG("Using free memory at {}", (void *)memory);
                     if (!MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(memory, sizeof(TrampolineSlot_t)))
@@ -492,7 +525,7 @@ class MemoryManager_t
             }
         }
 
-        TrampolineSlot_t *mem_region = AllocTrampolineRegion();
+        TrampolineSlot_t *mem_region = AllocTrampolineRegion(addressHint, reference, isUsable);
         if (mem_region == nullptr || !MiniDetour::MemoryManipulation::Implementation::BeginCodeWrite(mem_region, sizeof(TrampolineSlot_t)))
             return nullptr;
 
@@ -1083,7 +1116,11 @@ class Hook_t
         // on its destination). Used to check the slot size, and to protect and flush the whole trampoline.
         totalOriginalTrampolineSize = relocatedOriginalCodeSize + AbsJump_t::GetMaxOpcodeSize();
 
+#if defined(MINIDETOUR_ARCH_ARM64)
+        _OriginalTrampolineAddress = Globals_t::Instance().Memory.GetFreeTrampoline(totalOriginalTrampolineSize, functionToHook, functionToHook, _IsTrampolineNearFunction);
+#else
         _OriginalTrampolineAddress = Globals_t::Instance().Memory.GetFreeTrampoline(totalOriginalTrampolineSize);
+#endif
         if (_OriginalTrampolineAddress == nullptr)
         {
             SPDLOG_ERROR("Failed to get memory for trampoline.");

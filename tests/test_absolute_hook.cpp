@@ -58,9 +58,7 @@ static int AbsoluteHookDetour()
     return 100;
 }
 
-// The hook of a function wrote a relative jump to a jump slot next to it, and failed when no slot could be placed in
-// its range: next to the macOS shared cache on ARM64, the free memory can be farther than the 128 MB of a branch. The
-// function then jumps to the detour with an absolute jump, when it is long enough for one.
+// When no jump slot can be placed in range, the function is patched with an absolute jump.
 TEST_CASE("A function with no free memory in range is hooked with an absolute jump", "[absolute_hook]")
 {
 #if defined(MINIDETOUR_ARCH_X64)
@@ -110,6 +108,11 @@ TEST_CASE("A function with no free memory in range is hooked with an absolute ju
 
         MiniDetour::Hook_t hook;
         auto original = reinterpret_cast<int (*)()>(hook.HookFunction((void *)target, reinterpret_cast<void *>(&AbsoluteHookDetour)));
+#if defined(MINIDETOUR_ARCH_ARM64)
+        // An absolute trampoline return would clobber a live register, so the hook must fail safely.
+        CHECK(original == nullptr);
+        CHECK(target() == 1);
+#else
         REQUIRE(original != nullptr);
 
         // No relative jump: the start of the function is an absolute jump to the detour.
@@ -119,6 +122,7 @@ TEST_CASE("A function with no free memory in range is hooked with an absolute ju
 
         CHECK(hook.RestoreFunction() != nullptr);
         CHECK(target() == 1);
+#endif
     }
 
     Release(function - static_cast<uintptr_t>(side), static_cast<size_t>(side));
