@@ -129,6 +129,7 @@ typedef struct MiniDetourMemoryManipulationRegionInfos_t
 
 typedef struct MiniDetourModuleManipulationExportDetails_t
 {
+    // Borrowed from the loaded image; keep the image loaded while using this pointer.
     const char *ExportName;
     uint32_t ExportOrdinal;
     void *ExportCallAddress;
