@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 #include <new>
 #include <string>
@@ -1025,7 +1026,9 @@ class Hook_t
         return written;
     }
 
-    void *HookFunc(void *functionToHook, void *newFunction)
+    // originalFunction, when set, receives the trampoline before the hook is written, and gets its value back if the hook
+    // fails: the detour can be called by another thread as soon as the hook is written, and must find it there.
+    void *HookFunc(void *functionToHook, void *newFunction, void **originalFunction = nullptr)
     {
         // Already hooking a function: hooking another one would lose the state needed to restore the first one.
         if (_OriginalFuncAddress != nullptr)
@@ -1047,6 +1050,9 @@ class Hook_t
             return nullptr;
 
         size_t totalOriginalTrampolineSize = 0;
+        // The caller's pointer and its value before the hook, restored in the error path once it was changed.
+        void **publishedOriginal = nullptr;
+        void *previousOriginal   = nullptr;
         // Finished in the error path too once the function was prepared for writing.
         FunctionCodeWriter_t writer;
         // The jump slot the hook goes through, freed in the error path. The size of the jump written in the function.
@@ -1149,6 +1155,18 @@ class Hook_t
                 RelJump_t::WriteOpcodes(_HookCode.data(), functionToHook, jump_mem, func_mode, func_mode);
             else
                 AbsJump_t::WriteOpcodes(_HookCode.data(), newFunction, func_mode, hook_mode);
+
+            // The trampoline runs the original code whether the hook is written or not. Once the hook is written,
+            // another thread can enter the detour, which calls the original function through this pointer: if it still
+            // held the hooked function, the detour would call itself until the stack overflows.
+            if (originalFunction != nullptr)
+            {
+                publishedOriginal = originalFunction;
+                previousOriginal  = *originalFunction;
+                *originalFunction = _GetCallAddress(_OriginalTrampolineAddress, func_mode);
+                std::atomic_thread_fence(std::memory_order_seq_cst);
+            }
+
             {
                 // Nothing can be logged while the other threads are suspended: it would allocate.
                 bool frozen  = false;
@@ -1192,6 +1210,9 @@ class Hook_t
     error:
         // The function code wasn't modified: only its rights may have been.
         writer.Finish();
+
+        if (publishedOriginal != nullptr)
+            *publishedOriginal = previousOriginal;
 
         if (jump_mem != nullptr)
             Globals_t::Instance().Memory.FreeJump(jump_mem);
@@ -1476,12 +1497,17 @@ MINIDETOUR_EXPORT(int) MiniDetourHookTCanHook(minidetour_hook_handle_t handle, v
 
 MINIDETOUR_EXPORT(void *) MiniDetourHookTHookFunction(minidetour_hook_handle_t handle, void *function_to_hook, void *new_function)
 {
+    return MiniDetourHookTHookFunctionWithOriginal(handle, function_to_hook, new_function, nullptr);
+}
+
+MINIDETOUR_EXPORT(void *) MiniDetourHookTHookFunctionWithOriginal(minidetour_hook_handle_t handle, void *function_to_hook, void *new_function, void **original_function)
+{
     std::lock_guard<std::mutex> lock(MiniDetour::Globals_t::Instance().HookMutex);
     auto hook = reinterpret_cast<MiniDetour::Implementation::Hook_t *>(handle);
     if (hook == nullptr || function_to_hook == nullptr || new_function == nullptr)
         return nullptr;
 
-    return hook->HookFunc(function_to_hook, new_function);
+    return hook->HookFunc(function_to_hook, new_function, original_function);
 }
 
 MINIDETOUR_EXPORT(void *) MiniDetourHookTRestoreFunction(minidetour_hook_handle_t handle)

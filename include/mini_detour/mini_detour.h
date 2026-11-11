@@ -331,6 +331,10 @@ MINIDETOUR_EXPORT(void) MiniDetourHookTRestoreOnDestroy(minidetour_hook_handle_t
 // Returns 1 if the function can be hooked, 0 otherwise.
 MINIDETOUR_EXPORT(int) MiniDetourHookTCanHook(minidetour_hook_handle_t handle, void *function);
 MINIDETOUR_EXPORT(void *) MiniDetourHookTHookFunction(minidetour_hook_handle_t handle, void *function_to_hook, void *new_function);
+// Same as MiniDetourHookTHookFunction, and writes the original function (the trampoline) to *original_function before the
+// hook is written, so a detour calling the original function through it works from the moment another thread can enter
+// it. *original_function keeps its value if the function can't be hooked.
+MINIDETOUR_EXPORT(void *) MiniDetourHookTHookFunctionWithOriginal(minidetour_hook_handle_t handle, void *function_to_hook, void *new_function, void **original_function);
 MINIDETOUR_EXPORT(void *) MiniDetourHookTRestoreFunction(minidetour_hook_handle_t handle);
 MINIDETOUR_EXPORT(void *) MiniDetourHookTGetHookFunction(minidetour_hook_handle_t handle);
 MINIDETOUR_EXPORT(void *) MiniDetourHookTGetOriginalFunction(minidetour_hook_handle_t handle);
@@ -506,6 +510,9 @@ class Hook_t
     static bool ReplaceFunction(void *functionToReplace, void *newFunction) { return MiniDetourHookTReplaceFunction(functionToReplace, newFunction) != 0; }
 
     inline void *HookFunction(void *functionToHook, void *newFunction) { return MiniDetourHookTHookFunction(_hookHandle, functionToHook, newFunction); }
+
+    // Writes the original function to *originalFunction before the hook is written (see MiniDetourHookTHookFunctionWithOriginal).
+    inline void *HookFunction(void *functionToHook, void *newFunction, void **originalFunction) { return MiniDetourHookTHookFunctionWithOriginal(_hookHandle, functionToHook, newFunction, originalFunction); }
 
     inline void *RestoreFunction() { return MiniDetourHookTRestoreFunction(_hookHandle); }
 
