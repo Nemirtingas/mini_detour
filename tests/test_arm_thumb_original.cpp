@@ -17,7 +17,7 @@ TEST_CASE("Call the original of a hooked Thumb function", "[arm_thumb_original]"
     auto function = reinterpret_cast<int (*)()>(ThumbAddress(code.Data()));
 
     MiniDetour::Hook_t hook;
-    auto original = reinterpret_cast<int (*)()>(hook.HookFunction((void *)function, ThumbAddress(code.Data(64))));
+    auto original = reinterpret_cast<int (*)()>(TestHookFunction(hook, (void *)function, ThumbAddress(code.Data(64))));
     REQUIRE(original != nullptr);
     CHECK((reinterpret_cast<uintptr_t>(original) & 1) == 1);
 

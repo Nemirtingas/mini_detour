@@ -109,7 +109,7 @@ TEST_CASE("A function with no free memory in range is hooked with an absolute ju
         auto target = GeneratedCode::Function(code);
 
         MiniDetour::Hook_t hook;
-        auto original = reinterpret_cast<int (*)()>(hook.HookFunction((void *)target, reinterpret_cast<void *>(&AbsoluteHookDetour)));
+        auto original = reinterpret_cast<int (*)()>(TestHookFunction(hook, (void *)target, reinterpret_cast<void *>(&AbsoluteHookDetour)));
         REQUIRE(original != nullptr);
 
         // No relative jump: the start of the function is an absolute jump to the detour.

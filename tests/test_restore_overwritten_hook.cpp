@@ -16,7 +16,7 @@ TEST_CASE("Restoring a hook overwritten by someone else bypasses the detour", "[
     auto function = GeneratedCode::Function(code);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction((void *)function, reinterpret_cast<void *>(&OverwrittenHookDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, (void *)function, reinterpret_cast<void *>(&OverwrittenHookDetour)) != nullptr);
 
     // Our hook is a relative jump to a jump going to the detour.
     void *ourJump = reinterpret_cast<void *>(GeneratedCode::RelativeJumpTarget(code.Data()));

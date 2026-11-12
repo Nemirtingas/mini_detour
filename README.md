@@ -59,16 +59,17 @@ target_link_libraries(my_target PRIVATE Nemirtingas::MiniDetour)
 #include <mini_detour/mini_detour.h>
 
 static MiniDetour::Hook_t addHook;
+static decltype(&add) originalAdd = &add;
 
 static int MyAdd(int a, int b)
 {
     // Call the original function through its trampoline.
-    return addHook.GetOriginalFunction<decltype(&MyAdd)>()(a, b) * 10;
+    return originalAdd(a, b) * 10;
 }
 
 void Install()
 {
-    if (addHook.HookFunction(reinterpret_cast<void*>(&add), reinterpret_cast<void*>(&MyAdd)) == nullptr)
+    if (addHook.HookFunction(reinterpret_cast<void**>(&originalAdd), reinterpret_cast<void*>(&MyAdd)) == nullptr)
     {
         // The function can't be hooked (too short, or starts with instructions that can't be relocated).
     }
@@ -80,7 +81,10 @@ void Uninstall()
 }
 ```
 
-- `HookFunction` returns the address to call the original function, or `nullptr` when the hook can't be set. The library
+- `HookFunction` takes a pointer to a variable holding the function to hook. It replaces it with the address to call the
+  original function (its trampoline) before the hook is written: another thread can enter the detour as soon as the hook
+  is written, and the detour must find the original function there. The variable keeps its value when the hook fails.
+- `HookFunction` also returns the address to call the original function, or `nullptr` when the hook can't be set. The library
   refuses to hook rather than generate wrong code: a function too short for a jump, or starting with instructions it
   can't relocate, is not hooked. `CanHook` tells it without hooking.
 - A `Hook_t` restores its hook when destroyed, unless `RestoreOnDestroy(false)` was called. It can't be copied, only moved.
@@ -118,7 +122,11 @@ Every C++ function is an inline wrapper over a C function, declared in the same 
 
 ```c
 minidetour_hook_handle_t hook = MiniDetourHookTAlloc();
-void* original = MiniDetourHookTHookFunction(hook, (void*)&add, (void*)&MyAdd);
+void* original = (void*)&add;
+if (MiniDetourHookTHookFunction(hook, &original, (void*)&MyAdd) == NULL)
+{
+    /* Not hooked: original is still add. */
+}
 /* ... */
 MiniDetourHookTRestoreFunction(hook);
 MiniDetourHookTFree(hook);

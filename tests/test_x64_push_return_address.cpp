@@ -79,7 +79,7 @@ TEST_CASE("Relocated call returns to an address between 2 and 4 GB", "[x64_push]
 
     {
         MiniDetour::Hook_t hook;
-        REQUIRE(hook.HookFunction(code, reinterpret_cast<void *>(&PushReturnAddressDetour)) != nullptr);
+        REQUIRE(TestHookFunction(hook, code, reinterpret_cast<void *>(&PushReturnAddressDetour)) != nullptr);
 
         CHECK(functionPtr() == 100);
         CHECK(hook.GetOriginalFunction<PushFunc_t>()() == 42);

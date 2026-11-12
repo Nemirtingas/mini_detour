@@ -17,7 +17,7 @@ TEST_CASE("Restore a hook on freed memory", "[restore_freed]")
         CodeBuffer_t code;
         REQUIRE(code.IsValid());
         GeneratedCode::WriteReturnConstant(code, 0, 42);
-        REQUIRE(hook.HookFunction((void *)GeneratedCode::Function(code), (void *)&FreedMemoryDetour) != nullptr);
+        REQUIRE(TestHookFunction(hook, (void *)GeneratedCode::Function(code), (void *)&FreedMemoryDetour) != nullptr);
     }
 
     CHECK(hook.RestoreFunction() == nullptr);
@@ -29,7 +29,7 @@ TEST_CASE("Restore a hook on freed memory", "[restore_freed]")
     GeneratedCode::WriteReturnConstant(other, 0, 43);
     auto function = GeneratedCode::Function<int(TEST_CALL *)()>(other);
 
-    auto original = reinterpret_cast<int(TEST_CALL *)()>(hook.HookFunction((void *)function, (void *)&FreedMemoryDetour));
+    auto original = reinterpret_cast<int(TEST_CALL *)()>(TestHookFunction(hook, (void *)function, (void *)&FreedMemoryDetour));
     REQUIRE(original != nullptr);
     CHECK(function() == 7);
     CHECK(original() == 43);

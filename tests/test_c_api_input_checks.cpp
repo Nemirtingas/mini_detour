@@ -52,7 +52,8 @@ TEST_CASE("Hook functions refuse a null handle", "[c_api_input_checks]")
 {
     MiniDetourHookTRestoreOnDestroy(nullptr, true);
     CHECK_FALSE(MiniDetourHookTCanHook(nullptr, reinterpret_cast<void *>(&InputChecksFunction)));
-    CHECK(MiniDetourHookTHookFunction(nullptr, reinterpret_cast<void *>(&InputChecksFunction), reinterpret_cast<void *>(&InputChecksFunction)) == nullptr);
+    void *function = reinterpret_cast<void *>(&InputChecksFunction);
+    CHECK(MiniDetourHookTHookFunction(nullptr, &function, reinterpret_cast<void *>(&InputChecksFunction)) == nullptr);
     CHECK(MiniDetourHookTRestoreFunction(nullptr) == nullptr);
     CHECK(MiniDetourHookTGetHookFunction(nullptr) == nullptr);
     CHECK(MiniDetourHookTGetOriginalFunction(nullptr) == nullptr);
@@ -65,7 +66,11 @@ TEST_CASE("Hook functions refuse a null handle", "[c_api_input_checks]")
     REQUIRE(hook != nullptr);
     CHECK_FALSE(MiniDetourHookTCanHook(hook, nullptr));
     CHECK(MiniDetourHookTHookFunction(hook, nullptr, reinterpret_cast<void *>(&InputChecksFunction)) == nullptr);
-    CHECK(MiniDetourHookTHookFunction(hook, reinterpret_cast<void *>(&InputChecksFunction), nullptr) == nullptr);
+    void *nullFunction = nullptr;
+    CHECK(MiniDetourHookTHookFunction(hook, &nullFunction, reinterpret_cast<void *>(&InputChecksFunction)) == nullptr);
+    CHECK(nullFunction == nullptr);
+    CHECK(MiniDetourHookTHookFunction(hook, &function, nullptr) == nullptr);
+    CHECK(function == reinterpret_cast<void *>(&InputChecksFunction));
     MiniDetourHookTFree(hook);
 }
 
@@ -77,7 +82,7 @@ TEST_CASE("A moved from Hook_t can still be used", "[c_api_input_checks]")
 
     hook.RestoreOnDestroy(true);
     CHECK_FALSE(hook.CanHook(reinterpret_cast<void *>(&InputChecksFunction)));
-    CHECK(hook.HookFunction(reinterpret_cast<void *>(&InputChecksFunction), reinterpret_cast<void *>(&InputChecksFunction)) == nullptr);
+    CHECK(TestHookFunction(hook, reinterpret_cast<void *>(&InputChecksFunction), reinterpret_cast<void *>(&InputChecksFunction)) == nullptr);
     CHECK(hook.RestoreFunction() == nullptr);
     CHECK(hook.GetHookFunction() == nullptr);
     CHECK(hook.GetOriginalFunction() == nullptr);

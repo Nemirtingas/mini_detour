@@ -17,7 +17,7 @@ static void CheckJccFunction(CodeBuffer_t &code)
     REQUIRE(function(1) == 1);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction(code.Data(), reinterpret_cast<void *>(&JccDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, code.Data(), reinterpret_cast<void *>(&JccDetour)) != nullptr);
 
     CHECK(function(0) == 100);
     CHECK(function(1) == 100);

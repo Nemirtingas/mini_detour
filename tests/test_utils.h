@@ -216,6 +216,15 @@ static inline uintptr_t RelativeJumpTarget(const void *address)
 }
 } // namespace GeneratedCode
 
+// Hooks function and returns the address to call the original function, for the tests calling it from the hooking
+// thread only, or not at all: a detour that can run on another thread must get it from the pointer given to
+// HookFunction instead.
+static inline void *TestHookFunction(MiniDetour::Hook_t &hook, void *function, void *detour)
+{
+    void *original = function;
+    return hook.HookFunction(&original, detour);
+}
+
 #if defined(MINIDETOUR_ARCH_X86)
 // First integer argument in ecx on x86, so generated code doesn't depend on the stack layout.
 #define TEST_CALL MINIDETOUR_CALL_FAST

@@ -18,7 +18,7 @@ TEST_CASE("Thumb absolute jump doesn't write below the stack pointer", "[arm_thu
     void *detour  = ThumbAddress(code.Data(64));
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction((void *)function, detour) != nullptr);
+    REQUIRE(TestHookFunction(hook, (void *)function, detour) != nullptr);
 
     // The hooked function reaches the detour through the absolute jump of its jump slot.
     CHECK(function() != reinterpret_cast<uintptr_t>(detour));

@@ -17,7 +17,7 @@ TEST_CASE("Restoring a hook only writes back the bytes it overwrote", "[restore_
     auto function = GeneratedCode::Function<int(TEST_CALL *)()>(code);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction((void *)function, reinterpret_cast<void *>(&RestoreOnlyHookBytesDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, (void *)function, reinterpret_cast<void *>(&RestoreOnlyHookBytesDetour)) != nullptr);
     CHECK(function() == 100);
 
     // Someone else patches a no-op instruction after the hook's relative jump, within the size of an absolute jump.

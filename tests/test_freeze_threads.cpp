@@ -106,7 +106,7 @@ TEST_CASE("A function can't be hooked while a thread runs its first bytes", "[fr
     const uint8_t original[] = {0x90, 0x90, 0x90, 0xEB, 0xFC};
 
     MiniDetour::Hook_t hook;
-    CHECK(hook.HookFunction(code.Data(), reinterpret_cast<void *>(&FreezeThreadsDetour)) == nullptr);
+    CHECK(TestHookFunction(hook, code.Data(), reinterpret_cast<void *>(&FreezeThreadsDetour)) == nullptr);
     CHECK(memcmp(code.Data(), original, sizeof(original)) == 0);
 
     CHECK_FALSE(MiniDetour::Hook_t::ReplaceFunction(code.Data(), reinterpret_cast<void *>(&FreezeThreadsDetour)));
@@ -115,7 +115,7 @@ TEST_CASE("A function can't be hooked while a thread runs its first bytes", "[fr
     thread.StopSpinning();
 
     // Nothing runs the function anymore.
-    CHECK(hook.HookFunction(code.Data(), reinterpret_cast<void *>(&FreezeThreadsDetour)) != nullptr);
+    CHECK(TestHookFunction(hook, code.Data(), reinterpret_cast<void *>(&FreezeThreadsDetour)) != nullptr);
     CHECK(hook.RestoreFunction() != nullptr);
 }
 
@@ -129,7 +129,7 @@ TEST_CASE("A function can be hooked while a thread runs other code", "[freeze_th
     REQUIRE(thread.IsValid());
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction(code.Data(), reinterpret_cast<void *>(&FreezeThreadsDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, code.Data(), reinterpret_cast<void *>(&FreezeThreadsDetour)) != nullptr);
     CHECK(code.As<FreezeFunc_t>()() == 100);
     CHECK(hook.GetOriginalFunction<FreezeFunc_t>()() == 1);
 
@@ -208,7 +208,7 @@ TEST_CASE("A function can be hooked while a thread runs other code", "[freeze_th
     REQUIRE(thread.IsValid());
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction(code.Data(), reinterpret_cast<void *>(&FreezeThreadsDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, code.Data(), reinterpret_cast<void *>(&FreezeThreadsDetour)) != nullptr);
     CHECK(code.As<FreezeFunc_t>()() == 100);
     CHECK(hook.GetOriginalFunction<FreezeFunc_t>()() == 1);
 
@@ -270,9 +270,10 @@ TEST_CASE("Every thread is resumed before anything else runs", "[freeze_threads]
 
     // The hook is in place when the threads are resumed: its own write already goes through the detour.
     MiniDetour::Hook_t hook;
-    g_ResumeOrderSuspendedSeen                          = 0;
-    reinterpret_cast<void *&>(g_ResumeOrderCloseHandle) = hook.HookFunction(reinterpret_cast<void *>(&CloseHandle), reinterpret_cast<void *>(&ResumeOrderCloseHandleDetour));
-    REQUIRE(g_ResumeOrderCloseHandle != nullptr);
+    g_ResumeOrderSuspendedSeen = 0;
+    g_ResumeOrderCloseHandle   = &CloseHandle;
+    REQUIRE(hook.HookFunction(reinterpret_cast<void **>(&g_ResumeOrderCloseHandle), reinterpret_cast<void *>(&ResumeOrderCloseHandleDetour)) != nullptr);
+    REQUIRE(g_ResumeOrderCloseHandle != &CloseHandle);
     CHECK(hook.RestoreFunction() != nullptr);
     CHECK(g_ResumeOrderSuspendedSeen == 0);
 

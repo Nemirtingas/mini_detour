@@ -330,7 +330,10 @@ MINIDETOUR_EXPORT(void) MiniDetourHookTFree(minidetour_hook_handle_t handle);
 MINIDETOUR_EXPORT(void) MiniDetourHookTRestoreOnDestroy(minidetour_hook_handle_t handle, int restore);
 // Returns 1 if the function can be hooked, 0 otherwise.
 MINIDETOUR_EXPORT(int) MiniDetourHookTCanHook(minidetour_hook_handle_t handle, void *function);
-MINIDETOUR_EXPORT(void *) MiniDetourHookTHookFunction(minidetour_hook_handle_t handle, void *function_to_hook, void *new_function);
+// *function holds the function to hook. It is replaced by the address to call the original function (the trampoline)
+// before the hook is written: another thread can enter the detour as soon as it is, and the detour must find the original
+// function there. Returns that address too, or NULL if the function can't be hooked (*function is then unchanged).
+MINIDETOUR_EXPORT(void *) MiniDetourHookTHookFunction(minidetour_hook_handle_t handle, void **function, void *new_function);
 MINIDETOUR_EXPORT(void *) MiniDetourHookTRestoreFunction(minidetour_hook_handle_t handle);
 MINIDETOUR_EXPORT(void *) MiniDetourHookTGetHookFunction(minidetour_hook_handle_t handle);
 MINIDETOUR_EXPORT(void *) MiniDetourHookTGetOriginalFunction(minidetour_hook_handle_t handle);
@@ -505,7 +508,9 @@ class Hook_t
 
     static bool ReplaceFunction(void *functionToReplace, void *newFunction) { return MiniDetourHookTReplaceFunction(functionToReplace, newFunction) != 0; }
 
-    inline void *HookFunction(void *functionToHook, void *newFunction) { return MiniDetourHookTHookFunction(_hookHandle, functionToHook, newFunction); }
+    // *function holds the function to hook, and receives the original function before the hook is written (see
+    // MiniDetourHookTHookFunction).
+    inline void *HookFunction(void **function, void *newFunction) { return MiniDetourHookTHookFunction(_hookHandle, function, newFunction); }
 
     inline void *RestoreFunction() { return MiniDetourHookTRestoreFunction(_hookHandle); }
 

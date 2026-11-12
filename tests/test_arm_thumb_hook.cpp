@@ -21,7 +21,7 @@ TEST_CASE("Hook a Thumb function with a close detour", "[arm_thumb_hook]")
     REQUIRE(function() == 42);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction((void *)function, detour) != nullptr);
+    REQUIRE(TestHookFunction(hook, (void *)function, detour) != nullptr);
     CHECK(function() == 7);
 
     CHECK(hook.RestoreFunction() != nullptr);

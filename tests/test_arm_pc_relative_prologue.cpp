@@ -39,7 +39,7 @@ TEST_CASE("Hook an AArch64 function starting with a literal load", "[arm_pc_rela
     REQUIRE(function() == 42);
 
     MiniDetour::Hook_t hook;
-    auto original = reinterpret_cast<int (*)()>(hook.HookFunction((void *)function, detour));
+    auto original = reinterpret_cast<int (*)()>(TestHookFunction(hook, (void *)function, detour));
     if (original != nullptr)
     {
         // Hooked: the relocated load must still read 42.

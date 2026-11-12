@@ -106,7 +106,7 @@ TEST_CASE("Thumb hook jumping backward to its jump slot", "[arm_thumb_backward_j
     first.Write(0, {0x00, 0xBF, 0x00, 0xBF, 0x2A, 0x20, 0x70, 0x47}); // nop; nop; movs r0, #42; bx lr
     first.Write(64, {0x07, 0x20, 0x70, 0x47});                        // movs r0, #7; bx lr
     MiniDetour::Hook_t firstHook;
-    REQUIRE(firstHook.HookFunction(ThumbAddress(first.Data()), ThumbAddress(first.Data(64))) != nullptr);
+    REQUIRE(TestHookFunction(firstHook, ThumbAddress(first.Data()), ThumbAddress(first.Data(64))) != nullptr);
 
     const uintptr_t firstSlot = ThumbWideJumpTarget(first.Data());
     REQUIRE(firstSlot != 0);
@@ -120,7 +120,7 @@ TEST_CASE("Thumb hook jumping backward to its jump slot", "[arm_thumb_backward_j
     auto function = reinterpret_cast<int (*)()>(ThumbAddress(second.Data()));
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction((void *)function, ThumbAddress(second.Data(64))) != nullptr);
+    REQUIRE(TestHookFunction(hook, (void *)function, ThumbAddress(second.Data(64))) != nullptr);
 
     // The jump slot is below the function: the B.W jumps backward.
     const uintptr_t secondSlot = ThumbWideJumpTarget(second.Data());

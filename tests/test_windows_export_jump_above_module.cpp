@@ -31,7 +31,7 @@ TEST_CASE("Export jump is placed above the module base", "[export_jump_rva]")
     const uint8_t function[] = {0x90, 0xB8, 1, 0, 0, 0, 0xC3};
     memcpy(belowModule, function, sizeof(function));
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction(belowModule, (void *)&BelowModuleDetour) != nullptr);
+    REQUIRE(TestHookFunction(hook, belowModule, (void *)&BelowModuleDetour) != nullptr);
 
     // A detour that isn't representable as an RVA (below the module) needs a jump slot.
     CodeBuffer_t detour(4096);

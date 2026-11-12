@@ -26,7 +26,7 @@ TEST_CASE("Hook a function reading an absolute address", "[x86_absolute]")
     REQUIRE(function() == 1234);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction(code.Data(), reinterpret_cast<void *>(&AbsoluteAddressingDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, code.Data(), reinterpret_cast<void *>(&AbsoluteAddressingDetour)) != nullptr);
     CHECK(function() == 100);
     CHECK(hook.GetOriginalFunction<AbsoluteFunc_t>()() == 1234);
 

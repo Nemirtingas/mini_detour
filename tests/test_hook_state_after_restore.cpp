@@ -15,7 +15,7 @@ TEST_CASE("Restored hook doesn't expose its old trampoline", "[hook_state]")
     GeneratedCode::WriteReturnConstant(code, 0, 1);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction((void *)GeneratedCode::Function(code), reinterpret_cast<void *>(&HookStateDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, (void *)GeneratedCode::Function(code), reinterpret_cast<void *>(&HookStateDetour)) != nullptr);
     CHECK(hook.GetOriginalFunction() != nullptr);
     CHECK(hook.GetHookFunction() != nullptr);
 
@@ -34,10 +34,10 @@ TEST_CASE("A restored hook object can hook again", "[hook_state]")
     auto second = GeneratedCode::Function(code, 32);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction((void *)first, reinterpret_cast<void *>(&HookStateDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, (void *)first, reinterpret_cast<void *>(&HookStateDetour)) != nullptr);
     CHECK(hook.RestoreFunction() != nullptr);
 
-    REQUIRE(hook.HookFunction((void *)second, reinterpret_cast<void *>(&HookStateDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, (void *)second, reinterpret_cast<void *>(&HookStateDetour)) != nullptr);
     CHECK(first() == 1);
     CHECK(second() == 100);
     CHECK(hook.GetOriginalFunction<int (*)()>()() == 2);

@@ -25,6 +25,6 @@ TEST_CASE("Hook left active is restored at exit", "[restore_at_exit]")
     GeneratedCode::WriteReturnConstant(g_RestoredAtExitCode, 0, 1);
     auto function = GeneratedCode::Function(g_RestoredAtExitCode);
 
-    REQUIRE(g_RestoredAtExitHook.HookFunction((void *)function, reinterpret_cast<void *>(&RestoredAtExitDetour)) != nullptr);
+    REQUIRE(TestHookFunction(g_RestoredAtExitHook, (void *)function, reinterpret_cast<void *>(&RestoredAtExitDetour)) != nullptr);
     CHECK(function() == 100);
 }

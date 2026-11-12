@@ -19,8 +19,8 @@ TEST_CASE("A hook object in use refuses to hook another function", "[hook_twice]
     auto second = GeneratedCode::Function(code, 32);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction((void *)first, reinterpret_cast<void *>(&HookTwiceDetour)) != nullptr);
-    CHECK(hook.HookFunction((void *)second, reinterpret_cast<void *>(&HookTwiceDetour)) == nullptr);
+    REQUIRE(TestHookFunction(hook, (void *)first, reinterpret_cast<void *>(&HookTwiceDetour)) != nullptr);
+    CHECK(TestHookFunction(hook, (void *)second, reinterpret_cast<void *>(&HookTwiceDetour)) == nullptr);
 
     CHECK(first() == 100);
     CHECK(second() == 2);

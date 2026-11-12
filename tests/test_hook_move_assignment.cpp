@@ -18,7 +18,7 @@ TEST_CASE("Move assigning over an active hook restores it", "[hook_move]")
     auto function = GeneratedCode::Function(code);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction((void *)function, reinterpret_cast<void *>(&HookMoveDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, (void *)function, reinterpret_cast<void *>(&HookMoveDetour)) != nullptr);
     REQUIRE(function() == 100);
 
     hook = MiniDetour::Hook_t();
@@ -33,7 +33,7 @@ TEST_CASE("Self move assignment keeps the hook", "[hook_move]")
     auto function = GeneratedCode::Function(code);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction((void *)function, reinterpret_cast<void *>(&HookMoveDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, (void *)function, reinterpret_cast<void *>(&HookMoveDetour)) != nullptr);
 
     MiniDetour::Hook_t &sameHook = hook;
     hook                         = std::move(sameHook);

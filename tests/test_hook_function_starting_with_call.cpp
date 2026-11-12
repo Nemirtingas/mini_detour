@@ -38,7 +38,7 @@ TEST_CASE("Hook a function starting with a call", "[call_prologue]")
     REQUIRE(function() == 42);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction(code.Data(), reinterpret_cast<void *>(&StartsWithCallDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, code.Data(), reinterpret_cast<void *>(&StartsWithCallDetour)) != nullptr);
 
     CHECK(function() == 100);
     CHECK(callee() == 41);

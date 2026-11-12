@@ -27,7 +27,7 @@ TEST_CASE("Hooking keeps the rights of writable code", "[keep_function_protectio
     REQUIRE(CurrentRights(code.Data()) == MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction((void *)function, reinterpret_cast<void *>(&KeepProtectionDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, (void *)function, reinterpret_cast<void *>(&KeepProtectionDetour)) != nullptr);
     CHECK(function() == 100);
     CHECK(CurrentRights(code.Data()) == MiniDetour::MemoryManipulation::MemoryRights::mem_rwx);
 
@@ -60,7 +60,7 @@ TEST_CASE("Hooking keeps read-only code read-only", "[keep_function_protection]"
     REQUIRE(MiniDetour::MemoryManipulation::MemoryProtect(code.Data(), 4096, MiniDetour::MemoryManipulation::MemoryRights::mem_rx));
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction((void *)GeneratedCode::Function(code), reinterpret_cast<void *>(&KeepProtectionDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, (void *)GeneratedCode::Function(code), reinterpret_cast<void *>(&KeepProtectionDetour)) != nullptr);
     CHECK(CurrentRights(code.Data()) == MiniDetour::MemoryManipulation::MemoryRights::mem_rx);
 
     CHECK(hook.RestoreFunction() != nullptr);

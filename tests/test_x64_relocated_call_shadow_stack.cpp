@@ -58,7 +58,8 @@ TEST_CASE("A relocated call keeps the shadow stack consistent", "[x64_relocated_
     REQUIRE(function(1) == 6);
 
     MiniDetour::Hook_t hook;
-    auto original = reinterpret_cast<int (*)(int)>(hook.HookFunction(g_CallFirstCode, reinterpret_cast<void *>(&CallFirstDetour)));
+    void *originalFunction = g_CallFirstCode;
+    auto original          = reinterpret_cast<int (*)(int)>(hook.HookFunction(&originalFunction, reinterpret_cast<void *>(&CallFirstDetour)));
     REQUIRE(original != nullptr);
 
     // sub rsp, 28h, then call [rip + 2]: the callee returns into the trampoline.

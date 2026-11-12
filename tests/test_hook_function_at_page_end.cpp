@@ -29,7 +29,7 @@ TEST_CASE("Hook a function at the end of a readable page", "[page_end]")
     REQUIRE(function() == 42);
 
     MiniDetour::Hook_t hook;
-    auto original = reinterpret_cast<int(TEST_CALL *)()>(hook.HookFunction((void *)function, (void *)&PageEndDetour));
+    auto original = reinterpret_cast<int(TEST_CALL *)()>(TestHookFunction(hook, (void *)function, (void *)&PageEndDetour));
     REQUIRE(original != nullptr);
 
     CHECK(function() == 7);

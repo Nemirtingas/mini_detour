@@ -28,7 +28,7 @@ TEST_CASE("A thunk loop doesn't hang the hook", "[thunk_loop]")
 
     MiniDetour::Hook_t twoThunksLoop;
     twoThunksLoop.CanHook(code.Data(32));
-    twoThunksLoop.HookFunction(code.Data(32), reinterpret_cast<void *>(&ThunkLoopDetour));
+    TestHookFunction(twoThunksLoop, code.Data(32), reinterpret_cast<void *>(&ThunkLoopDetour));
     twoThunksLoop.RestoreFunction();
 }
 
@@ -42,7 +42,7 @@ TEST_CASE("A short thunk chain is followed to the function", "[thunk_loop]")
     code.Write(64, {0xB8, 7, 0, 0, 0, 0xC3});       // mov eax, 7 ; ret
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction(code.Data(), reinterpret_cast<void *>(&ThunkLoopDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, code.Data(), reinterpret_cast<void *>(&ThunkLoopDetour)) != nullptr);
 
     // The function at the end of the chain is the one hooked.
     CHECK(code.As<ThunkFunc_t>(64)() == 100);

@@ -25,7 +25,7 @@ TEST_CASE("Many hooks use every trampoline slot without overflowing", "[trampoli
     for (size_t i = 0; i < functionCount; ++i)
     {
         INFO("hook " << i);
-        REQUIRE(hooks[i].HookFunction((void *)GeneratedCode::Function(code, i * functionStride), reinterpret_cast<void *>(&TrampolineSlotsDetour)) != nullptr);
+        REQUIRE(TestHookFunction(hooks[i], (void *)GeneratedCode::Function(code, i * functionStride), reinterpret_cast<void *>(&TrampolineSlotsDetour)) != nullptr);
     }
 
     for (size_t i = 0; i < functionCount; ++i)

@@ -14,7 +14,7 @@ TEST_CASE("Thumb hook with a jump region 20 MB away", "[arm_thumb_jump_range]")
     first.Write(0, {0x00, 0xBF, 0x00, 0xBF, 0x2A, 0x20, 0x70, 0x47}); // nop; nop; movs r0, #42; bx lr
     first.Write(64, {0x07, 0x20, 0x70, 0x47});                        // movs r0, #7; bx lr
     MiniDetour::Hook_t firstHook;
-    REQUIRE(firstHook.HookFunction(ThumbAddress(first.Data()), ThumbAddress(first.Data(64))) != nullptr);
+    REQUIRE(TestHookFunction(firstHook, ThumbAddress(first.Data()), ThumbAddress(first.Data(64))) != nullptr);
 
     // A second function 20 MB away: in reach of that region for ARM, not for Thumb.
     CodeBuffer_t second(4096, first.Data(0x1400000));
@@ -28,7 +28,7 @@ TEST_CASE("Thumb hook with a jump region 20 MB away", "[arm_thumb_jump_range]")
     auto function = reinterpret_cast<int (*)()>(ThumbAddress(second.Data()));
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction((void *)function, ThumbAddress(second.Data(64))) != nullptr);
+    REQUIRE(TestHookFunction(hook, (void *)function, ThumbAddress(second.Data(64))) != nullptr);
     CHECK(function() == 8);
 
     CHECK(hook.RestoreFunction() != nullptr);

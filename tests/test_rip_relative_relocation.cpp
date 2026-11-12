@@ -27,7 +27,7 @@ static void CheckRipFunction(CodeBuffer_t &code, uint64_t expected)
     REQUIRE(function() == expected);
 
     MiniDetour::Hook_t hook;
-    REQUIRE(hook.HookFunction(code.Data(), reinterpret_cast<void *>(&RipRelativeDetour)) != nullptr);
+    REQUIRE(TestHookFunction(hook, code.Data(), reinterpret_cast<void *>(&RipRelativeDetour)) != nullptr);
     CHECK(function() == RipDetourResult);
     CHECK(hook.GetOriginalFunction<RipFunc_t>()() == expected);
 

@@ -35,7 +35,7 @@ TEST_CASE("Hooks set from several threads", "[concurrent_hooks]")
                 for (int n = 0; n < iterations; ++n)
                 {
                     MiniDetour::Hook_t hook;
-                    auto original = reinterpret_cast<int(TEST_CALL *)()>(hook.HookFunction((void *)function, (void *)&ConcurrentDetour));
+                    auto original = reinterpret_cast<int(TEST_CALL *)()>(TestHookFunction(hook, (void *)function, (void *)&ConcurrentDetour));
                     if (original == nullptr || original() != i || function() != 1000)
                         ++failures;
 

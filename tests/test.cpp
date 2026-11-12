@@ -549,7 +549,7 @@ TEST_CASE("Hook a C library function", "[Hook function]")
     CHECK(Myputs_called == false);
 
     SPDLOG_INFO("Hooking puts...");
-    CHECK(puts_hook.HookFunction((void *)&puts, (void *)&Myputs) != nullptr);
+    CHECK(TestHookFunction(puts_hook, (void *)&puts, (void *)&Myputs) != nullptr);
 
     SPDLOG_INFO("Calling original puts...");
     REQUIRE(puts_hook.GetOriginalFunction<decltype(puts) *>() != nullptr);
@@ -575,7 +575,7 @@ TEST_CASE("Hook function", "[Hook function]")
     CHECK(do_something_ptr(5, 8) == 13);
 
     SPDLOG_INFO("Hooking do_something...");
-    CHECK(do_something_hook.HookFunction((void *)&do_something, (void *)Mydo_something) != nullptr);
+    CHECK(TestHookFunction(do_something_hook, (void *)&do_something, (void *)Mydo_something) != nullptr);
 
     REQUIRE(do_something_hook.GetOriginalFunction<void *>() != nullptr);
     {
@@ -597,7 +597,7 @@ TEST_CASE("Hook function", "[Hook function]")
     }
 
     CHECK(do_something2_ptr(8, 4) == 4);
-    CHECK(do_something_hook2.HookFunction((void *)&do_something2, (void *)Mydo_something2) != nullptr);
+    CHECK(TestHookFunction(do_something_hook2, (void *)&do_something2, (void *)Mydo_something2) != nullptr);
 
     REQUIRE(do_something_hook2.GetOriginalFunction<void *>() != nullptr);
     {
@@ -663,8 +663,9 @@ TEST_CASE("Hook small function with call", "[Hook function]")
     test_func();
     CHECK(nothing_calls == 1);
 
-    (void *&)bkp = test_hook.HookFunction((void *)test_func, (void *)my_test_func);
-    REQUIRE(bkp != nullptr);
+    bkp = test_func;
+    REQUIRE(test_hook.HookFunction(reinterpret_cast<void **>(&bkp), (void *)my_test_func) != nullptr);
+    REQUIRE(bkp != test_func);
 
     // The detour runs, then the original code through the trampoline, with its relocated call.
     SPDLOG_INFO("Calling test_func");
